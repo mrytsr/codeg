@@ -1,5 +1,5 @@
 import { act, render, screen } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   WorkspaceProvider,
   useWorkspaceActions,
@@ -324,6 +324,120 @@ describe("WorkspaceProvider mode", () => {
 
     expect(screen.getByTestId("mode")).toHaveTextContent("conversation")
     expect(screen.getByTestId("file-tab-count")).toHaveTextContent("0")
+  })
+})
+
+describe("WorkspaceProvider file history guard", () => {
+  beforeEach(() => {
+    window.history.replaceState({}, "", "/workspace")
+    vi.spyOn(window.history, "back").mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("pushes one history entry when files open and closes all files on back", () => {
+    const pushState = vi.spyOn(window.history, "pushState")
+    renderWorkspace()
+
+    act(() => {
+      screen.getByRole("button", { name: "Open diff" }).click()
+      screen.getByRole("button", { name: "Open diff 2" }).click()
+    })
+
+    expect(screen.getByTestId("file-tab-count")).toHaveTextContent("2")
+    expect(pushState).toHaveBeenCalledTimes(1)
+    expect(pushState.mock.calls[0]?.[0]).toEqual({
+      codegFileWorkspace: true,
+    })
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    })
+
+    expect(screen.getByTestId("mode")).toHaveTextContent("conversation")
+    expect(screen.getByTestId("file-tab-count")).toHaveTextContent("0")
+  })
+
+  function DirtyFileProbe() {
+    const {
+      openFilePreview,
+      updateActiveFileContent,
+      closeAllFileTabs,
+      mode,
+      fileTabs,
+    } = useWorkspaceContext()
+
+    return (
+      <div>
+        <output data-testid="mode">{mode}</output>
+        <output data-testid="file-tab-count">{fileTabs.length}</output>
+        <output data-testid="dirty-count">
+          {fileTabs.filter((tab) => tab.isDirty).length}
+        </output>
+        <button onClick={() => void openFilePreview("a.ts")}>open file</button>
+        <button onClick={() => updateActiveFileContent("local changes")}>
+          edit
+        </button>
+        <button onClick={closeAllFileTabs}>close all</button>
+      </div>
+    )
+  }
+
+  it("keeps a dirty file workspace when back-close is refused", async () => {
+    mockedApi.readFileForEdit.mockResolvedValue({
+      path: "a.ts",
+      content: "saved",
+      etag: "e1",
+      mtime_ms: 1,
+      readonly: false,
+      line_ending: "lf",
+    })
+    mockedApi.gitIsTracked.mockResolvedValue(false)
+    vi.spyOn(window.history, "pushState")
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+
+    render(
+      <WorkspaceProvider>
+        <DirtyFileProbe />
+      </WorkspaceProvider>
+    )
+
+    await act(async () => {
+      screen.getByText("open file").click()
+    })
+    await act(async () => {
+      screen.getByText("edit").click()
+    })
+    expect(screen.getByTestId("dirty-count")).toHaveTextContent("1")
+
+    await act(async () => {
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    })
+
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("mode")).toHaveTextContent("fusion")
+    expect(screen.getByTestId("file-tab-count")).toHaveTextContent("1")
+    expect(screen.getByTestId("dirty-count")).toHaveTextContent("1")
+  })
+
+  it("consumes the history entry when the user closes all files manually", () => {
+    vi.spyOn(window.history, "pushState")
+    const back = vi.spyOn(window.history, "back")
+    renderWorkspace()
+
+    act(() => {
+      screen.getByRole("button", { name: "Open diff" }).click()
+    })
+    expect(screen.getByTestId("file-tab-count")).toHaveTextContent("1")
+
+    act(() => {
+      screen.getByRole("button", { name: "Close all" }).click()
+    })
+
+    expect(screen.getByTestId("file-tab-count")).toHaveTextContent("0")
+    expect(back).toHaveBeenCalledTimes(1)
   })
 })
 
