@@ -12,6 +12,7 @@ import {
 } from "react"
 import { useTranslations } from "next-intl"
 import { useActiveFolder } from "@/contexts/active-folder-context"
+import { useBrowserBackWindow } from "@/contexts/workspace-window-history"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { buildFileTabId } from "@/lib/file-tab-id"
 import {
@@ -50,6 +51,7 @@ import {
   HIDDEN_TAB_CONTENT_BUDGET_CHARS,
   selectTabsToUnload,
 } from "@/lib/file-tab-memory"
+import { isDesktop } from "@/lib/transport"
 import { useWorkspaceStateStore } from "@/hooks/use-workspace-state-store"
 import {
   useOpenFileTabsWatch,
@@ -111,7 +113,9 @@ interface WorkspaceActionsValue {
   switchFileTab: (tabId: string) => void
   closeFileTab: (tabId: string) => void
   closeOtherFileTabs: (tabId: string) => void
-  closeAllFileTabs: () => void
+  /** Returns false when the user vetoes the dirty-tabs confirm, so the
+   *  browser-back integration can restore the history entry it consumed. */
+  closeAllFileTabs: () => boolean
   reorderFileTabs: (tabs: FileWorkspaceTab[]) => void
   // Open a file tab. Accepts absolute paths, `~/` paths (expanded via the
   // backend home dir), and paths relative to a folder root. `folderId` is
@@ -331,6 +335,20 @@ function loadingTab(
 
 type LoadDecision = { kind: "skip" } | { kind: "fetch"; gen: number }
 
+const FILE_WORKSPACE_HISTORY_KEY = "codegFileWorkspace"
+
+function canUseFileWorkspaceHistory(): boolean {
+  return typeof window !== "undefined" && !isDesktop()
+}
+
+function hasFileWorkspaceHistoryState(): boolean {
+  return Boolean(
+    (window.history.state as Record<string, unknown> | null)?.[
+      FILE_WORKSPACE_HISTORY_KEY
+    ]
+  )
+}
+
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -420,6 +438,21 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   useEffect(() => {
     fileTabsRef.current = fileTabs
   }, [fileTabs])
+
+  // Browser back is a mobile affordance for leaving the file workspace, not
+  // for leaving /workspace itself. One synthetic entry guards the whole file
+  // layer; popstate closes all tabs and manual close consumes the entry.
+  const fileHistoryDepthRef = useRef(0)
+  const ignoreNextFileHistoryPopRef = useRef(false)
+
+  const pushFileWorkspaceHistory = useCallback(() => {
+    window.history.pushState(
+      { [FILE_WORKSPACE_HISTORY_KEY]: true },
+      "",
+      window.location.href
+    )
+    fileHistoryDepthRef.current += 1
+  }, [])
 
   useEffect(() => {
     activeFileTabIdRef.current = activeFileTabId
@@ -2243,13 +2276,15 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     [activateFilePane, t]
   )
 
-  const closeAllFileTabs = useCallback(() => {
-    setFileTabs((prev) => {
-      if (prev.some(isDirtyFileTab)) {
-        const confirmed = window.confirm(t("confirmCloseAllDirtyTabs"))
-        if (!confirmed) return prev
-      }
+  const closeAllFileTabs = useCallback((): boolean => {
+    // Confirm outside the state updater: the browser-back handler needs the
+    // veto synchronously to decide whether to restore the history entry.
+    if (fileTabsRef.current.some(isDirtyFileTab)) {
+      const confirmed = window.confirm(t("confirmCloseAllDirtyTabs"))
+      if (!confirmed) return false
+    }
 
+    setFileTabs((prev) => {
       for (const tab of prev) {
         const closed = snapshotFileTab(tab)
         if (closed) pushClosedTab(closed)
@@ -2261,11 +2296,56 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       activateConversationPane()
       return []
     })
+    return true
   }, [activateConversationPane, t])
+
+  useBrowserBackWindow({
+    open: fileTabs.length > 0,
+    onClose: closeAllFileTabs,
+    key: "file-workspace",
+  })
 
   const reorderFileTabs = useCallback((tabs: FileWorkspaceTab[]) => {
     setFileTabs(tabs)
   }, [])
+  useEffect(() => {
+    if (!canUseFileWorkspaceHistory()) return
+
+    if (fileTabs.length > 0) {
+      if (fileHistoryDepthRef.current === 0) pushFileWorkspaceHistory()
+      return
+    }
+
+    if (fileHistoryDepthRef.current === 0) return
+    fileHistoryDepthRef.current = 0
+    if (hasFileWorkspaceHistoryState()) {
+      ignoreNextFileHistoryPopRef.current = true
+      window.history.back()
+    }
+  }, [fileTabs.length, pushFileWorkspaceHistory])
+
+  useEffect(() => {
+    if (!canUseFileWorkspaceHistory()) return
+
+    const handlePopState = () => {
+      if (ignoreNextFileHistoryPopRef.current) {
+        ignoreNextFileHistoryPopRef.current = false
+        return
+      }
+      if (fileHistoryDepthRef.current === 0) return
+
+      fileHistoryDepthRef.current = 0
+      if (fileTabsRef.current.length === 0) return
+
+      closeAllFileTabs()
+      // If close was refused for a dirty tab, restore the synthetic entry.
+      // If it succeeded, the empty-tabs effect above consumes it after commit.
+      pushFileWorkspaceHistory()
+    }
+
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [closeAllFileTabs, pushFileWorkspaceHistory])
 
   const activeFileTab = useMemo(
     () => fileTabs.find((tab) => tab.id === activeFileTabId) ?? null,
