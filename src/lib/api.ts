@@ -1874,6 +1874,16 @@ export async function validateGitLabToken(
   return getTransport().call("validate_gitlab_token", { serverUrl, token })
 }
 
+/** Same answer shape again, from Gitea's `GET /api/v1/user`. `scopes` always
+ *  comes back empty: Gitea reports a token's scopes only on an endpoint that
+ *  wants the account password and refuses the token being checked. */
+export async function validateGiteaToken(
+  serverUrl: string,
+  token: string
+): Promise<GitHubTokenValidation> {
+  return getTransport().call("validate_gitea_token", { serverUrl, token })
+}
+
 export async function updateGitHubAccounts(
   settings: GitHubAccountsSettings
 ): Promise<GitHubAccountsSettings> {

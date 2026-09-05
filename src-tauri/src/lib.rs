@@ -1395,6 +1395,7 @@ mod tauri_app {
                 version_control::get_github_accounts,
                 version_control::validate_github_token,
                 version_control::validate_gitlab_token,
+                version_control::validate_gitea_token,
                 version_control::update_github_accounts,
                 version_control::save_account_token,
                 version_control::get_account_token,

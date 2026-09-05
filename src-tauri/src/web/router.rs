@@ -644,6 +644,10 @@ pub fn build_router(
             post(handlers::version_control::validate_gitlab_token),
         )
         .route(
+            "/validate_gitea_token",
+            post(handlers::version_control::validate_gitea_token),
+        )
+        .route(
             "/save_account_token",
             post(handlers::version_control::save_account_token),
         )

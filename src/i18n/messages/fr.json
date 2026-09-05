@@ -304,6 +304,10 @@
     "gitlabDescription": "Gérez les comptes GitLab pour l'authentification. Les jetons sont stockés localement.",
     "gitlabTokenHint": "Créez un jeton d'accès personnel avec la portée api dans GitLab → Preferences → Access tokens.",
     "gitlabNoAccounts": "Aucun compte GitLab pour l'instant",
+    "giteaTitle": "Comptes Gitea",
+    "giteaDescription": "Gérez les comptes Gitea (et Forgejo) pour l'authentification. Les jetons sont stockés localement.",
+    "giteaTokenHint": "Créez un jeton d'accès avec les portées write:repository, write:issue et read:user dans Gitea → Settings → Applications.",
+    "giteaNoAccounts": "Aucun compte Gitea pour l'instant",
     "noAccounts": "Aucun compte GitHub configuré.",
     "addAccount": "Ajouter un compte",
     "serverUrl": "URL du serveur",
@@ -336,7 +340,7 @@
     "loadFailed": "Échec du chargement des paramètres : {message}",
     "gitAccount": {
       "sectionTitle": "Comptes serveur Git",
-      "sectionDescription": "Gérez les identifiants pour les serveurs Git non GitHub (GitLab, Bitbucket, auto-hébergé, etc.).",
+      "sectionDescription": "Gérez les identifiants des serveurs Git qui n'ont pas leur propre section (Bitbucket, auto-hébergés, etc.).",
       "noAccounts": "Aucun compte de serveur Git configuré.",
       "addAccount": "Ajouter un compte",
       "addTitle": "Ajouter un compte Git",
@@ -5325,7 +5329,7 @@
     "noRemote": "Ce dossier n'a pas de remote reconnaissable (origin)",
     "errors": {
       "noAccount": "Aucun compte {provider} n'est configuré pour {host}. Ajoutez-en un dans Paramètres → Contrôle de version pour charger ce dépôt.",
-      "unsupportedHost": "Le panneau du dépôt ne prend en charge que GitHub et GitLab, et {host} n'est reconnu comme ni l'un ni l'autre. S'il s'agit d'une instance auto-hébergée de GitHub Enterprise ou de GitLab, ajoutez-y un compte dans Paramètres → Contrôle de version.",
+      "unsupportedHost": "Le panneau du dépôt ne prend en charge que GitHub, GitLab et Gitea, et {host} n'est reconnu comme aucun d'entre eux. S'il s'agit d'une instance auto-hébergée de GitHub Enterprise, GitLab, Gitea ou Forgejo, ajoutez-y un compte dans Paramètres → Contrôle de version.",
       "wrongForge": "{host} est un {provider}, et non la forge sous laquelle il était classé. La détection a été corrigée — rechargez pour réessayer."
     },
     "addAccount": "Ajouter un compte",

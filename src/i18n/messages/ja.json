@@ -304,6 +304,10 @@
     "gitlabDescription": "認証用の GitLab アカウントを管理します。トークンはローカルに保存されます。",
     "gitlabTokenHint": "GitLab → Preferences → Access tokens で api スコープ付きのパーソナルアクセストークンを作成してください。",
     "gitlabNoAccounts": "GitLab アカウントがまだありません",
+    "giteaTitle": "Gitea アカウント",
+    "giteaDescription": "認証用の Gitea（および Forgejo）アカウントを管理します。トークンはローカルに保存されます。",
+    "giteaTokenHint": "Gitea → Settings → Applications で write:repository、write:issue、read:user スコープ付きのアクセストークンを作成してください。",
+    "giteaNoAccounts": "Gitea アカウントがまだありません",
     "noAccounts": "GitHub アカウントが設定されていません。",
     "addAccount": "アカウントを追加",
     "serverUrl": "サーバー URL",
@@ -336,7 +340,7 @@
     "loadFailed": "設定の読み込みに失敗しました：{message}",
     "gitAccount": {
       "sectionTitle": "Git サーバーアカウント",
-      "sectionDescription": "GitHub 以外の Git サーバーの認証情報を管理します（GitLab、Bitbucket、セルフホストなど）。",
+      "sectionDescription": "専用のセクションがない Git サーバーの認証情報を管理します（Bitbucket、自己ホスト型など）。",
       "noAccounts": "Git サーバーアカウントが設定されていません。",
       "addAccount": "アカウントを追加",
       "addTitle": "Git アカウントを追加",
@@ -5325,7 +5329,7 @@
     "noRemote": "このフォルダには認識できるリモート（origin）がありません",
     "errors": {
       "noAccount": "{host} の {provider} アカウントが設定されていません。「設定 → バージョン管理」で追加するとこのリポジトリを読み込めます。",
-      "unsupportedHost": "リポジトリパネルは GitHub と GitLab にのみ対応しており、{host} はそのどちらとしても認識できません。自己ホスト型の GitHub Enterprise または GitLab インスタンスであれば、「設定 → バージョン管理」でアカウントを追加してください。",
+      "unsupportedHost": "リポジトリパネルは GitHub、GitLab、Gitea にのみ対応しており、{host} はそのいずれとしても認識できません。自己ホスト型の GitHub Enterprise、GitLab、Gitea、Forgejo インスタンスであれば、「設定 → バージョン管理」でアカウントを追加してください。",
       "wrongForge": "{host} は {provider} でした。別のフォージとして扱われていましたが、判定を修正しました。再読み込みしてください。"
     },
     "addAccount": "アカウントを追加",

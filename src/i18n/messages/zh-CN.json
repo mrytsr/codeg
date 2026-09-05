@@ -304,6 +304,10 @@
     "gitlabDescription": "管理用于身份验证的 GitLab 账号。令牌存储在本地。",
     "gitlabTokenHint": "在 GitLab → Preferences → Access tokens 中创建带 api 权限的个人访问令牌。",
     "gitlabNoAccounts": "还没有 GitLab 账号",
+    "giteaTitle": "Gitea 账号",
+    "giteaDescription": "管理用于身份验证的 Gitea（及 Forgejo）账号。令牌存储在本地。",
+    "giteaTokenHint": "在 Gitea → Settings → Applications 中创建带 write:repository、write:issue 和 read:user 权限的访问令牌。",
+    "giteaNoAccounts": "还没有 Gitea 账号",
     "noAccounts": "暂无 GitHub 账号。",
     "addAccount": "添加账号",
     "serverUrl": "服务器地址",
@@ -336,7 +340,7 @@
     "loadFailed": "加载设置失败：{message}",
     "gitAccount": {
       "sectionTitle": "Git 服务器账号",
-      "sectionDescription": "管理非 GitHub 的 Git 服务器凭据（GitLab、Bitbucket、自建服务等）。",
+      "sectionDescription": "管理没有独立分区的 Git 服务器凭据（Bitbucket、自建服务等）。",
       "noAccounts": "暂无 Git 服务器账号。",
       "addAccount": "添加账号",
       "addTitle": "添加 Git 账号",
@@ -5325,7 +5329,7 @@
     "noRemote": "该文件夹没有可识别的代码托管远端（origin）",
     "errors": {
       "noAccount": "还没有为 {host} 配置 {provider} 账号。请在「设置 → 版本控制」中添加后再加载该仓库。",
-      "unsupportedHost": "仓库面板目前仅支持 GitHub 和 GitLab，而 {host} 不是其中任何一种。如果它是自建的 GitHub Enterprise 或 GitLab 实例，请在「设置 → 版本控制」中为它添加账号。",
+      "unsupportedHost": "仓库面板目前仅支持 GitHub、GitLab 和 Gitea，而 {host} 不是其中任何一种。如果它是自建的 GitHub Enterprise、GitLab、Gitea 或 Forgejo 实例，请在「设置 → 版本控制」中为它添加账号。",
       "wrongForge": "{host} 实际上是 {provider}，此前被误判为另一种代码托管服务。已自动更正，请重新加载。"
     },
     "addAccount": "添加账号",

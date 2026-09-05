@@ -304,6 +304,10 @@
     "gitlabDescription": "إدارة حسابات GitLab للمصادقة. يتم تخزين الرموز محليًا.",
     "gitlabTokenHint": "أنشئ رمز وصول شخصيًا بنطاق api من GitLab → Preferences → Access tokens.",
     "gitlabNoAccounts": "لا يوجد حساب GitLab بعد",
+    "giteaTitle": "حسابات Gitea",
+    "giteaDescription": "إدارة حسابات Gitea (و Forgejo) للمصادقة. يتم تخزين الرموز محليًا.",
+    "giteaTokenHint": "أنشئ رمز وصول بنطاقات write:repository و write:issue و read:user من Gitea → Settings → Applications.",
+    "giteaNoAccounts": "لا يوجد حساب Gitea بعد",
     "noAccounts": "لا توجد حسابات GitHub مكوّنة.",
     "addAccount": "إضافة حساب",
     "serverUrl": "عنوان الخادم",
@@ -336,7 +340,7 @@
     "loadFailed": "فشل تحميل الإعدادات: {message}",
     "gitAccount": {
       "sectionTitle": "حسابات خادم Git",
-      "sectionDescription": "إدارة بيانات الاعتماد لخوادم Git غير GitHub (GitLab، Bitbucket، الخوادم الذاتية، إلخ).",
+      "sectionDescription": "إدارة بيانات اعتماد خوادم Git التي ليس لها قسم خاص (Bitbucket، الاستضافة الذاتية، إلخ).",
       "noAccounts": "لا توجد حسابات خادم Git مكوّنة.",
       "addAccount": "إضافة حساب",
       "addTitle": "إضافة حساب Git",
@@ -5325,7 +5329,7 @@
     "noRemote": "لا يحتوي هذا المجلد على remote معروف (origin)",
     "errors": {
       "noAccount": "لا يوجد حساب {provider} مُهيّأ للمضيف {host}. أضف حسابًا من الإعدادات ← التحكم بالإصدارات لتحميل هذا المستودع.",
-      "unsupportedHost": "لوحة المستودع تدعم GitHub و GitLab فقط، و{host} لا يُعرَف كأي منهما. إذا كان مثيلًا مستضافًا ذاتيًا من GitHub Enterprise أو GitLab، فأضف له حسابًا من الإعدادات ← التحكم بالإصدارات.",
+      "unsupportedHost": "لوحة المستودع تدعم GitHub و GitLab و Gitea فقط، و{host} لا يُعرَف كأي منها. إذا كان مثيلًا مستضافًا ذاتيًا من GitHub Enterprise أو GitLab أو Gitea أو Forgejo، فأضف له حسابًا من الإعدادات ← التحكم بالإصدارات.",
       "wrongForge": "{host} هو {provider}، وليس المنصة التي كان مصنّفًا ضمنها. تم تصحيح الاكتشاف — أعد التحميل للمحاولة مجددًا."
     },
     "addAccount": "إضافة حساب",

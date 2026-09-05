@@ -304,6 +304,10 @@
     "gitlabDescription": "Gerencie contas do GitLab para autenticação. Os tokens são armazenados localmente.",
     "gitlabTokenHint": "Crie um token de acesso pessoal com o escopo api em GitLab → Preferences → Access tokens.",
     "gitlabNoAccounts": "Ainda não há conta do GitLab",
+    "giteaTitle": "Contas do Gitea",
+    "giteaDescription": "Gerencie contas do Gitea (e Forgejo) para autenticação. Os tokens são armazenados localmente.",
+    "giteaTokenHint": "Crie um token de acesso com os escopos write:repository, write:issue e read:user em Gitea → Settings → Applications.",
+    "giteaNoAccounts": "Ainda não há conta do Gitea",
     "noAccounts": "Nenhuma conta do GitHub configurada.",
     "addAccount": "Adicionar conta",
     "serverUrl": "URL do servidor",
@@ -336,7 +340,7 @@
     "loadFailed": "Falha ao carregar configurações: {message}",
     "gitAccount": {
       "sectionTitle": "Contas de servidor Git",
-      "sectionDescription": "Gerencie credenciais para servidores Git que não são GitHub (GitLab, Bitbucket, auto-hospedados, etc.).",
+      "sectionDescription": "Gerencie credenciais de servidores Git sem uma seção própria (Bitbucket, auto-hospedados, etc.).",
       "noAccounts": "Nenhuma conta de servidor Git configurada.",
       "addAccount": "Adicionar conta",
       "addTitle": "Adicionar conta Git",
@@ -5325,7 +5329,7 @@
     "noRemote": "Esta pasta não tem um remoto reconhecível (origin)",
     "errors": {
       "noAccount": "Nenhuma conta {provider} configurada para {host}. Adicione uma em Configurações → Controle de versão para carregar este repositório.",
-      "unsupportedHost": "O painel do repositório só oferece suporte a GitHub e GitLab, e {host} não é reconhecido como nenhum dos dois. Se for uma instância auto-hospedada do GitHub Enterprise ou do GitLab, adicione uma conta para ela em Configurações → Controle de versão.",
+      "unsupportedHost": "O painel do repositório só oferece suporte a GitHub, GitLab e Gitea, e {host} não é reconhecido como nenhum deles. Se for uma instância auto-hospedada do GitHub Enterprise, GitLab, Gitea ou Forgejo, adicione uma conta para ela em Configurações → Controle de versão.",
       "wrongForge": "{host} é um {provider}, não a forja com que estava classificado. A detecção foi corrigida — recarregue para tentar novamente."
     },
     "addAccount": "Adicionar uma conta",

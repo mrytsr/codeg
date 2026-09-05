@@ -304,6 +304,10 @@
     "gitlabDescription": "인증용 GitLab 계정을 관리합니다. 토큰은 로컬에 저장됩니다.",
     "gitlabTokenHint": "GitLab → Preferences → Access tokens에서 api 범위를 가진 개인 액세스 토큰을 만드세요.",
     "gitlabNoAccounts": "아직 GitLab 계정이 없습니다",
+    "giteaTitle": "Gitea 계정",
+    "giteaDescription": "인증용 Gitea(및 Forgejo) 계정을 관리합니다. 토큰은 로컬에 저장됩니다.",
+    "giteaTokenHint": "Gitea → Settings → Applications에서 write:repository, write:issue, read:user 범위를 가진 액세스 토큰을 만드세요.",
+    "giteaNoAccounts": "아직 Gitea 계정이 없습니다",
     "noAccounts": "설정된 GitHub 계정이 없습니다.",
     "addAccount": "계정 추가",
     "serverUrl": "서버 URL",
@@ -336,7 +340,7 @@
     "loadFailed": "설정 로드 실패: {message}",
     "gitAccount": {
       "sectionTitle": "Git 서버 계정",
-      "sectionDescription": "GitHub 이외의 Git 서버 자격 증명을 관리합니다 (GitLab, Bitbucket, 자체 호스팅 등).",
+      "sectionDescription": "전용 섹션이 없는 Git 서버의 자격 증명을 관리합니다(Bitbucket, 자체 호스팅 등).",
       "noAccounts": "설정된 Git 서버 계정이 없습니다.",
       "addAccount": "계정 추가",
       "addTitle": "Git 계정 추가",
@@ -5325,7 +5329,7 @@
     "noRemote": "이 폴더에는 인식 가능한 원격 저장소(origin)가 없습니다",
     "errors": {
       "noAccount": "{host}에 대한 {provider} 계정이 설정되지 않았습니다. 설정 → 버전 관리에서 추가하면 이 저장소를 불러올 수 있습니다.",
-      "unsupportedHost": "리포지토리 패널은 GitHub와 GitLab만 지원하며, {host}는 둘 중 어느 쪽으로도 인식되지 않습니다. 자체 호스팅 GitHub Enterprise 또는 GitLab 인스턴스라면 설정 → 버전 관리에서 계정을 추가하세요.",
+      "unsupportedHost": "리포지토리 패널은 GitHub, GitLab, Gitea만 지원하며, {host}는 그중 어느 쪽으로도 인식되지 않습니다. 자체 호스팅 GitHub Enterprise, GitLab, Gitea 또는 Forgejo 인스턴스라면 설정 → 버전 관리에서 계정을 추가하세요.",
       "wrongForge": "{host}은(는) {provider}입니다. 다른 포지로 잘못 인식되었으나 감지 결과를 수정했습니다. 다시 불러오세요."
     },
     "addAccount": "계정 추가",

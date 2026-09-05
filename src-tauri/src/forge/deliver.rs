@@ -29,7 +29,7 @@ use serde::Deserialize;
 
 use super::auth::ResolvedAuth;
 use super::{
-    github, gitlab, urlencode_query, web_origin, ForgeError, ForgeItemKind, ForgeProvider,
+    gitea, github, gitlab, urlencode_query, web_origin, ForgeError, ForgeItemKind, ForgeProvider,
 };
 
 /// A pull request as far as delivery cares. Deliberately not the full API
@@ -273,6 +273,9 @@ impl ForgeDeliveryApi for ForgeDelivery {
             ForgeProvider::GitLab => {
                 gitlab::find_merge_requests(&auth, ctx.owner_repo, head_branch).await
             }
+            ForgeProvider::Gitea => {
+                gitea::find_pulls(&auth, ctx.owner_repo, head_branch).await
+            }
         }
         .map_err(|e| e.to_string())
     }
@@ -288,6 +291,7 @@ impl ForgeDeliveryApi for ForgeDelivery {
             ForgeProvider::GitLab => {
                 gitlab::create_merge_request(&auth, ctx.owner_repo, req).await
             }
+            ForgeProvider::Gitea => gitea::create_pull(&auth, ctx.owner_repo, req).await,
         }
         .map_err(|e| e.to_string())
     }
@@ -299,6 +303,7 @@ impl ForgeDeliveryApi for ForgeDelivery {
             ForgeProvider::GitLab => {
                 gitlab::get_merge_request(&auth, ctx.owner_repo, number).await
             }
+            ForgeProvider::Gitea => gitea::get_pull(&auth, ctx.owner_repo, number).await,
         }
         .map_err(|e| e.to_string())
     }
@@ -340,6 +345,11 @@ impl ForgeDeliveryApi for ForgeDelivery {
                 // comment. Same one request either way — and an anchor that did
                 // not survive sanitizing must not fail a comment that was
                 // posted (see `create_issue_comment`).
+                .map(|comment| comment.html_url.unwrap_or_default()),
+            // No kind here either: a pull request is an issue at Gitea, exactly
+            // as at GitHub, and one collection serves both.
+            ForgeProvider::Gitea => gitea::create_comment(&auth, ctx.owner_repo, number, body)
+                .await
                 .map(|comment| comment.html_url.unwrap_or_default()),
         }
         .map_err(|e| e.to_string())
@@ -625,11 +635,13 @@ fn with_credentials(cmd: &mut tokio::process::Command, ctx: &DeliveryCtx<'_>, au
     match crate::git_credential::ensure_askpass_script(ctx.data_dir) {
         Ok(askpass) => {
             let username = if auth.username.trim().is_empty() {
-                // Neither forge checks the username when the password is a
-                // token, but git insists on having one; these are each
-                // ecosystem's conventional placeholder.
+                // No forge checks the username when the password is a token
+                // (Gitea looks the token up and authenticates by it, ignoring
+                // whatever name came with it), but git insists on having one;
+                // these are each ecosystem's conventional placeholder — Gitea's
+                // is GitHub's, which is what its own Actions runner sends.
                 match ctx.provider {
-                    ForgeProvider::GitHub => "x-access-token",
+                    ForgeProvider::GitHub | ForgeProvider::Gitea => "x-access-token",
                     ForgeProvider::GitLab => "oauth2",
                 }
             } else {
