@@ -420,5 +420,9 @@ pub async fn delete_conversation(
         params.conversation_id,
     )
     .await?;
+    crate::commands::model_provider_launch::cleanup_conversation_workspaces(
+        &state.data_dir,
+        params.conversation_id,
+    );
     Ok(Json(()))
 }
