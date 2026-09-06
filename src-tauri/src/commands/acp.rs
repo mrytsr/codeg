@@ -9366,7 +9366,7 @@ pub async fn acp_cursor_list_models(
 
 /// Primary env var keys for each agent type: (api_base_url, api_key, model).
 /// Shared by runtime env resolution, model-provider cascade, and config patching.
-fn agent_env_keys(agent_type: AgentType) -> (&'static str, &'static str, &'static str) {
+pub(crate) fn agent_env_keys(agent_type: AgentType) -> (&'static str, &'static str, &'static str) {
     match agent_type {
         AgentType::ClaudeCode => (
             "ANTHROPIC_BASE_URL",
@@ -10195,6 +10195,13 @@ pub(crate) async fn build_session_runtime_env_with_conversation(
             resolve_conversation_model_selection_core(db, data_dir, conversation_id).await?
         {
             apply_conversation_model_selection_env(&mut runtime_env, &selection);
+            crate::commands::model_provider_launch::apply_launch_adapter(
+                agent_type,
+                &selection,
+                &mut runtime_env,
+                data_dir,
+                conversation_id,
+            )?;
         }
     }
 
@@ -10260,6 +10267,16 @@ pub(crate) fn fingerprint_config(
         if let Some(json) = load_cursor_cli_config_raw() {
             hasher.update(json.as_bytes());
         }
+    }
+    // Phase 4 shared-provider session workspaces: when the agent's config-home
+    // env var points at a model-provider workspace, fold the projected config
+    // files so a content change (even with an unchanged selection) marks
+    // running sessions restart-required.
+    if let Some(blob) =
+        crate::commands::model_provider_launch::workspace_fingerprint_blob(agent_type, runtime_env)
+    {
+        hasher.update(b"\x01provider_config\x01");
+        hasher.update(blob.as_bytes());
     }
     format!("{:x}", hasher.finalize())
 }
@@ -16348,6 +16365,32 @@ wire_api = "chat"
             env.get("CODEG_MODEL_INPUT").map(String::as_str),
             Some("text,image")
         );
+        // Phase 4: the launch adapter projected the selection into Cline's
+        // session workspace (empty-dir isolation) and pointed CLINE_DIR at it.
+        let cline_home = PathBuf::from(
+            env.get("CLINE_DIR")
+                .expect("adapter must set CLINE_DIR for a workspace agent"),
+        );
+        assert_eq!(
+            cline_home,
+            catalog
+                .path()
+                .join("model-provider")
+                .join("cline")
+                .join(conv.id.to_string())
+        );
+        let gs: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(cline_home.join("globalState.json")).expect("globalState"),
+        )
+        .expect("globalState json");
+        assert_eq!(gs["actModeApiProvider"], "openai");
+        assert_eq!(gs["actModeOpenAiModelId"], "model-a");
+        assert_eq!(gs["openAiBaseUrl"], "https://example.com/v1");
+        let secrets: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(cline_home.join("secrets.json")).expect("secrets"),
+        )
+        .expect("secrets json");
+        assert_eq!(secrets["openAiApiKey"], "test-key");
     }
 
     #[tokio::test]

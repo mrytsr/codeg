@@ -2570,8 +2570,18 @@ pub async fn delete_conversation(
     db: tauri::State<'_, AppDatabase>,
     conversation_id: i32,
 ) -> Result<(), AppCommandError> {
-    let emitter = EventEmitter::Tauri(app);
-    delete_conversation_with_cleanup_core(&emitter, &db.conn, conversation_id).await
+    let emitter = EventEmitter::Tauri(app.clone());
+    delete_conversation_with_cleanup_core(&emitter, &db.conn, conversation_id).await?;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map(|path| crate::paths::resolve_effective_data_dir(&path))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    crate::commands::model_provider_launch::cleanup_conversation_workspaces(
+        &data_dir,
+        conversation_id,
+    );
+    Ok(())
 }
 
 fn compute_stats(all_conversations: &[ConversationSummary]) -> AgentStats {
