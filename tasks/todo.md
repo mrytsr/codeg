@@ -2,19 +2,19 @@
 
 ## Phase 1
 
-- [ ] Add models.json Rust types and parser
-- [ ] Add ordered, atomic, locked file writer
-- [ ] Implement provider CRUD service and validation
-- [ ] Add Tauri commands and Axum routes
-- [ ] Mirror API types in TypeScript
-- [ ] Switch frontend `ModelProviderService` from mock to transport
+- [x] Add models.json Rust types and parser
+- [x] Add ordered, atomic, locked file writer
+- [x] Implement provider CRUD service and validation
+- [x] Add Tauri commands and Axum routes
+- [x] Mirror API types in TypeScript
+- [x] Switch frontend `ModelProviderService` from mock to transport
 
 ## Phase 2
 
-- [ ] Add `agent_setting.model_source`
-- [ ] Return source from `AcpAgentInfo`
-- [ ] Implement `acp_update_agent_model_source`
-- [ ] Persist source-card UI state
+- [x] Add `agent_setting.model_source`
+- [x] Return source from `AcpAgentInfo`
+- [x] Implement `acp_update_agent_model_source`
+- [x] Persist source-card UI state
 
 ## Phase 3
 
