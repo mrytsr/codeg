@@ -110,6 +110,9 @@ async fn create_inner(
         kind: Set(kind),
         model: Set(None),
         git_branch: Set(git_branch),
+        model_source: Set(None),
+        model_provider_id: Set(None),
+        model_provider_model_id: Set(None),
         external_id: Set(None),
         parent_id: Set(parent_id),
         parent_tool_use_id: Set(parent_tool_use_id),
@@ -626,6 +629,57 @@ pub async fn update_pin(
 /// `update_external_id`: `SessionStarted` writes are not serialized against
 /// deletes (deleting only soft-marks the row; the agent stays connected and
 /// bound), so a late event must not half-resurrect an invisible row.
+/// Fetch the raw conversation row without building a sidebar summary. Used by
+/// runtime and selection paths that need provider ids not exposed in summaries.
+pub async fn find_raw_by_id(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<Option<conversation::Model>, DbError> {
+    conversation::Entity::find_by_id(conversation_id)
+        .one(conn)
+        .await
+        .map_err(Into::into)
+}
+
+/// Store the shared Model Provider selection for one conversation.
+///
+/// `None` restores the conversation to its agent-owned runtime by clearing all
+/// three provider fields. A concrete selection must be complete and is already
+/// validated by the command layer before it reaches this persistence function.
+pub async fn update_model_selection(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> Result<(), DbError> {
+    let conv = conversation::Entity::find_by_id(conversation_id)
+        .one(conn)
+        .await?
+        .ok_or_else(|| DbError::Migration(format!("Conversation not found: {conversation_id}")))?;
+    let mut active: conversation::ActiveModel = conv.into();
+    match (provider_id, model_id) {
+        (Some(provider_id), Some(model_id)) => {
+            active.model_source = Set(Some("provider".to_string()));
+            active.model_provider_id = Set(Some(provider_id));
+            active.model_provider_model_id = Set(Some(model_id.clone()));
+            active.model = Set(Some(model_id));
+        }
+        (None, None) => {
+            active.model_source = Set(None);
+            active.model_provider_id = Set(None);
+            active.model_provider_model_id = Set(None);
+        }
+        _ => {
+            return Err(DbError::Migration(
+                "Provider and model id must be set together".to_string(),
+            ));
+        }
+    }
+    active.updated_at = Set(Utc::now());
+    active.update(conn).await?;
+    Ok(())
+}
+
 pub async fn bind_external_id(
     conn: &DatabaseConnection,
     conversation_id: i32,
@@ -899,6 +953,9 @@ struct CarriedOverRow {
     kind: ConversationKind,
     model: Option<String>,
     git_branch: Option<String>,
+    model_source: Option<String>,
+    model_provider_id: Option<String>,
+    model_provider_model_id: Option<String>,
     parent_id: Option<i32>,
     message_count: i32,
     created_at: chrono::DateTime<Utc>,
@@ -928,6 +985,9 @@ impl CarriedOverRow {
             kind: row.kind.clone(),
             model: row.model.clone(),
             git_branch: row.git_branch.clone(),
+            model_source: row.model_source.clone(),
+            model_provider_id: row.model_provider_id.clone(),
+            model_provider_model_id: row.model_provider_model_id.clone(),
             // Carried so the `kind == Delegate ⟺ parent_id IS NOT NULL`
             // invariant survives, and so a preserved child stays inside its
             // parent's sub-session subtree instead of surfacing as a root.
@@ -956,6 +1016,9 @@ impl CarriedOverRow {
             kind: Set(self.kind),
             model: Set(self.model),
             git_branch: Set(self.git_branch),
+            model_source: Set(self.model_source),
+            model_provider_id: Set(self.model_provider_id),
+            model_provider_model_id: Set(self.model_provider_model_id),
             external_id: Set(Some(external_id)),
             parent_id: Set(self.parent_id),
             // Deliberately NOT carried: both are close to unique per delegation
