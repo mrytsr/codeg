@@ -3139,6 +3139,8 @@ export interface ConversationConnectionInfo {
 }
 
 // ACP agent info returned by acp_list_agents
+export type AgentModelSource = "native" | "provider"
+
 export interface AcpAgentInfo {
   agent_type: AgentType
   /**
@@ -3216,6 +3218,7 @@ export interface AcpAgentInfo {
    * launch flag, not a config key). Cursor agent only. */
   cursor_settings: CursorSettings | null
   model_provider_id: number | null
+  model_source: AgentModelSource
   /** Display icon for a custom ACP agent — normally an inlined
    *  `data:image/…;base64,…` URL. Always null for built-ins, which ship
    *  hand-drawn marks in `agent-icon.tsx`. */

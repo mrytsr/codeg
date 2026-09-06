@@ -513,6 +513,7 @@ mod tests {
             installed_version: Set(None),
             env_json: Set(Some("{}".to_string())),
             model_provider_id: Set(Some(provider.id)),
+            model_source: Set("native".to_string()),
             created_at: Set(now),
             updated_at: Set(now),
         }

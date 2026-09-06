@@ -772,6 +772,10 @@ pub fn build_router(
             post(handlers::acp::acp_update_agent_env),
         )
         .route(
+            "/acp_update_agent_model_source",
+            post(handlers::acp::acp_update_agent_model_source),
+        )
+        .route(
             "/acp_update_agent_config",
             post(handlers::acp::acp_update_agent_config),
         )

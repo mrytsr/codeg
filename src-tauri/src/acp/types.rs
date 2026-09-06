@@ -1096,6 +1096,7 @@ pub struct AcpAgentInfo {
     /// for `AgentType::Cursor`. Derived from `cursor_cli_config_json`.
     pub cursor_settings: Option<CursorSettings>,
     pub model_provider_id: Option<i32>,
+    pub model_source: String,
     /// Display icon for a custom ACP agent — normally an inlined
     /// `data:image/…;base64,…` URL (see
     /// `crate::acp::custom_registry::CustomAgentDef::icon_url`). Always `None`

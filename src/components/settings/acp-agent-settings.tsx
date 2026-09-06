@@ -102,6 +102,7 @@ import {
   acpUninstallAgent,
   acpUpdateAgentConfig,
   acpUpdateAgentEnv,
+  acpUpdateAgentModelSource,
   acpUpdateHermesConfig,
   acpRevealHermesHome,
   acpOpenHermesSetupTerminal,
@@ -140,7 +141,7 @@ import type {
   ModelProviderApiType,
   ModelProviderRecord,
 } from "@/lib/model-provider-types"
-import { useModelProviderService } from "@/stores/model-provider-mock"
+import { useModelProviderService } from "@/stores/model-provider-transport"
 import {
   OpenCodeConnectDialog,
   OpenCodeCustomProviderDialog,
@@ -4488,6 +4489,14 @@ export function AcpAgentSettings() {
       setAgents(next)
       publishAgentDisplay(next)
       setModelProviderRecords(providers)
+      setModelProviderSources(
+        Object.fromEntries(
+          next.map((agent) => [
+            agent.agent_type,
+            agent.model_source === "provider",
+          ])
+        ) as Partial<Record<AgentType, boolean>>
+      )
       setDrafts((prev) => {
         const updated = { ...prev }
         for (const agent of next) {
@@ -7947,10 +7956,45 @@ export function AcpAgentSettings() {
                       selected={selectedUsesModelProviderSource}
                       onSelect={(selected) => {
                         if (!selectedAgentKind) return
+                        const agentType = selectedAgentKind
+                        const previous =
+                          modelProviderSources[agentType] ?? false
                         setModelProviderSources((prev) => ({
                           ...prev,
-                          [selectedAgentKind]: selected,
+                          [agentType]: selected,
                         }))
+                        acpUpdateAgentModelSource(
+                          agentType,
+                          selected ? "provider" : "native"
+                        )
+                          .then((affected) => {
+                            reportAffectedSessions(affected)
+                            setAgents((prev) =>
+                              prev.map((agent) =>
+                                agent.agent_type === agentType
+                                  ? {
+                                      ...agent,
+                                      model_source: selected
+                                        ? "provider"
+                                        : "native",
+                                    }
+                                  : agent
+                              )
+                            )
+                          })
+                          .catch((err) => {
+                            console.error(
+                              "[Settings] save model source failed:",
+                              err
+                            )
+                            setModelProviderSources((prev) => ({
+                              ...prev,
+                              [agentType]: previous,
+                            }))
+                            toast.error(t("toasts.saveEnvFailed"), {
+                              description: toErrorMessage(err),
+                            })
+                          })
                       }}
                     />
                     {!selectedUsesModelProviderSource &&

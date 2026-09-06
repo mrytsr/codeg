@@ -18,6 +18,7 @@ import { TurnBusyError, isTurnInProgressRejection } from "./turn-busy"
 import type { FolderThemeColor } from "./theme-presets"
 import type { FollowUpIntent } from "./task-follow-up"
 import type {
+  AgentModelSource,
   AgentType,
   AgentDelegationDefaults,
   AgentOptionsSnapshot,
@@ -575,6 +576,16 @@ export async function acpUpdateAgentPreferences(
 
 /** Returns the number of running sessions left on stale config by this save
  *  (for the settings-side "N sessions need restart" toast). */
+export async function acpUpdateAgentModelSource(
+  agentType: AgentType,
+  modelSource: AgentModelSource
+): Promise<number> {
+  return getTransport().call("acp_update_agent_model_source", {
+    agentType,
+    modelSource,
+  })
+}
+
 export async function acpUpdateAgentEnv(
   agentType: AgentType,
   params: {

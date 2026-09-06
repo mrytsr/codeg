@@ -27,7 +27,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { useModelProviderService } from "@/stores/model-provider-mock"
+import { useModelProviderService } from "@/stores/model-provider-transport"
 import {
   emptyProviderDraft,
   recordToDraft,

@@ -1446,3 +1446,27 @@ mod tests {
         assert!(!text.contains("codex"));
     }
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpUpdateAgentModelSourceParams {
+    pub agent_type: AgentType,
+    pub model_source: crate::models::agent::AgentModelSource,
+}
+
+pub async fn acp_update_agent_model_source(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpUpdateAgentModelSourceParams>,
+) -> Result<Json<usize>, AppCommandError> {
+    let affected = acp_commands::acp_update_agent_model_source_and_refresh(
+        params.agent_type,
+        params.model_source,
+        &state.db,
+        &state.connection_manager,
+        &state.data_dir,
+        &state.emitter,
+    )
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(affected))
+}

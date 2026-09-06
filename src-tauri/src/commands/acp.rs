@@ -26,7 +26,7 @@ use crate::acp::types::{ConnectionInfo, ForkResultInfo, PromptInputBlock};
 use crate::db::service::agent_setting_service;
 use crate::db::service::model_provider_service;
 use crate::db::AppDatabase;
-use crate::models::agent::AgentType;
+use crate::models::agent::{AgentModelSource, AgentType};
 use crate::web::event_bridge::EventEmitter;
 
 const ACP_AGENTS_UPDATED_EVENT: &str = "app://acp-agents-updated";
@@ -5353,6 +5353,10 @@ async fn clear_kimi_model_env(db: &AppDatabase) -> Result<(), AcpError> {
         .map_err(|e| AcpError::protocol(e.to_string()))?;
     let enabled = setting.as_ref().map(|m| m.enabled).unwrap_or(true);
     let model_provider_id = setting.as_ref().and_then(|m| m.model_provider_id);
+    let model_source = setting
+        .as_ref()
+        .map(|m| m.model_source.clone())
+        .unwrap_or_else(|| "native".to_string());
     let mut env: BTreeMap<String, String> = setting
         .and_then(|m| m.env_json)
         .and_then(|raw| serde_json::from_str(&raw).ok())
@@ -5372,6 +5376,7 @@ async fn clear_kimi_model_env(db: &AppDatabase) -> Result<(), AcpError> {
             enabled,
             env_json: Some(env_json),
             model_provider_id,
+            model_source,
         },
     )
     .await
@@ -9936,6 +9941,7 @@ pub(crate) async fn cascade_update_model_provider(
             enabled: setting.enabled,
             env_json: serialize_env_map(&env_map)?,
             model_provider_id: setting.model_provider_id,
+            model_source: setting.model_source.clone(),
         };
         agent_setting_service::update(&db.conn, agent_type, patch)
             .await
@@ -10883,7 +10889,7 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
                 .custom_id()
                 .and_then(crate::acp::custom_registry::source_of)
                 .map(|s| s.as_str().to_string()),
-            enabled: setting.map(|m| m.enabled).unwrap_or(true),
+            enabled: setting.as_ref().map(|m| m.enabled).unwrap_or(true),
             sort_order,
             installed_version: local_installed_version,
             host_tools_agent_mode: !crate::acp::host_tools_policy::HostToolsPolicy::from_env(&env)
@@ -10903,7 +10909,11 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
             grok_settings,
             cursor_cli_config_json,
             cursor_settings,
-            model_provider_id: setting.and_then(|m| m.model_provider_id),
+            model_provider_id: setting.as_ref().and_then(|m| m.model_provider_id),
+            model_source: setting
+                .as_ref()
+                .map(|m| m.model_source.clone())
+                .unwrap_or_else(|| AgentModelSource::Native.as_str().to_string()),
             icon_url: agent_type
                 .custom_id()
                 .and_then(custom_registry::icon_for)
@@ -10942,6 +10952,58 @@ pub async fn acp_clear_binary_cache(agent_type: AgentType) -> Result<(), AcpErro
         binary_cache::clear_agent_cache(agent_type)?;
     }
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn acp_update_agent_model_source_core(
+    agent_type: AgentType,
+    model_source: AgentModelSource,
+    db: &AppDatabase,
+    emitter: &EventEmitter,
+) -> Result<(), AcpError> {
+    let default = agent_setting_service::AgentDefaultInput {
+        agent_type,
+        registry_id: registry::registry_id_for(agent_type).to_string(),
+        default_sort_order: i32::MAX / 2,
+    };
+    agent_setting_service::ensure_defaults(&db.conn, &[default])
+        .await
+        .map_err(|e| AcpError::protocol(e.to_string()))?;
+
+    let setting = agent_setting_service::get_by_agent_type(&db.conn, agent_type)
+        .await
+        .map_err(|e| AcpError::protocol(e.to_string()))?
+        .ok_or_else(|| AcpError::protocol("agent setting not found"))?;
+    let patch = agent_setting_service::AgentSettingsUpdate {
+        enabled: setting.enabled,
+        env_json: setting.env_json,
+        model_provider_id: setting.model_provider_id,
+        model_source: model_source.as_str().to_string(),
+    };
+    agent_setting_service::update(&db.conn, agent_type, patch)
+        .await
+        .map_err(|e| AcpError::protocol(e.to_string()))?;
+    emit_acp_agents_updated(emitter, "model_source_updated", Some(agent_type));
+    Ok(())
+}
+
+pub(crate) async fn acp_update_agent_model_source_and_refresh(
+    agent_type: AgentType,
+    model_source: AgentModelSource,
+    db: &AppDatabase,
+    manager: &ConnectionManager,
+    data_dir: &Path,
+    emitter: &EventEmitter,
+) -> Result<usize, AcpError> {
+    acp_update_agent_model_source_core(agent_type, model_source, db, emitter).await?;
+    Ok(refresh_config_staleness(
+        manager,
+        db,
+        data_dir,
+        &[agent_type],
+        ConfigStaleKind::AgentConfig,
+    )
+    .await)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -10985,10 +11047,16 @@ pub(crate) async fn acp_update_agent_preferences_core(
         }
     }
 
+    let current = agent_setting_service::get_by_agent_type(&db.conn, agent_type)
+        .await
+        .map_err(|e| AcpError::protocol(e.to_string()))?;
     let patch = agent_setting_service::AgentSettingsUpdate {
         enabled,
         env_json,
         model_provider_id: None,
+        model_source: current
+            .map(|m| m.model_source)
+            .unwrap_or_else(|| "native".to_string()),
     };
     agent_setting_service::update(&db.conn, agent_type, patch)
         .await
@@ -11164,10 +11232,16 @@ pub(crate) async fn acp_update_agent_env_core(
         }
     }
 
+    let current = agent_setting_service::get_by_agent_type(&db.conn, agent_type)
+        .await
+        .map_err(|e| AcpError::protocol(e.to_string()))?;
     let patch = agent_setting_service::AgentSettingsUpdate {
         enabled,
         env_json: serialize_env_map(&merged_env)?,
         model_provider_id,
+        model_source: current
+            .map(|m| m.model_source)
+            .unwrap_or_else(|| "native".to_string()),
     };
     agent_setting_service::update(&db.conn, agent_type, patch)
         .await
@@ -11296,6 +11370,32 @@ fn apply_codex_catalog_and_model(raw: Option<&str>) -> Result<(), AcpError> {
         toml::to_string_pretty(&toml_value).map_err(|e| AcpError::protocol(e.to_string()))?;
     persist_codex_native_config_files(None, Some(&toml_str))?;
     Ok(())
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_update_agent_model_source(
+    agent_type: AgentType,
+    model_source: AgentModelSource,
+    manager: State<'_, ConnectionManager>,
+    db: State<'_, AppDatabase>,
+    app: tauri::AppHandle,
+) -> Result<usize, AcpError> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let emitter = EventEmitter::Tauri(app);
+    acp_update_agent_model_source_and_refresh(
+        agent_type,
+        model_source,
+        &db,
+        &manager,
+        &app_data_dir,
+        &emitter,
+    )
+    .await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -15973,6 +16073,46 @@ wire_api = "chat"
             Some(&serde_json::json!(["Shell(npm run build)"]))
         );
         assert_eq!(v.pointer("/permissions/deny"), Some(&serde_json::json!([])));
+    }
+
+    #[tokio::test]
+    async fn agent_model_source_persists_and_reports() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        agent_setting_service::ensure_defaults(
+            &db.conn,
+            &[agent_setting_service::AgentDefaultInput {
+                agent_type: AgentType::Cline,
+                registry_id: registry::registry_id_for(AgentType::Cline).to_string(),
+                default_sort_order: 0,
+            }],
+        )
+        .await
+        .expect("defaults");
+
+        let agent = acp_list_agents_core(&db)
+            .await
+            .expect("agents")
+            .into_iter()
+            .find(|a| a.agent_type == AgentType::Cline)
+            .expect("cline");
+        assert_eq!(agent.model_source, "native");
+
+        acp_update_agent_model_source_core(
+            AgentType::Cline,
+            AgentModelSource::Provider,
+            &db,
+            &EventEmitter::Noop,
+        )
+        .await
+        .expect("update");
+
+        let agent = acp_list_agents_core(&db)
+            .await
+            .expect("agents")
+            .into_iter()
+            .find(|a| a.agent_type == AgentType::Cline)
+            .expect("cline");
+        assert_eq!(agent.model_source, "provider");
     }
 
     #[tokio::test]
