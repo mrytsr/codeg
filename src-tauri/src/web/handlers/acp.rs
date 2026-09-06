@@ -72,6 +72,8 @@ pub struct AcpConnectParams {
     pub preferred_mode_id: Option<String>,
     #[serde(default)]
     pub preferred_config_values: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub conversation_id: Option<i32>,
 }
 
 pub async fn acp_connect(
@@ -81,11 +83,12 @@ pub async fn acp_connect(
     let db = &state.db;
     let manager = &state.connection_manager;
 
-    let runtime_env = acp_commands::build_session_runtime_env(
+    let runtime_env = acp_commands::build_session_runtime_env_with_conversation(
         db,
         params.agent_type,
         params.session_id.as_deref(),
         &state.data_dir,
+        params.conversation_id,
     )
     .await
     .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
