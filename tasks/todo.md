@@ -18,9 +18,9 @@
 
 ## Phase 3
 
-- [ ] Add conversation provider/model selection columns
-- [ ] Implement selection validation and setter
-- [ ] Thread selection into launch and config fingerprint
+- [x] Add conversation provider/model selection columns
+- [x] Implement selection validation and setter
+- [x] Thread selection into launch and config fingerprint
 
 ## Phase 4
 
