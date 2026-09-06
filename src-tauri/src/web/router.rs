@@ -446,10 +446,7 @@ pub fn build_router(
         .route("/git_pull", post(handlers::git::git_pull))
         .route("/git_push", post(handlers::git::git_push))
         .route("/git_fetch", post(handlers::git::git_fetch))
-        .route(
-            "/git_update_branch",
-            post(handlers::git::git_update_branch),
-        )
+        .route("/git_update_branch", post(handlers::git::git_update_branch))
         .route("/git_commit", post(handlers::git::git_commit))
         .route("/git_fetch_remote", post(handlers::git::git_fetch_remote))
         .route("/git_delete_branch", post(handlers::git::git_delete_branch))
@@ -723,10 +720,7 @@ pub fn build_router(
             "/acp_set_config_option",
             post(handlers::acp::acp_set_config_option),
         )
-        .route(
-            "/acp_goal_control",
-            post(handlers::acp::acp_goal_control),
-        )
+        .route("/acp_goal_control", post(handlers::acp::acp_goal_control))
         .route(
             "/acp_describe_agent_options",
             post(handlers::acp::acp_describe_agent_options),
@@ -1274,6 +1268,47 @@ pub fn build_router(
             "/delete_model_provider",
             post(handlers::model_provider::delete_model_provider),
         )
+        // ─── Shared models.json providers ───
+        .route(
+            "/model_provider_records",
+            post(handlers::model_provider_file::list_model_provider_records),
+        )
+        .route(
+            "/model_provider_builtin_records",
+            post(handlers::model_provider_file::list_builtin_model_providers),
+        )
+        .route(
+            "/model_provider_create",
+            post(handlers::model_provider_file::create_model_provider),
+        )
+        .route(
+            "/model_provider_update",
+            post(handlers::model_provider_file::update_model_provider),
+        )
+        .route(
+            "/model_provider_delete",
+            post(handlers::model_provider_file::delete_model_provider),
+        )
+        .route(
+            "/model_provider_set_enabled",
+            post(handlers::model_provider_file::set_model_provider_enabled),
+        )
+        .route(
+            "/model_provider_reorder",
+            post(handlers::model_provider_file::reorder_model_providers),
+        )
+        .route(
+            "/model_provider_clone_builtin",
+            post(handlers::model_provider_file::clone_builtin_model_provider),
+        )
+        .route(
+            "/model_provider_probe",
+            post(handlers::model_provider_file::probe_model_provider_models),
+        )
+        .route(
+            "/model_provider_test",
+            post(handlers::model_provider_file::test_model_provider_model),
+        )
         // ─── Quick Messages ───
         .route(
             "/quick_messages_list",
@@ -1300,7 +1335,10 @@ pub fn build_router(
             "/automation_list",
             post(handlers::automation::automation_list),
         )
-        .route("/automation_get", post(handlers::automation::automation_get))
+        .route(
+            "/automation_get",
+            post(handlers::automation::automation_get),
+        )
         .route(
             "/automation_runs",
             post(handlers::automation::automation_runs),
@@ -1413,10 +1451,7 @@ pub fn build_router(
             "/forge_list_issues",
             post(handlers::forge::forge_list_issues),
         )
-        .route(
-            "/forge_tab_count",
-            post(handlers::forge::forge_tab_count),
-        )
+        .route("/forge_tab_count", post(handlers::forge::forge_tab_count))
         .route(
             "/forge_list_labels",
             post(handlers::forge::forge_list_labels),

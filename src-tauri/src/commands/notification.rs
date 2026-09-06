@@ -148,11 +148,9 @@ pub async fn open_system_notification_settings() -> Result<(), AppCommandError> 
         }
     }
 
-    Err(
-        AppCommandError::new(
-            AppErrorCode::DependencyMissing,
-            "Could not open the system notification settings on this desktop",
-        )
-        .with_detail(last_error.unwrap_or_else(|| "no candidate command available".to_string())),
+    Err(AppCommandError::new(
+        AppErrorCode::DependencyMissing,
+        "Could not open the system notification settings on this desktop",
     )
+    .with_detail(last_error.unwrap_or_else(|| "no candidate command available".to_string())))
 }
