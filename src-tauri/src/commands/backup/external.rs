@@ -454,9 +454,7 @@ fn recover_and_page_copy(copy_db: &Path, dest: &Path) -> Result<(), rusqlite::Er
 
 /// Scan a (plaintext) backup ZIP for external entries whose live target already
 /// exists, so the UI can surface conflicts before any write.
-pub fn scan_external_conflicts(
-    zip_path: &Path,
-) -> Result<Vec<ExternalConflict>, AppCommandError> {
+pub fn scan_external_conflicts(zip_path: &Path) -> Result<Vec<ExternalConflict>, AppCommandError> {
     scan_external_conflicts_with_sources(zip_path, &external_transcript_sources())
 }
 
@@ -548,8 +546,9 @@ fn restore_external_with_sources(
         if cancel.is_cancelled() {
             return Err(cancelled_error());
         }
-        let entry = entry
-            .map_err(|e| AppCommandError::io_error("Walk staged transcripts").with_detail(e.to_string()))?;
+        let entry = entry.map_err(|e| {
+            AppCommandError::io_error("Walk staged transcripts").with_detail(e.to_string())
+        })?;
         if !entry.file_type().is_file() {
             continue;
         }
@@ -636,7 +635,11 @@ fn restore_one(
     // parent is a symlink — otherwise `create_dir_all`/rename would follow it
     // and write outside the agent's tree.
     if !parent_chain_is_safe(base, parent) {
-        tracing::warn!("[RESTORE] external: symlinked parent under {}, skipping {}", base.display(), target.display());
+        tracing::warn!(
+            "[RESTORE] external: symlinked parent under {}, skipping {}",
+            base.display(),
+            target.display()
+        );
         return FileOutcome::Failed;
     }
     if let Err(e) = std::fs::create_dir_all(parent) {
@@ -661,17 +664,25 @@ fn restore_one(
             // race. On a copy failure, remove the partial file we just created
             // so no half-written transcript is left at the live path.
             match OpenOptions::new().write(true).create_new(true).open(target) {
-                Ok(mut out) => match File::open(src).and_then(|mut i| std::io::copy(&mut i, &mut out)) {
-                    Ok(_) => FileOutcome::Written,
-                    Err(e) => {
-                        tracing::error!("[RESTORE] external: write {} failed: {e}", target.display());
-                        let _ = std::fs::remove_file(target);
-                        FileOutcome::Failed
+                Ok(mut out) => {
+                    match File::open(src).and_then(|mut i| std::io::copy(&mut i, &mut out)) {
+                        Ok(_) => FileOutcome::Written,
+                        Err(e) => {
+                            tracing::error!(
+                                "[RESTORE] external: write {} failed: {e}",
+                                target.display()
+                            );
+                            let _ = std::fs::remove_file(target);
+                            FileOutcome::Failed
+                        }
                     }
-                },
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => FileOutcome::Skipped,
                 Err(e) => {
-                    tracing::error!("[RESTORE] external: create {} failed: {e}", target.display());
+                    tracing::error!(
+                        "[RESTORE] external: create {} failed: {e}",
+                        target.display()
+                    );
                     FileOutcome::Failed
                 }
             }
@@ -688,7 +699,10 @@ fn restore_one(
                 Ok(())
             })();
             if let Err(e) = write {
-                tracing::error!("[RESTORE] external: stage temp for {} failed: {e}", target.display());
+                tracing::error!(
+                    "[RESTORE] external: stage temp for {} failed: {e}",
+                    target.display()
+                );
                 let _ = std::fs::remove_file(&tmp);
                 return FileOutcome::Failed;
             }
@@ -698,7 +712,10 @@ fn restore_one(
                 let _ = std::fs::remove_file(target);
             }
             if let Err(e) = std::fs::rename(&tmp, target) {
-                tracing::error!("[RESTORE] external: publish {} failed: {e}", target.display());
+                tracing::error!(
+                    "[RESTORE] external: publish {} failed: {e}",
+                    target.display()
+                );
                 let _ = std::fs::remove_file(&tmp);
                 return FileOutcome::Failed;
             }
@@ -986,7 +1003,8 @@ mod tests {
         assert_eq!(base, store.root);
         assert_eq!(target, store.root.join("objects").join("aa").join(&hex));
         assert!(
-            map_external_to_target("external/deepseek-attachments/tmp/staged", store_only).is_none()
+            map_external_to_target("external/deepseek-attachments/tmp/staged", store_only)
+                .is_none()
         );
         assert!(map_external_to_target(
             "external/deepseek-attachments/request-images/aa/bb",

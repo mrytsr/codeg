@@ -631,7 +631,8 @@ pub(crate) fn apply_pending_restore_with_paths(
 
     tracing::info!(
         "[RESTORE] applying staged restore (backup app_version={}, migration={})",
-        pending.app_version, pending.latest_migration
+        pending.app_version,
+        pending.latest_migration
     );
 
     // The snapshot directory is DERIVED from the marker, so every retry of the
@@ -1058,7 +1059,11 @@ fn commit_pending_marker(
     // and silently committing a different staging dir. A crash mid-write leaves
     // a partial marker, which `apply_pending_restore_*` treats as malformed and
     // discards (its staging is then reaped by `cleanup_transient_dirs`).
-    let mut f = match OpenOptions::new().write(true).create_new(true).open(&marker) {
+    let mut f = match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&marker)
+    {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             return Err(already_pending_error())
@@ -1104,7 +1109,11 @@ fn sanitize_stamp(rfc3339: &str) -> String {
 }
 
 fn emit(emitter: &EventEmitter, op_id: &str, phase: BackupPhase) {
-    emit_event(emitter, BACKUP_PROGRESS_EVENT, BackupProgress::phase(op_id, phase));
+    emit_event(
+        emitter,
+        BACKUP_PROGRESS_EVENT,
+        BackupProgress::phase(op_id, phase),
+    );
 }
 
 fn emit_progress(

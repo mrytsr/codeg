@@ -83,7 +83,8 @@ pub async fn backup_create_ticket(
         include_external_transcripts: params.include_external_transcripts,
         passphrase: params.passphrase.clone(),
     };
-    let result = core::create_backup_core(inputs, opts, &dest, &state.emitter, &op_id, &cancel).await;
+    let result =
+        core::create_backup_core(inputs, opts, &dest, &state.emitter, &op_id, &cancel).await;
     state.workspace_transfer.finish_transfer(&op_id).await;
     let manifest = result?;
 
@@ -123,7 +124,11 @@ pub async fn backup_download(
     Extension(state): Extension<Arc<AppState>>,
     AxumPath(ticket): AxumPath<String>,
 ) -> Result<Response, AppCommandError> {
-    let Some(t) = state.workspace_transfer.consume_download_ticket(&ticket).await else {
+    let Some(t) = state
+        .workspace_transfer
+        .consume_download_ticket(&ticket)
+        .await
+    else {
         return Err(AppCommandError::not_found(
             "Download ticket is invalid or expired",
         ));
@@ -131,7 +136,10 @@ pub async fn backup_download(
     // This public route shares the ticket pool with workspace downloads. Only
     // serve tickets that point inside the backup temp dir, so a workspace ticket
     // redeemed here can't stream an arbitrary workspace file.
-    if !t.target_path.starts_with(state.data_dir.join(BACKUP_TMP_DIR)) {
+    if !t
+        .target_path
+        .starts_with(state.data_dir.join(BACKUP_TMP_DIR))
+    {
         return Err(AppCommandError::not_found(
             "Download ticket is invalid or expired",
         ));

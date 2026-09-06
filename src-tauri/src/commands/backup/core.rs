@@ -12,7 +12,9 @@ use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 use sea_orm_migration::MigratorTrait;
 use tokio_util::sync::CancellationToken;
 
-use crate::app_error::{AppCommandError, BACKUP_I18N_KEY_NEWER_VERSION, BACKUP_I18N_KEY_UNKNOWN_FORMAT};
+use crate::app_error::{
+    AppCommandError, BACKUP_I18N_KEY_NEWER_VERSION, BACKUP_I18N_KEY_UNKNOWN_FORMAT,
+};
 use crate::db::migration::Migrator;
 use crate::web::event_bridge::{emit_event, EventEmitter};
 
@@ -176,9 +178,14 @@ pub(crate) async fn create_backup_core(
             let part_c = part.clone();
             let pass = pass.to_string();
             let cancel_c = cancel.clone();
-            tokio::task::spawn_blocking(move || crypto::encrypt_file(&zip_tmp_c, &part_c, &pass, &cancel_c))
-                .await
-                .map_err(|e| AppCommandError::task_execution_failed("Encrypt task failed").with_detail(e.to_string()))??;
+            tokio::task::spawn_blocking(move || {
+                crypto::encrypt_file(&zip_tmp_c, &part_c, &pass, &cancel_c)
+            })
+            .await
+            .map_err(|e| {
+                AppCommandError::task_execution_failed("Encrypt task failed")
+                    .with_detail(e.to_string())
+            })??;
         }
         None => {
             tokio::fs::copy(&zip_tmp, &part)
@@ -186,7 +193,9 @@ pub(crate) async fn create_backup_core(
                 .map_err(super::map_disk_full)?;
         }
     }
-    tokio::fs::rename(&part, dest_path).await.map_err(AppCommandError::io)?;
+    tokio::fs::rename(&part, dest_path)
+        .await
+        .map_err(AppCommandError::io)?;
 
     let total = manifest.total_bytes();
     emit(emitter, op_id, BackupPhase::Done, total, Some(total), None);
@@ -202,7 +211,9 @@ pub(crate) async fn scan_external_conflicts_core(
     let zip = zip_path.to_path_buf();
     tokio::task::spawn_blocking(move || super::external::scan_external_conflicts(&zip))
         .await
-        .map_err(|e| AppCommandError::task_execution_failed("Scan task failed").with_detail(e.to_string()))?
+        .map_err(|e| {
+            AppCommandError::task_execution_failed("Scan task failed").with_detail(e.to_string())
+        })?
 }
 
 /// Run `VACUUM INTO` to produce a transactionally-consistent, defragmented
@@ -213,13 +224,17 @@ pub(crate) async fn snapshot_db_to(
 ) -> Result<(), AppCommandError> {
     // VACUUM INTO requires the destination not to exist.
     if dest.exists() {
-        tokio::fs::remove_file(dest).await.map_err(AppCommandError::io)?;
+        tokio::fs::remove_file(dest)
+            .await
+            .map_err(AppCommandError::io)?;
     }
     let dest_lit = dest.to_string_lossy().replace('\'', "''");
     let sql = format!("VACUUM INTO '{dest_lit}';");
     conn.execute(Statement::from_string(DbBackend::Sqlite, sql))
         .await
-        .map_err(|e| AppCommandError::database_error("VACUUM INTO failed").with_detail(e.to_string()))?;
+        .map_err(|e| {
+            AppCommandError::database_error("VACUUM INTO failed").with_detail(e.to_string())
+        })?;
     Ok(())
 }
 
@@ -417,8 +432,14 @@ mod tests {
 
         // Extract and confirm the snapshot is a real DB carrying our row.
         let out = dir.path().join("out");
-        archive::extract_all(&dest, &out, &manifest, &cancel, &mut archive::null_progress())
-            .unwrap();
+        archive::extract_all(
+            &dest,
+            &out,
+            &manifest,
+            &cancel,
+            &mut archive::null_progress(),
+        )
+        .unwrap();
         assert_eq!(count_folders(&out.join("db/codeg.db")).await, 1);
     }
 
@@ -516,7 +537,9 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(PathBuf::from(&staged.staging_dir).join("db/codeg.db").exists());
+        assert!(PathBuf::from(&staged.staging_dir)
+            .join("db/codeg.db")
+            .exists());
         assert!(restore_dir.path().join(PENDING_MARKER).is_file());
 
         // Apply on "startup" → live DB carries the two seeded folders. Inject
@@ -755,8 +778,10 @@ mod tests {
         assert!(ok && reason.is_none());
 
         // A migration we don't know → newer version, rejected.
-        let (ok, reason) =
-            evaluate_compat(&manifest_with_migration("m99999999_000001_from_the_future", 1));
+        let (ok, reason) = evaluate_compat(&manifest_with_migration(
+            "m99999999_000001_from_the_future",
+            1,
+        ));
         assert!(!ok);
         assert_eq!(reason.as_deref(), Some(BACKUP_I18N_KEY_NEWER_VERSION));
 

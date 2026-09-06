@@ -352,21 +352,22 @@ pub mod mock {
             preferred_mode_id: Option<String>,
             preferred_config_values: BTreeMap<String, String>,
         ) -> Result<ResumedSpawn, SpawnerError> {
-            self.resume_spawn_args.lock().await.push(ResumeSpawnCallArgs {
-                parent_connection_id: parent_connection_id.to_string(),
-                agent_type,
-                working_dir,
-                external_session_id: external_session_id.to_string(),
-                preferred_mode_id,
-                preferred_config_values,
-            });
+            self.resume_spawn_args
+                .lock()
+                .await
+                .push(ResumeSpawnCallArgs {
+                    parent_connection_id: parent_connection_id.to_string(),
+                    agent_type,
+                    working_dir,
+                    external_session_id: external_session_id.to_string(),
+                    preferred_mode_id,
+                    preferred_config_values,
+                });
             self.resume_spawn_results
                 .lock()
                 .await
                 .pop_front()
-                .unwrap_or_else(|| {
-                    Err(SpawnerError::Spawn("no queued resume spawn result".into()))
-                })
+                .unwrap_or_else(|| Err(SpawnerError::Spawn("no queued resume spawn result".into())))
         }
 
         async fn send_resume_prompt(
