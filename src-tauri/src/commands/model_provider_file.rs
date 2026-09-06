@@ -531,27 +531,42 @@ pub async fn clone_builtin_model_provider_core(
 }
 
 pub async fn probe_model_provider_models_core(
-    _params: ProbeParams,
+    params: ProbeParams,
 ) -> Result<ProbeOutcome, AppCommandError> {
-    // Network probing lands with the Phase 5 API-family clients. The command
-    // surface is present now so the frontend contract does not fork later.
-    Ok(ProbeOutcome {
-        ok: false,
-        models: None,
-        error: Some("Model probing is not implemented yet".to_string()),
-    })
+    Ok(crate::commands::model_provider_probe::probe_models(
+        &params.base_url,
+        params.api,
+        params.api_key.as_deref(),
+        params.auth_header.unwrap_or(true),
+    )
+    .await)
 }
 
 pub async fn test_model_provider_model_core(
-    _provider_id: String,
-    _model_id: String,
-    _api_key: Option<String>,
+    data_dir: &Path,
+    provider_id: String,
+    model_id: String,
+    api_key: Option<String>,
 ) -> Result<TestOutcome, AppCommandError> {
-    Ok(TestOutcome {
-        ok: false,
-        reply: None,
-        error: Some("Model testing is not implemented yet".to_string()),
-    })
+    let (provider, _model) =
+        resolve_model_selection_core(data_dir, &provider_id, &model_id).await?;
+    let api = provider
+        .api
+        .unwrap_or(ModelProviderApiType::OpenAiCompletions);
+    let base_url = provider.base_url.unwrap_or_default();
+    let key = api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or(provider.api_key.as_deref());
+    Ok(crate::commands::model_provider_probe::test_model(
+        &base_url,
+        api,
+        key,
+        &model_id,
+        provider.auth_header,
+    )
+    .await)
 }
 
 pub async fn resolve_model_selection_core(
@@ -693,11 +708,12 @@ mod tauri_commands {
 
     #[tauri::command]
     pub async fn model_provider_test(
+        app: tauri::AppHandle,
         provider_id: String,
         model_id: String,
         api_key: Option<String>,
     ) -> Result<TestOutcome, AppCommandError> {
-        test_model_provider_model_core(provider_id, model_id, api_key).await
+        test_model_provider_model_core(&data_dir(&app)?, provider_id, model_id, api_key).await
     }
 }
 
@@ -821,5 +837,74 @@ mod tests {
         assert!(model_provider_api_types(&AgentType::OpenCode).len() == 4);
         assert!(model_provider_api_types(&AgentType::Cursor).is_empty());
         assert!(model_provider_api_types(&AgentType::Custom("x")).is_empty());
+    }
+
+    #[tokio::test]
+    async fn clone_builtin_suffixes_and_dedupes() {
+        let dir = tempfile::tempdir().unwrap();
+        let cloned = clone_builtin_model_provider_core(dir.path(), "anthropic".to_string())
+            .await
+            .unwrap();
+        assert_eq!(cloned.provider_id, "anthropic-2");
+        assert_eq!(cloned.api, ModelProviderApiType::AnthropicMessages);
+        assert_eq!(cloned.base_url, "https://api.anthropic.com");
+        assert!(!cloned.models.is_empty());
+        assert!(cloned.api_key.is_empty());
+
+        // Persisting it and cloning again dedupes to anthropic-3.
+        create_model_provider_core(dir.path(), cloned)
+            .await
+            .unwrap();
+        let next = clone_builtin_model_provider_core(dir.path(), "anthropic".to_string())
+            .await
+            .unwrap();
+        assert_eq!(next.provider_id, "anthropic-3");
+    }
+
+    #[tokio::test]
+    async fn clone_builtin_unknown_id_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            clone_builtin_model_provider_core(dir.path(), "nope".to_string())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_model_selection_errors_on_corrupt_catalog() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("models.json"), "{not json").unwrap();
+        assert!(
+            resolve_model_selection_core(dir.path(), "provider", "model")
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_writes_are_serialized_and_never_corrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut handles = Vec::new();
+        for i in 0..20 {
+            let path = dir.path().to_path_buf();
+            let id = format!("p{i}");
+            handles.push(tokio::spawn(async move {
+                let draft = draft(&id);
+                let _ = create_model_provider_core(&path, draft.clone()).await;
+                let mut updated = draft;
+                let url = format!("https://{id}.example.com/v1");
+                updated.original_id = id;
+                updated.base_url = url;
+                let _ = update_model_provider_core(&path, updated).await;
+            }));
+        }
+        for handle in handles {
+            handle.await.expect("task joined");
+        }
+        // Every write landed and the file still parses: the in-process lock +
+        // atomic rename serialize the create/update pairs.
+        let file = read_models_file(&dir.path().join("models.json")).expect("parse");
+        assert_eq!(file.providers.len(), 20);
     }
 }

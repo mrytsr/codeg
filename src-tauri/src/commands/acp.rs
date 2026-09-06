@@ -16394,6 +16394,97 @@ wire_api = "chat"
     }
 
     #[tokio::test]
+    async fn corrupt_catalog_fails_launch_not_silently() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let catalog = tempfile::tempdir().expect("catalog dir");
+        let folder = crate::db::test_helpers::seed_folder(&db, "/tmp/codeg-corrupt-catalog").await;
+        let conv = conversation_service::create(
+            &db.conn,
+            folder,
+            AgentType::Cline,
+            Some("corrupt launch".to_string()),
+            None,
+        )
+        .await
+        .expect("create conversation");
+        crate::commands::model_provider_file::create_model_provider_core(
+            catalog.path(),
+            crate::models::model_provider_file::ModelProviderDraft {
+                provider_id: "provider-a".to_string(),
+                original_id: String::new(),
+                api: crate::models::model_provider_file::ModelProviderApiType::OpenAiCompletions,
+                base_url: "https://example.com/v1".to_string(),
+                proxy: None,
+                api_key: "test-key".to_string(),
+                auth_header: true,
+                compat_supports_developer_role: None,
+                enabled: true,
+                models: vec![crate::models::model_provider_file::ModelEntryDraft {
+                    id: "model-a".to_string(),
+                    reasoning: true,
+                    input: crate::models::model_provider_file::WireModelInput::TextImage,
+                    context_window: None,
+                    max_tokens: None,
+                    base_instructions: None,
+                }],
+                clear_api_key: None,
+            },
+        )
+        .await
+        .expect("create provider");
+        conversation_service::update_model_selection(
+            &db.conn,
+            conv.id,
+            Some("provider-a".to_string()),
+            Some("model-a".to_string()),
+        )
+        .await
+        .expect("save selection");
+        agent_setting_service::ensure_defaults(
+            &db.conn,
+            &[agent_setting_service::AgentDefaultInput {
+                agent_type: AgentType::Cline,
+                registry_id: registry::registry_id_for(AgentType::Cline).to_string(),
+                default_sort_order: 0,
+            }],
+        )
+        .await
+        .expect("ensure defaults");
+        agent_setting_service::update(
+            &db.conn,
+            AgentType::Cline,
+            agent_setting_service::AgentSettingsUpdate {
+                enabled: true,
+                env_json: None,
+                model_provider_id: None,
+                model_source: "provider".to_string(),
+            },
+        )
+        .await
+        .expect("switch source");
+
+        // Corrupt the catalog between selection and launch: the launch must
+        // surface a hard error, never silently fall back to a native model.
+        std::fs::write(catalog.path().join("models.json"), "{not json").unwrap();
+        let result = build_session_runtime_env_with_conversation(
+            &db,
+            AgentType::Cline,
+            None,
+            catalog.path(),
+            Some(conv.id),
+        )
+        .await;
+        assert!(result.is_err(), "corrupt catalog must fail launch");
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid models.json"),
+            "error should name the corrupt catalog"
+        );
+    }
+
+    #[tokio::test]
     async fn agent_model_source_persists_and_reports() {
         let db = crate::db::test_helpers::fresh_in_memory_db().await;
         agent_setting_service::ensure_defaults(

@@ -125,10 +125,12 @@ pub async fn probe_model_provider_models(
 }
 
 pub async fn test_model_provider_model(
+    Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<TestModelParams>,
 ) -> Result<Json<TestOutcome>, AppCommandError> {
     Ok(Json(
         mp_file::test_model_provider_model_core(
+            &state.data_dir,
             params.provider_id,
             params.model_id,
             params.api_key,
