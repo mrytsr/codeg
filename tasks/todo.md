@@ -24,11 +24,12 @@
 
 ## Phase 4
 
-- [ ] Add provider launch adapter trait
-- [ ] Implement env-only agents
-- [ ] Implement Codex config projection
-- [ ] Implement Claude/Gemini native parity
-- [ ] Implement remaining agent adapters
+- [x] Add provider launch adapter (`apply_launch_adapter` + workspace writers)
+- [x] Implement env-only agents (Claude Code, Gemini, Grok, DeepSeek, CodeBuddy, Kimi Code completions)
+- [x] Implement Codex config projection (empty CODEX_HOME workspace)
+- [x] Implement Claude/Gemini native parity (env-only projection)
+- [x] Implement remaining agent adapters (Pi, OpenCode, Cline, Hermes, Kimi Code)
+- [x] Fold projected workspace into config fingerprint; clean up on conversation delete
 
 ## Phase 5
 
