@@ -1,6 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+} from "react"
 import { useTranslations } from "next-intl"
 import { isImeCompositionKey } from "@/lib/ime-composition"
 import { Button } from "@/components/ui/button"
@@ -81,6 +89,7 @@ import {
   InlineSessionConfigToggle,
 } from "@/components/chat/session-config-selector"
 import { ModelOptionPicker } from "@/components/chat/model-option-picker"
+import { ModelProviderPickerDemo } from "@/components/chat/model-provider-picker-demo"
 import { SelectorTooltip } from "@/components/chat/selector-tooltip"
 import {
   SessionSelectorsPanel,
@@ -1444,10 +1453,10 @@ export function MessageInput({
         availableConfigOptions.map((option) => {
           // On/off options flip in place — a dropdown for a binary choice is a
           // wasted interaction.
+          let selector: ReactElement
           if (option.kind.type === "boolean") {
-            return (
+            selector = (
               <InlineSessionConfigToggle
-                key={option.id}
                 option={option}
                 onLabel={t("toggleOn")}
                 offLabel={t("toggleOff")}
@@ -1456,17 +1465,23 @@ export function MessageInput({
                 }
               />
             )
-          }
-          // Long model lists get the searchable + virtualized popover (a Radix
-          // menu of hundreds of items is the scroll jank); every other option —
-          // and short model lists — keep the lightweight inline dropdown.
-          const listGroups = modelPickerGroups(option)
-          if (listGroups) {
-            return (
+          } else {
+            // Long model lists get the searchable + virtualized popover (a Radix
+            // menu of hundreds of items is the scroll jank); every other option —
+            // and short model lists — keep the lightweight inline dropdown.
+            const listGroups = modelPickerGroups(option)
+            selector = listGroups ? (
               <ModelOptionPicker
-                key={option.id}
                 option={option}
                 groups={listGroups}
+                onSelect={(configId, valueId) =>
+                  onConfigOptionChange?.(configId, valueId)
+                }
+              />
+            ) : (
+              <InlineSessionConfigSelector
+                option={option}
+                derivedGroups={deriveModelGroups(option)}
                 onSelect={(configId, valueId) =>
                   onConfigOptionChange?.(configId, valueId)
                 }
@@ -1474,14 +1489,11 @@ export function MessageInput({
             )
           }
           return (
-            <InlineSessionConfigSelector
-              key={option.id}
-              option={option}
-              derivedGroups={deriveModelGroups(option)}
-              onSelect={(configId, valueId) =>
-                onConfigOptionChange?.(configId, valueId)
-              }
-            />
+            <Fragment key={option.id}>
+              {selector}
+              {/* DEMO: fake two-level provider → model picker next to the live one. */}
+              {isModelConfigOption(option) && <ModelProviderPickerDemo />}
+            </Fragment>
           )
         })}
       {showModeSelector && (
@@ -1935,6 +1947,13 @@ export function MessageInput({
                         hasInlineSelectors && "@[30rem]:hidden"
                       )}
                     >
+                      {/* DEMO: same fake picker, reachable on narrow/mobile
+                          composers where the inline selectors are collapsed. */}
+                      <ModelProviderPickerDemo
+                        side="top"
+                        align="end"
+                        className="max-w-40"
+                      />
                       <Popover
                         open={collapsedSelectorsOpen}
                         onOpenChange={setCollapsedSelectorsOpen}
