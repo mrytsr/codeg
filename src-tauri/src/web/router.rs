@@ -156,6 +156,10 @@ pub fn build_router(
             post(handlers::conversations::update_conversation_title),
         )
         .route(
+            "/update_conversation_model_selection",
+            post(handlers::conversations::update_conversation_model_selection),
+        )
+        .route(
             "/update_conversation_pinned",
             post(handlers::conversations::update_conversation_pinned),
         )

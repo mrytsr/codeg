@@ -6,9 +6,12 @@ use tauri::Manager;
 use crate::app_error::AppCommandError;
 use crate::db::entities::conversation;
 use crate::db::entities::folder::FolderKind;
-use crate::db::service::{conversation_service, folder_service, import_service, tab_service};
+use crate::db::service::{
+    agent_setting_service, conversation_service, folder_service, import_service, tab_service,
+};
 #[cfg(feature = "tauri-runtime")]
 use crate::db::AppDatabase;
+use crate::models::model_provider_file::ModelProviderApiType;
 use crate::models::*;
 // Concrete parser type only for `load_thread_name_index`, which is codex's own
 // index reader and not part of the `AgentParser` trait. Every history read goes
@@ -2341,6 +2344,107 @@ pub async fn update_conversation_title(
     emit_conversation_upsert(&EventEmitter::Tauri(app), &db.conn, conversation_id).await;
     sync_conversation_title_to_channels_core(&db.conn, &chat_channel_manager, conversation_id)
         .await;
+    Ok(())
+}
+
+pub async fn update_conversation_model_selection_core(
+    conn: &sea_orm::DatabaseConnection,
+    data_dir: &std::path::Path,
+    conversation_id: i32,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> Result<(), AppCommandError> {
+    let conv = conversation_service::find_raw_by_id(conn, conversation_id)
+        .await
+        .map_err(AppCommandError::from)?
+        .ok_or_else(|| {
+            AppCommandError::not_found(format!("Conversation not found: {conversation_id}"))
+        })?;
+    let agent_type =
+        serde_json::from_value::<AgentType>(serde_json::Value::String(conv.agent_type.clone()))
+            .map_err(|e| {
+                AppCommandError::invalid_input("Invalid agent type for conversation")
+                    .with_detail(e.to_string())
+            })?;
+
+    if provider_id.is_some() || model_id.is_some() {
+        let setting = agent_setting_service::get_by_agent_type(conn, agent_type)
+            .await
+            .map_err(AppCommandError::from)?;
+        if setting
+            .as_ref()
+            .map(|setting| setting.model_source.as_str() != "provider")
+            .unwrap_or(true)
+        {
+            return Err(AppCommandError::invalid_input(format!(
+                "{agent_type:?} must use the shared Model Provider source before a conversation selection can be saved"
+            )));
+        }
+    }
+
+    if let (Some(provider_id), Some(model_id)) = (provider_id.clone(), model_id.clone()) {
+        let (provider, model) = crate::commands::model_provider_file::resolve_model_selection_core(
+            data_dir,
+            provider_id.trim(),
+            model_id.trim(),
+        )
+        .await?;
+        let api = provider
+            .api
+            .unwrap_or(ModelProviderApiType::OpenAiCompletions);
+        let capabilities =
+            crate::commands::model_provider_file::model_provider_api_types(&agent_type);
+        if !capabilities.contains(&api) {
+            return Err(AppCommandError::invalid_input(format!(
+                "{agent_type:?} does not support API type {}",
+                api.as_str()
+            )));
+        }
+        if !provider.enabled {
+            return Err(AppCommandError::invalid_input(format!(
+                "Provider {provider_id} is disabled"
+            )));
+        }
+        if model.id != model_id.trim() {
+            return Err(AppCommandError::not_found(format!(
+                "Model {model_id} does not exist in provider {provider_id}"
+            )));
+        }
+    } else if provider_id.is_some() || model_id.is_some() {
+        return Err(AppCommandError::invalid_input(
+            "Provider and model id must be set together",
+        ));
+    }
+
+    conversation_service::update_model_selection(conn, conversation_id, provider_id, model_id)
+        .await
+        .map_err(AppCommandError::from)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn update_conversation_model_selection(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, AppDatabase>,
+    conversation_id: i32,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> Result<(), AppCommandError> {
+    use tauri::Manager;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map(|path| crate::paths::resolve_effective_data_dir(&path))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    update_conversation_model_selection_core(
+        &db.conn,
+        &data_dir,
+        conversation_id,
+        provider_id,
+        model_id,
+    )
+    .await?;
+    emit_conversation_upsert(&EventEmitter::Tauri(app), &db.conn, conversation_id).await;
     Ok(())
 }
 
@@ -4687,6 +4791,185 @@ mod tests {
             .await
             .expect("read back");
         assert_eq!(summary.title.as_deref(), Some("Renamed"));
+    }
+
+    #[tokio::test]
+    async fn update_conversation_model_selection_validates_catalog_and_agent() {
+        use sea_orm::EntityTrait;
+
+        let db = fresh_in_memory_db().await;
+        let catalog = tempfile::tempdir().expect("catalog dir");
+        let folder_id = seed_folder(&db, "/tmp/codeg-provider-selection-test").await;
+        let conv_id = create_conversation_core(&db.conn, folder_id, AgentType::Cline, None)
+            .await
+            .expect("create conversation");
+
+        let provider = crate::models::model_provider_file::ModelProviderDraft {
+            provider_id: "provider-a".into(),
+            original_id: String::new(),
+            api: crate::models::model_provider_file::ModelProviderApiType::OpenAiCompletions,
+            base_url: "https://example.com/v1".into(),
+            proxy: None,
+            api_key: "test-key".into(),
+            auth_header: true,
+            compat_supports_developer_role: None,
+            enabled: true,
+            models: vec![crate::models::model_provider_file::ModelEntryDraft {
+                id: "model-a".into(),
+                reasoning: true,
+                input: crate::models::model_provider_file::WireModelInput::TextImage,
+                context_window: None,
+                max_tokens: None,
+                base_instructions: None,
+            }],
+            clear_api_key: None,
+        };
+        crate::commands::model_provider_file::create_model_provider_core(catalog.path(), provider)
+            .await
+            .expect("create provider");
+
+        let err = update_conversation_model_selection_core(
+            &db.conn,
+            catalog.path(),
+            conv_id,
+            Some("provider-a".into()),
+            Some("model-a".into()),
+        )
+        .await
+        .expect_err("native agent cannot take a shared provider selection");
+        assert!(format!("{err:?}").contains("shared Model Provider source"));
+
+        agent_setting_service::ensure_defaults(
+            &db.conn,
+            &[agent_setting_service::AgentDefaultInput {
+                agent_type: AgentType::Cline,
+                registry_id: "cline".into(),
+                default_sort_order: 0,
+            }],
+        )
+        .await
+        .expect("ensure defaults");
+        agent_setting_service::update(
+            &db.conn,
+            AgentType::Cline,
+            agent_setting_service::AgentSettingsUpdate {
+                enabled: true,
+                env_json: None,
+                model_provider_id: None,
+                model_source: "provider".into(),
+            },
+        )
+        .await
+        .expect("switch agent source");
+
+        let err = update_conversation_model_selection_core(
+            &db.conn,
+            catalog.path(),
+            conv_id,
+            Some("provider-a".into()),
+            None,
+        )
+        .await
+        .expect_err("partial selection is invalid");
+        assert!(format!("{err:?}").contains("set together"));
+
+        update_conversation_model_selection_core(
+            &db.conn,
+            catalog.path(),
+            conv_id,
+            Some("provider-a".into()),
+            Some("model-a".into()),
+        )
+        .await
+        .expect("save selection");
+        let row = conversation::Entity::find_by_id(conv_id)
+            .one(&db.conn)
+            .await
+            .expect("read conversation")
+            .expect("conversation");
+        assert_eq!(row.model_source.as_deref(), Some("provider"));
+        assert_eq!(row.model_provider_id.as_deref(), Some("provider-a"));
+        assert_eq!(row.model_provider_model_id.as_deref(), Some("model-a"));
+        assert_eq!(row.model.as_deref(), Some("model-a"));
+
+        update_conversation_model_selection_core(&db.conn, catalog.path(), conv_id, None, None)
+            .await
+            .expect("clear selection");
+        let row = conversation::Entity::find_by_id(conv_id)
+            .one(&db.conn)
+            .await
+            .expect("read conversation")
+            .expect("conversation");
+        assert_eq!(row.model_source, None);
+        assert_eq!(row.model_provider_id, None);
+        assert_eq!(row.model_provider_model_id, None);
+    }
+
+    #[tokio::test]
+    async fn update_conversation_model_selection_rejects_disabled_provider() {
+        let db = fresh_in_memory_db().await;
+        let catalog = tempfile::tempdir().expect("catalog dir");
+        let folder_id = seed_folder(&db, "/tmp/codeg-disabled-provider-test").await;
+        let conv_id = create_conversation_core(&db.conn, folder_id, AgentType::Cline, None)
+            .await
+            .expect("create conversation");
+
+        let provider = crate::models::model_provider_file::ModelProviderDraft {
+            provider_id: "disabled-provider".into(),
+            original_id: String::new(),
+            api: crate::models::model_provider_file::ModelProviderApiType::OpenAiCompletions,
+            base_url: "https://example.com/v1".into(),
+            proxy: None,
+            api_key: "test-key".into(),
+            auth_header: true,
+            compat_supports_developer_role: None,
+            enabled: false,
+            models: vec![crate::models::model_provider_file::ModelEntryDraft {
+                id: "model-a".into(),
+                reasoning: true,
+                input: crate::models::model_provider_file::WireModelInput::TextImage,
+                context_window: None,
+                max_tokens: None,
+                base_instructions: None,
+            }],
+            clear_api_key: None,
+        };
+        crate::commands::model_provider_file::create_model_provider_core(catalog.path(), provider)
+            .await
+            .expect("create provider");
+        agent_setting_service::ensure_defaults(
+            &db.conn,
+            &[agent_setting_service::AgentDefaultInput {
+                agent_type: AgentType::Cline,
+                registry_id: "cline".into(),
+                default_sort_order: 0,
+            }],
+        )
+        .await
+        .expect("ensure defaults");
+        agent_setting_service::update(
+            &db.conn,
+            AgentType::Cline,
+            agent_setting_service::AgentSettingsUpdate {
+                enabled: true,
+                env_json: None,
+                model_provider_id: None,
+                model_source: "provider".into(),
+            },
+        )
+        .await
+        .expect("switch agent source");
+
+        let err = update_conversation_model_selection_core(
+            &db.conn,
+            catalog.path(),
+            conv_id,
+            Some("disabled-provider".into()),
+            Some("model-a".into()),
+        )
+        .await
+        .expect_err("disabled provider cannot be selected");
+        assert!(format!("{err:?}").contains("disabled"));
     }
 
     #[tokio::test]
