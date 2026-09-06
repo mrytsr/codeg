@@ -33,8 +33,8 @@
 
 ## Phase 5
 
-- [ ] Implement four API model probes
-- [ ] Implement per-model tests
-- [ ] Implement proxy support
-- [ ] Implement built-in clone templates
-- [ ] Add models.json corruption, locking, and launch integration tests
+- [x] Implement four API model probes (openai-completions / responses, anthropic, google; local mock-tested)
+- [x] Implement per-model tests (minimal chat request returning the model reply)
+- [x] Implement proxy support (provider proxy projected into session env)
+- [x] Implement built-in clone templates (built in Phase 1; behavior tests added here)
+- [x] Add models.json corruption, locking, and launch integration tests

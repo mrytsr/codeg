@@ -26,6 +26,7 @@ pub mod mcp_service;
 pub mod model_provider;
 pub mod model_provider_file;
 pub mod model_provider_launch;
+pub mod model_provider_probe;
 #[cfg(feature = "tauri-runtime")]
 pub mod notification;
 pub mod office_tools;

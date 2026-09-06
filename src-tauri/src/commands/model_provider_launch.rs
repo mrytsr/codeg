@@ -98,7 +98,32 @@ pub(crate) fn apply_launch_adapter(
             )));
         }
     }
+    apply_proxy_env(selection, runtime_env);
     Ok(())
+}
+
+/// Project a provider-level proxy into the session launch env. Every agent
+/// family reads the standard `HTTP(S)_PROXY` / `ALL_PROXY` variables (both
+/// casings — curl and Node differ), so a provider that declares one gets it
+/// applied to the agent process; a provider without a proxy leaves the user's
+/// global proxy environment untouched.
+fn apply_proxy_env(
+    selection: &ResolvedConversationModelSelection,
+    runtime_env: &mut BTreeMap<String, String>,
+) {
+    let Some(proxy) = non_empty(selection.provider.proxy.as_deref()) else {
+        return;
+    };
+    for var in [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ] {
+        runtime_env.insert(var.to_string(), proxy.to_string());
+    }
 }
 
 /// The per-conversation workspace path for an agent.
@@ -1100,6 +1125,51 @@ mod tests {
             blob,
             workspace_fingerprint_blob(AgentType::Codex, &env3).unwrap()
         );
+    }
+
+    #[test]
+    fn provider_proxy_is_projected_into_launch_env() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut s = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::OpenAiCompletions,
+        );
+        s.provider.proxy = Some("http://127.0.0.1:8080".to_string());
+        let mut env = BTreeMap::new();
+        apply_launch_adapter(AgentType::ClaudeCode, &s, &mut env, tmp.path(), 1).expect("adapter");
+        for var in [
+            "HTTPS_PROXY",
+            "https_proxy",
+            "HTTP_PROXY",
+            "http_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+        ] {
+            assert_eq!(
+                env.get(var).map(String::as_str),
+                Some("http://127.0.0.1:8080"),
+                "{var}"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_without_proxy_leaves_global_proxy_alone() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let s = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::OpenAiCompletions,
+        );
+        let mut env = BTreeMap::new();
+        env.insert("HTTPS_PROXY".to_string(), "http://global:3128".to_string());
+        apply_launch_adapter(AgentType::ClaudeCode, &s, &mut env, tmp.path(), 1).expect("adapter");
+        assert_eq!(
+            env.get("HTTPS_PROXY").map(String::as_str),
+            Some("http://global:3128")
+        );
+        assert!(!env.contains_key("HTTP_PROXY"));
     }
 
     #[test]
