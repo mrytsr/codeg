@@ -495,6 +495,10 @@ export interface DbConversationSummary {
   /** Mirrors `conversation.kind` — drives sidebar visibility and grouping. */
   kind: ConversationKind
   model: string | null
+  /** Shared Model Provider selection; null preserves legacy native runtime. */
+  model_source?: "native" | "provider" | null
+  model_provider_id?: string | null
+  model_provider_model_id?: string | null
   git_branch: string | null
   external_id: string | null
   message_count: number

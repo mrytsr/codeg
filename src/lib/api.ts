@@ -3257,6 +3257,20 @@ export async function updateConversationPinned(
   })
 }
 
+/** Save or clear the shared Model Provider model selected for one conversation.
+ *  Passing both ids saves it; passing both as null restores native selection. */
+export async function updateConversationModelSelection(
+  conversationId: number,
+  providerId: string | null,
+  modelId: string | null
+): Promise<void> {
+  return getTransport().call("update_conversation_model_selection", {
+    conversationId,
+    providerId,
+    modelId,
+  })
+}
+
 export async function deleteConversation(
   conversationId: number
 ): Promise<void> {
