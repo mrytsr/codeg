@@ -40,6 +40,15 @@ pub enum ModelInputKind {
     Image,
 }
 
+impl ModelInputKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Image => "image",
+        }
+    }
+}
+
 /// One model as it is persisted in `models.json`. `input` is intentionally an
 /// array to stay compatible with files created by pios.
 #[derive(Debug, Clone, Serialize, Deserialize)]

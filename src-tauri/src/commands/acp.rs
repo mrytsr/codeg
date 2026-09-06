@@ -24,6 +24,7 @@ use crate::acp::types::{
 #[cfg(feature = "tauri-runtime")]
 use crate::acp::types::{ConnectionInfo, ForkResultInfo, PromptInputBlock};
 use crate::db::service::agent_setting_service;
+use crate::db::service::conversation_service;
 use crate::db::service::model_provider_service;
 use crate::db::AppDatabase;
 use crate::models::agent::{AgentModelSource, AgentType};
@@ -9998,11 +9999,161 @@ pub async fn acp_preflight(
 /// Diverging any of these from the others reintroduces the
 /// "[UI shows options] != [delegation gets options]" inconsistency that
 /// the multi-agent settings panel was designed to prevent.
+/// A concrete shared-provider selection resolved for launch. This carries the
+/// raw provider/model file entries so Phase-4 adapters can project either env
+/// variables or session-scoped config files without reading `models.json`
+/// again. It is intentionally backend-only and never serialized.
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedConversationModelSelection {
+    pub provider_id: String,
+    pub model_id: String,
+    pub provider: crate::models::model_provider_file::ProviderFile,
+    pub model: crate::models::model_provider_file::ModelEntryFile,
+}
+
+/// Resolve the shared-provider selection attached to a conversation.
+///
+/// Returns `None` for legacy native conversations. A `"provider"` row must
+/// carry both immutable catalog ids; the provider/model membership, enabled
+/// state, and the agent's API-family capability are re-checked here so an
+/// external `models.json` edit between selection and launch fails clearly.
+pub(crate) async fn resolve_conversation_model_selection_core(
+    db: &AppDatabase,
+    data_dir: &Path,
+    conversation_id: i32,
+) -> Result<Option<ResolvedConversationModelSelection>, AcpError> {
+    let conv = conversation_service::find_raw_by_id(&db.conn, conversation_id)
+        .await
+        .map_err(|e| AcpError::protocol(e.to_string()))?
+        .ok_or_else(|| {
+            AcpError::protocol(format!("Conversation {conversation_id} does not exist"))
+        })?;
+
+    if conv.model_source.as_deref() != Some("provider") {
+        return Ok(None);
+    }
+
+    let provider_id = conv.model_provider_id.clone().ok_or_else(|| {
+        AcpError::protocol(format!(
+            "Conversation {conversation_id} is missing model provider id"
+        ))
+    })?;
+    let model_id = conv.model_provider_model_id.clone().ok_or_else(|| {
+        AcpError::protocol(format!(
+            "Conversation {conversation_id} is missing provider model id"
+        ))
+    })?;
+
+    let agent_type: AgentType =
+        serde_json::from_value(serde_json::Value::String(conv.agent_type.clone()))
+            .map_err(|e| AcpError::protocol(format!("Invalid conversation agent type: {e}")))?;
+
+    let setting = agent_setting_service::get_by_agent_type(&db.conn, agent_type)
+        .await
+        .map_err(|e| AcpError::protocol(e.to_string()))?;
+    if setting
+        .as_ref()
+        .map(|setting| setting.model_source.as_str() != "provider")
+        .unwrap_or(true)
+    {
+        return Ok(None);
+    }
+
+    let api_types = crate::commands::model_provider_file::model_provider_api_types(&agent_type);
+    if api_types.is_empty() {
+        return Err(AcpError::protocol(format!(
+            "{agent_type:?} does not support the shared Model Provider source"
+        )));
+    }
+
+    let (provider, model) = crate::commands::model_provider_file::resolve_model_selection_core(
+        data_dir,
+        &provider_id,
+        &model_id,
+    )
+    .await
+    .map_err(|e| AcpError::protocol(e.to_string()))?;
+    let api = provider
+        .api
+        .unwrap_or(crate::models::model_provider_file::ModelProviderApiType::OpenAiCompletions);
+    if !api_types.contains(&api) {
+        return Err(AcpError::protocol(format!(
+            "{agent_type:?} does not support API type {} required by provider {provider_id}",
+            api.as_str()
+        )));
+    }
+
+    Ok(Some(ResolvedConversationModelSelection {
+        provider_id,
+        model_id,
+        provider,
+        model,
+    }))
+}
+
+/// Overlay the resolved selection into the launch environment. This is the
+/// adapter-neutral minimum; agent-specific variable names/config projection
+/// land in the launch-adapter phase and should consume the same resolver.
+fn apply_conversation_model_selection_env(
+    runtime_env: &mut BTreeMap<String, String>,
+    selection: &ResolvedConversationModelSelection,
+) {
+    let api = selection
+        .provider
+        .api
+        .unwrap_or(crate::models::model_provider_file::ModelProviderApiType::OpenAiCompletions);
+    runtime_env.insert("CODEG_MODEL_SOURCE".into(), "provider".into());
+    runtime_env.insert("CODEG_MODEL_API".into(), api.as_str().into());
+    runtime_env.insert(
+        "CODEG_MODEL_PROVIDER_ID".into(),
+        selection.provider_id.clone(),
+    );
+    runtime_env.insert("CODEG_MODEL_ID".into(), selection.model_id.clone());
+    if let Some(base_url) = selection.provider.base_url.as_ref() {
+        runtime_env.insert("CODEG_MODEL_BASE_URL".into(), base_url.clone());
+    }
+    if let Some(api_key) = selection.provider.api_key.as_ref() {
+        if !api_key.trim().is_empty() {
+            runtime_env.insert("CODEG_MODEL_API_KEY".into(), api_key.clone());
+        }
+    }
+    if let Some(proxy) = selection.provider.proxy.as_ref() {
+        runtime_env.insert("CODEG_MODEL_PROXY".into(), proxy.clone());
+    }
+    runtime_env.insert(
+        "CODEG_MODEL_REASONING".into(),
+        selection.model.reasoning.to_string(),
+    );
+    runtime_env.insert(
+        "CODEG_MODEL_INPUT".into(),
+        selection
+            .model
+            .input
+            .iter()
+            .map(|kind| kind.as_str().to_string())
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+}
+
 pub(crate) async fn build_session_runtime_env(
     db: &AppDatabase,
     agent_type: AgentType,
     session_id: Option<&str>,
     data_dir: &Path,
+) -> Result<BTreeMap<String, String>, AcpError> {
+    build_session_runtime_env_with_conversation(db, agent_type, session_id, data_dir, None).await
+}
+
+/// [`build_session_runtime_env`] with an optional conversation selection.
+/// Launch paths that already know the conversation pass its id so the shared
+/// provider selection is validated and projected into the launch environment.
+pub(crate) async fn build_session_runtime_env_with_conversation(
+    db: &AppDatabase,
+    agent_type: AgentType,
+    session_id: Option<&str>,
+    data_dir: &Path,
+    conversation_id: Option<i32>,
 ) -> Result<BTreeMap<String, String>, AcpError> {
     let setting = agent_setting_service::get_by_agent_type(&db.conn, agent_type)
         .await
@@ -10037,6 +10188,14 @@ pub(crate) async fn build_session_runtime_env(
 
     if agent_type == AgentType::OpenClaw && session_id.is_none() {
         runtime_env.insert("OPENCLAW_RESET_SESSION".into(), "1".into());
+    }
+
+    if let Some(conversation_id) = conversation_id {
+        if let Some(selection) =
+            resolve_conversation_model_selection_core(db, data_dir, conversation_id).await?
+        {
+            apply_conversation_model_selection_env(&mut runtime_env, &selection);
+        }
     }
 
     Ok(runtime_env)
@@ -16073,6 +16232,115 @@ wire_api = "chat"
             Some(&serde_json::json!(["Shell(npm run build)"]))
         );
         assert_eq!(v.pointer("/permissions/deny"), Some(&serde_json::json!([])));
+    }
+
+    #[tokio::test]
+    async fn conversation_model_selection_resolves_into_launch_env() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let catalog = tempfile::tempdir().expect("catalog dir");
+        let folder =
+            crate::db::test_helpers::seed_folder(&db, "/tmp/codeg-conversation-model-launch").await;
+        let conv = conversation_service::create(
+            &db.conn,
+            folder,
+            AgentType::Cline,
+            Some("provider selection".to_string()),
+            None,
+        )
+        .await
+        .expect("create conversation");
+
+        crate::commands::model_provider_file::create_model_provider_core(
+            catalog.path(),
+            crate::models::model_provider_file::ModelProviderDraft {
+                provider_id: "provider-a".to_string(),
+                original_id: String::new(),
+                api: crate::models::model_provider_file::ModelProviderApiType::OpenAiCompletions,
+                base_url: "https://example.com/v1".to_string(),
+                proxy: None,
+                api_key: "test-key".to_string(),
+                auth_header: true,
+                compat_supports_developer_role: None,
+                enabled: true,
+                models: vec![crate::models::model_provider_file::ModelEntryDraft {
+                    id: "model-a".to_string(),
+                    reasoning: true,
+                    input: crate::models::model_provider_file::WireModelInput::TextImage,
+                    context_window: None,
+                    max_tokens: None,
+                    base_instructions: None,
+                }],
+                clear_api_key: None,
+            },
+        )
+        .await
+        .expect("create provider");
+
+        conversation_service::update_model_selection(
+            &db.conn,
+            conv.id,
+            Some("provider-a".to_string()),
+            Some("model-a".to_string()),
+        )
+        .await
+        .expect("save selection");
+
+        agent_setting_service::ensure_defaults(
+            &db.conn,
+            &[agent_setting_service::AgentDefaultInput {
+                agent_type: AgentType::Cline,
+                registry_id: registry::registry_id_for(AgentType::Cline).to_string(),
+                default_sort_order: 0,
+            }],
+        )
+        .await
+        .expect("ensure defaults");
+        agent_setting_service::update(
+            &db.conn,
+            AgentType::Cline,
+            agent_setting_service::AgentSettingsUpdate {
+                enabled: true,
+                env_json: None,
+                model_provider_id: None,
+                model_source: "provider".to_string(),
+            },
+        )
+        .await
+        .expect("switch source");
+
+        let env = build_session_runtime_env_with_conversation(
+            &db,
+            AgentType::Cline,
+            None,
+            catalog.path(),
+            Some(conv.id),
+        )
+        .await
+        .expect("build launch env");
+        assert_eq!(
+            env.get("CODEG_MODEL_SOURCE").map(String::as_str),
+            Some("provider")
+        );
+        assert_eq!(
+            env.get("CODEG_MODEL_PROVIDER_ID").map(String::as_str),
+            Some("provider-a")
+        );
+        assert_eq!(
+            env.get("CODEG_MODEL_ID").map(String::as_str),
+            Some("model-a")
+        );
+        assert_eq!(
+            env.get("CODEG_MODEL_BASE_URL").map(String::as_str),
+            Some("https://example.com/v1")
+        );
+        assert_eq!(
+            env.get("CODEG_MODEL_API_KEY").map(String::as_str),
+            Some("test-key")
+        );
+        assert_eq!(
+            env.get("CODEG_MODEL_INPUT").map(String::as_str),
+            Some("text,image")
+        );
     }
 
     #[tokio::test]
