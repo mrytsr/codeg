@@ -1554,7 +1554,8 @@
     "customAgentRemoveWithData": "Also delete its recorded conversation history",
     "customAgentRemoved": "Removed {name}",
     "customAgentBadge": "Custom",
-    "customAgentNotLaunchable": "This agent cannot launch here: {reason}"
+    "customAgentNotLaunchable": "This agent cannot launch here: {reason}",
+    "providerSourceActiveHint": "This agent uses the shared Model Provider catalog. Native model settings are hidden."
   },
   "SettingsPages": {
     "agentsLoading": "Loading agent settings...",
@@ -5706,16 +5707,14 @@
     "canvasActions": "Canvas actions",
     "mergeIntoNewRegion": "New region"
   },
-  "ModelProviderPickerDemo": {
-    "demoTag": "DEMO",
+  "ModelProviderPicker": {
     "placeholder": "Provider · Model",
-    "providers": "Providers",
-    "models": "Models",
-    "disabled": "disabled",
     "noProviders": "No providers",
     "noModels": "No models",
     "vision": "vision",
     "reasoning": "reasoning",
-    "openPicker": "Demo provider picker"
+    "openPicker": "Model provider",
+    "resetNative": "Back to native config",
+    "saveFailed": "Failed to save model selection"
   }
 }

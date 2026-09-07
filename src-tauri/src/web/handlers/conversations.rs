@@ -369,8 +369,9 @@ pub async fn update_conversation_model_selection(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<UpdateConversationModelSelectionParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    conv_commands::update_conversation_model_selection_core(
+    conv_commands::update_conversation_model_selection_and_refresh(
         &state.db.conn,
+        &state.connection_manager,
         &state.data_dir,
         params.conversation_id,
         params.provider_id,

@@ -5563,6 +5563,10 @@ export function AcpAgentSettings() {
   const selectedAgentSupportsSourceCard = selectedAgentKind
     ? MODEL_PROVIDER_SOURCE_CARD_AGENT_TYPES.includes(selectedAgentKind)
     : false
+  // Claude's provider mode is rendered in the legacy-agent branch below so the
+  // native config panel can be reused when the user switches back to native.
+  const selectedAgentUsesSourceCardPanel =
+    selectedAgentSupportsSourceCard && selectedAgentKind !== "claude_code"
   const selectedUsesModelProviderSource =
     selectedAgentSupportsSourceCard &&
     Boolean(selectedAgentKind && modelProviderSources[selectedAgentKind])
@@ -7948,7 +7952,7 @@ export function AcpAgentSettings() {
                   </div>
                 </div>
 
-                {selectedAgentSupportsSourceCard ? (
+                {selectedAgentUsesSourceCardPanel ? (
                   <>
                     <ModelProviderSourceCard
                       apiTypes={selectedModelProviderApiTypes}
@@ -7997,6 +8001,11 @@ export function AcpAgentSettings() {
                           })
                       }}
                     />
+                    {selectedUsesModelProviderSource && (
+                      <div className="rounded-md border bg-muted/20 p-3 text-2xs text-muted-foreground">
+                        {t("providerSourceActiveHint")}
+                      </div>
+                    )}
                     {!selectedUsesModelProviderSource &&
                       (selectedAgent.agent_type === "codex" ? (
                         <div className="space-y-3 rounded-md border bg-muted/10 p-3">
@@ -11880,674 +11889,58 @@ supports_websockets = true`}
                         </div>
                       ))}
                   </>
-                ) : selectedAgent.agent_type === "codex" ? (
-                  <div className="space-y-3 rounded-md border bg-muted/10 p-3">
-                    <div>
-                      <label className="text-xs font-medium">
-                        {t("configManagement")}
-                      </label>
-                      <p className="mt-1 text-2xs text-muted-foreground">
-                        {t("codex.configDescription")}
-                      </p>
-                    </div>
-
-                    {selectedModelProviderApiTypes.length > 0 && (
-                      <ModelProviderApiTypeBadges
-                        apiTypes={selectedModelProviderApiTypes}
-                      />
-                    )}
-                    <div className="space-y-1.5">
-                      <label className="text-2xs text-muted-foreground">
-                        {t("codex.authMode")}
-                      </label>
-                      <Select
-                        value={selectedDraft.codexAuthMode}
-                        onValueChange={(value) => {
-                          if (
-                            CODEX_AUTH_MODES.includes(value as CodexAuthMode)
-                          ) {
-                            handleCodexAuthModeChange(value as CodexAuthMode)
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent align="start">
-                          {CODEX_AUTH_MODES.map((mode) => (
-                            <SelectItem
-                              key={mode}
-                              value={mode}
-                              disabled={
-                                mode === "model_provider" &&
-                                selectedCompatibleModelProviderCount === 0
-                              }
-                            >
-                              {mode === "chatgpt_subscription"
-                                ? t("authModeOfficialSubscription")
-                                : mode === "model_provider"
-                                  ? t("authModeModelProviderCount", {
-                                      count:
-                                        selectedCompatibleModelProviderCount,
-                                    })
-                                  : t("authModeCustomEndpoint")}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-2xs text-muted-foreground">
-                        {selectedDraft.codexAuthMode === "chatgpt_subscription"
-                          ? t("codex.chatgptSubscriptionHint")
-                          : selectedDraft.codexAuthMode === "model_provider"
-                            ? t("modelProviderHint")
-                            : t("authModeCustomEndpointHint")}
-                      </p>
-                    </div>
-
-                    {selectedDraft.codexAuthMode === "chatgpt_subscription" && (
-                      <div className="space-y-2">
-                        {hasCodexChatgptTokens(
-                          selectedDraft.codexAuthJsonText
-                        ) &&
-                          codexLoginStatus !== "polling" &&
-                          codexLoginStatus !== "requesting" && (
-                            <div className="flex items-center gap-1.5 text-xs text-green-600">
-                              <CheckCircle2 className="h-3 w-3" />
-                              {t("codex.loggedIn")}
-                            </div>
-                          )}
-                        {codexLoginStatus === "idle" && (
-                          <Button
-                            onClick={handleCodexDeviceLogin}
-                            size="sm"
-                            variant="outline"
-                          >
-                            {hasCodexChatgptTokens(
-                              selectedDraft.codexAuthJsonText
-                            )
-                              ? t("codex.loginRelogin")
-                              : t("codex.loginButton")}
-                          </Button>
-                        )}
-                        {codexLoginStatus === "requesting" && (
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            {t("codex.loginRequesting")}
-                          </div>
-                        )}
-                        {codexLoginStatus === "polling" && codexDeviceCode && (
-                          <div className="space-y-2 rounded-md border p-3">
-                            <p className="text-xs">{t("codex.loginStep1")}</p>
-                            <button
-                              type="button"
-                              className="text-xs text-primary underline cursor-pointer"
-                              onClick={() =>
-                                openUrl(codexDeviceCode.verificationUrl)
-                              }
-                            >
-                              {codexDeviceCode.verificationUrl}
-                            </button>
-                            <p className="text-xs mt-1">
-                              {t("codex.loginStep2")}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <code className="rounded bg-muted px-2 py-1 text-sm font-mono font-bold tracking-widest">
-                                {codexDeviceCode.userCode}
-                              </code>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 w-7 p-0"
-                                onClick={async () => {
-                                  const ok = await copyTextToClipboard(
-                                    codexDeviceCode.userCode
-                                  )
-                                  if (ok) {
-                                    toast.success(t("codex.loginCodeCopied"))
-                                  }
-                                }}
-                              >
-                                <Copy className="h-3 w-3" />
-                              </Button>
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              {t("codex.loginPolling")}
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={cancelCodexDeviceLogin}
-                            >
-                              {t("codex.loginCancel")}
-                            </Button>
-                          </div>
-                        )}
-                        {codexLoginStatus === "success" && (
-                          <div className="flex items-center gap-1.5 text-xs text-green-600">
-                            <CheckCircle2 className="h-3 w-3" />
-                            {t("codex.loginSuccess")}
-                          </div>
-                        )}
-                        {codexLoginStatus === "error" && (
-                          <div className="space-y-1.5">
-                            <p className="text-xs text-destructive">
-                              {t("codex.loginFailed", {
-                                message: codexLoginError ?? "Unknown error",
-                              })}
-                            </p>
-                            <Button
-                              onClick={handleCodexDeviceLogin}
-                              size="sm"
-                              variant="outline"
-                            >
-                              {t("codex.loginRetry")}
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {(selectedDraft.codexAuthMode === "api_key" ||
-                      selectedDraft.codexAuthMode === "model_provider") && (
-                      <div className="space-y-1.5">
-                        <label className="text-2xs text-muted-foreground">
-                          API URL
-                        </label>
-                        <Input
-                          value={selectedDraft.apiBaseUrl}
-                          readOnly={
-                            selectedDraft.codexAuthMode === "model_provider"
-                          }
-                          onChange={(event) => {
-                            handleCodexImportantConfigChange(
-                              "apiBaseUrl",
-                              event.target.value
-                            )
-                          }}
-                          placeholder="https://api.openai.com/v1"
-                        />
-                      </div>
-                    )}
-
-                    {(selectedDraft.codexAuthMode === "api_key" ||
-                      selectedDraft.codexAuthMode === "model_provider") && (
-                      <div className="space-y-1.5">
-                        <label className="text-2xs text-muted-foreground">
-                          API Key
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type={
-                              showApiKeys[selectedAgent.agent_type]
-                                ? "text"
-                                : "password"
-                            }
-                            value={selectedDraft.apiKey}
-                            readOnly={
-                              selectedDraft.codexAuthMode === "model_provider"
-                            }
-                            onChange={(event) => {
-                              handleCodexImportantConfigChange(
-                                "apiKey",
-                                event.target.value
+                ) : selectedAgent.agent_type === "claude_code" &&
+                  selectedUsesModelProviderSource ? (
+                  <div className="space-y-3">
+                    <ModelProviderSourceCard
+                      apiTypes={selectedModelProviderApiTypes}
+                      count={selectedCompatibleModelProviderCount}
+                      selected={selectedUsesModelProviderSource}
+                      onSelect={(selected) => {
+                        if (!selectedAgentKind) return
+                        const agentType = selectedAgentKind
+                        const previous =
+                          modelProviderSources[agentType] ?? false
+                        setModelProviderSources((prev) => ({
+                          ...prev,
+                          [agentType]: selected,
+                        }))
+                        acpUpdateAgentModelSource(
+                          agentType,
+                          selected ? "provider" : "native"
+                        )
+                          .then((affected) => {
+                            reportAffectedSessions(affected)
+                            setAgents((prev) =>
+                              prev.map((agent) =>
+                                agent.agent_type === agentType
+                                  ? {
+                                      ...agent,
+                                      model_source: selected
+                                        ? "provider"
+                                        : "native",
+                                    }
+                                  : agent
                               )
-                            }}
-                            placeholder="sk-..."
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setShowApiKeys((prev) => ({
-                                ...prev,
-                                [selectedAgent.agent_type]:
-                                  !prev[selectedAgent.agent_type],
-                              }))
-                            }}
-                            title={
-                              showApiKeys[selectedAgent.agent_type]
-                                ? t("actions.hideApiKey")
-                                : t("actions.showApiKey")
-                            }
-                          >
-                            {showApiKeys[selectedAgent.agent_type] ? (
-                              <EyeOff className="h-3.5 w-3.5" />
-                            ) : (
-                              <Eye className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-
-                    {(selectedDraft.codexAuthMode === "api_key" ||
-                      selectedDraft.codexAuthMode === "model_provider") && (
-                      <div className="space-y-1.5">
-                        <CodexModelListEditor
-                          value={selectedDraft.codexModelList}
-                          onChange={handleCodexModelListChange}
-                          readOnly={
-                            selectedDraft.codexAuthMode === "model_provider"
-                          }
-                        />
-                      </div>
-                    )}
-
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between rounded-md border px-3 py-2">
-                        <label className="text-2xs text-muted-foreground">
-                          {t("codex.enableWebsocket")}
-                        </label>
-                        <Switch
-                          checked={selectedDraft.codexSupportsWebsockets}
-                          onCheckedChange={handleCodexSupportsWebsocketsChange}
-                          aria-label={t("codex.enableWebsocketAria")}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between rounded-md border px-3 py-2">
-                        <label className="text-2xs text-muted-foreground">
-                          {t("codex.enableSkills")}
-                        </label>
-                        <Switch
-                          checked={selectedDraft.codexSkills}
-                          onCheckedChange={handleCodexSkillsChange}
-                          aria-label={t("codex.enableSkillsAria")}
-                        />
-                      </div>
-                    </div>
-
-                    {/* `[features].default_mode_request_user_input` — without
-                        it codex refuses its own `request_user_input` tool
-                        outside Plan mode, so codeg's question cards never
-                        appear in an ordinary turn (openai/codex#24750). */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between rounded-md border px-3 py-2">
-                        <label className="text-2xs text-muted-foreground">
-                          {t("codex.enableDefaultModeRequestUserInput")}
-                        </label>
-                        <Switch
-                          checked={
-                            selectedDraft.codexDefaultModeRequestUserInput
-                          }
-                          onCheckedChange={
-                            handleCodexDefaultModeRequestUserInputChange
-                          }
-                          aria-label={t(
-                            "codex.enableDefaultModeRequestUserInputAria"
-                          )}
-                        />
-                      </div>
-                      <p className="text-3xs text-muted-foreground">
-                        {t("codex.enableDefaultModeRequestUserInputHint")}
-                      </p>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between rounded-md border px-3 py-2">
-                        <label className="text-2xs text-muted-foreground">
-                          {t("codex.enableFast")}
-                        </label>
-                        <Switch
-                          checked={selectedDraft.codexServiceTierFast}
-                          onCheckedChange={handleCodexServiceTierFastChange}
-                          aria-label={t("codex.enableFastAria")}
-                        />
-                      </div>
-                    </div>
-
-                    {/* ---- Sandbox & approvals (config.toml thread defaults) ----
-                        These govern the turns codex starts by itself: /goal,
-                        /review, /compact. Ordinary prompts carry the composer
-                        preset's own policy per turn and ignore these keys. */}
-                    <div className="space-y-2 rounded-md border px-3 py-2.5">
-                      <div className="space-y-1">
-                        <p className="text-2xs font-medium">
-                          {t("codex.sandboxGroupTitle")}
-                        </p>
-                        <p className="text-3xs text-muted-foreground">
-                          {t("codex.sandboxGroupHint")}
-                        </p>
-                      </div>
-
-                      {selectedDraft.codexSandboxShadowed ? (
-                        <p className="text-3xs text-yellow-500">
-                          {t("codex.sandboxShadowedWarning")}
-                        </p>
-                      ) : null}
-                      {selectedDraft.codexSandboxHasPermissionsTable &&
-                      !selectedDraft.codexSandboxShadowed ? (
-                        <p className="text-3xs text-yellow-500">
-                          {t("codex.sandboxPermissionsTableWarning")}
-                        </p>
-                      ) : null}
-
-                      <div className="space-y-1.5">
-                        <label className="text-2xs text-muted-foreground">
-                          {t("codex.approvalPolicyLabel")}
-                        </label>
-                        <Select
-                          value={
-                            selectedDraft.codexApprovalPolicy ||
-                            CODEX_SANDBOX_UNSET_OPTION
-                          }
-                          onValueChange={(value) => {
-                            updateSelectedDraft((current) => ({
-                              ...current,
-                              codexApprovalPolicy:
-                                value === CODEX_SANDBOX_UNSET_OPTION
-                                  ? CODEX_SANDBOX_UNSET
-                                  : (value as CodexApprovalPolicyChoice),
+                            )
+                          })
+                          .catch((err) => {
+                            console.error(
+                              "[Settings] save model source failed:",
+                              err
+                            )
+                            setModelProviderSources((prev) => ({
+                              ...prev,
+                              [agentType]: previous,
                             }))
-                          }}
-                        >
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent align="start">
-                            <SelectItem value={CODEX_SANDBOX_UNSET_OPTION}>
-                              {t("codex.approvalPolicyUnset")}
-                            </SelectItem>
-                            {CODEX_APPROVAL_POLICY_VALUES.map((value) => (
-                              <SelectItem key={value} value={value}>
-                                {t(`codex.approvalPolicy_${value}`)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {/* `untrusted` has no equivalent in codex-acp's three
-                            approval presets, so an ACP session cannot honor it
-                            (#442). Say so where the user picks it, rather than
-                            letting it look effective. */}
-                        {selectedDraft.codexApprovalPolicy === "untrusted" ? (
-                          <p className="text-3xs text-yellow-500">
-                            {t("codex.approvalPolicyUntrustedAcpWarning")}
-                          </p>
-                        ) : null}
-                      </div>
-
-                      {selectedDraft.codexApprovalPolicy === "granular" ? (
-                        <div className="space-y-1 rounded-md border border-dashed px-2.5 py-2">
-                          <p className="text-3xs text-muted-foreground">
-                            {t("codex.granularHint")}
-                          </p>
-                          {CODEX_GRANULAR_KEYS.map((key) => (
-                            <div
-                              className="flex items-center justify-between gap-2 py-0.5"
-                              key={key}
-                            >
-                              <label className="text-2xs text-muted-foreground">
-                                {t(`codex.granular_${key}`)}
-                              </label>
-                              <Switch
-                                checked={selectedDraft.codexGranular[key]}
-                                onCheckedChange={(checked) => {
-                                  updateSelectedDraft((current) => ({
-                                    ...current,
-                                    codexGranular: {
-                                      ...current.codexGranular,
-                                      [key]: checked,
-                                    },
-                                  }))
-                                }}
-                                aria-label={t(`codex.granular_${key}`)}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      <div className="space-y-1.5">
-                        <label className="text-2xs text-muted-foreground">
-                          {t("codex.sandboxModeLabel")}
-                        </label>
-                        <Select
-                          disabled={selectedDraft.codexSandboxShadowed}
-                          value={
-                            selectedDraft.codexSandboxMode ||
-                            CODEX_SANDBOX_UNSET_OPTION
-                          }
-                          onValueChange={(value) => {
-                            updateSelectedDraft((current) => ({
-                              ...current,
-                              codexSandboxMode:
-                                value === CODEX_SANDBOX_UNSET_OPTION
-                                  ? CODEX_SANDBOX_UNSET
-                                  : (value as CodexSandboxModeChoice),
-                            }))
-                          }}
-                        >
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent align="start">
-                            <SelectItem value={CODEX_SANDBOX_UNSET_OPTION}>
-                              {t("codex.sandboxModeUnset")}
-                            </SelectItem>
-                            {CODEX_SANDBOX_MODE_VALUES.map((value) => (
-                              <SelectItem key={value} value={value}>
-                                {t(`codex.sandboxMode_${value}`)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <p className="text-3xs text-muted-foreground">
-                          {t("codex.sandboxModeHint")}
-                        </p>
-                        {/* Sandbox mode is what codeg maps onto the session's
-                            starting approval preset (#442), so it reaches
-                            ordinary prompts even though approval_policy does
-                            not. Worth stating next to the control that does it. */}
-                        {codexSandboxSeedsAcpPreset(
-                          selectedDraft.codexSandboxShadowed
-                        ) ? (
-                          <p className="text-3xs text-muted-foreground">
-                            {t("codex.sandboxModeSeedsPresetHint")}
-                          </p>
-                        ) : null}
-                        {/* codex-acp 1.7.0 redefined its `read-only` preset to
-                            carry a workspace-write sandbox, and it re-sends
-                            that policy every turn — so an ACP session cannot
-                            honor a read-only sandbox at all any more. This
-                            control keeps working for codex CLI/IDE sessions,
-                            which is exactly why the divergence has to be said
-                            out loud rather than left to look effective. */}
-                        {showsCodexReadOnlyAcpWarning(
-                          selectedDraft.codexSandboxMode,
-                          selectedDraft.codexSandboxShadowed
-                        ) ? (
-                          <p className="text-3xs text-yellow-500">
-                            {t("codex.sandboxModeReadOnlyAcpWarning")}
-                          </p>
-                        ) : null}
-                      </div>
-
-                      {codexWorkspaceWriteApplies(
-                        selectedDraft.codexSandboxMode
-                      ) && !selectedDraft.codexSandboxShadowed ? (
-                        <div className="space-y-2 rounded-md border border-dashed px-2.5 py-2">
-                          <div className="space-y-1">
-                            <label className="text-2xs text-muted-foreground">
-                              {t("codex.writableRootsLabel")}
-                            </label>
-                            <Textarea
-                              className="min-h-16 font-mono text-2xs"
-                              spellCheck={false}
-                              value={selectedDraft.codexWritableRootsText}
-                              onChange={(event) => {
-                                const next = event.target.value
-                                updateSelectedDraft((current) => ({
-                                  ...current,
-                                  codexWritableRootsText: next,
-                                }))
-                              }}
-                              placeholder={"/Users/me/shared\n/srv/cache"}
-                            />
-                            {codexRelativeWritableRoot ? (
-                              <p className="text-3xs text-red-500">
-                                {t("codex.sandboxRootsRelativeError", {
-                                  path: codexRelativeWritableRoot,
-                                })}
-                              </p>
-                            ) : (
-                              <p className="text-3xs text-muted-foreground">
-                                {t("codex.writableRootsHint")}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <label className="text-2xs text-muted-foreground">
-                              {t("codex.networkAccessLabel")}
-                            </label>
-                            <Switch
-                              checked={selectedDraft.codexNetworkAccess}
-                              onCheckedChange={(checked) => {
-                                updateSelectedDraft((current) => ({
-                                  ...current,
-                                  codexNetworkAccess: checked,
-                                }))
-                              }}
-                              aria-label={t("codex.networkAccessLabel")}
-                            />
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <label className="text-2xs text-muted-foreground">
-                              {t("codex.excludeTmpdirLabel")}
-                            </label>
-                            <Switch
-                              checked={selectedDraft.codexExcludeTmpdirEnvVar}
-                              onCheckedChange={(checked) => {
-                                updateSelectedDraft((current) => ({
-                                  ...current,
-                                  codexExcludeTmpdirEnvVar: checked,
-                                }))
-                              }}
-                              aria-label={t("codex.excludeTmpdirLabel")}
-                            />
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <label className="text-2xs text-muted-foreground">
-                              {t("codex.excludeSlashTmpLabel")}
-                            </label>
-                            <Switch
-                              checked={selectedDraft.codexExcludeSlashTmp}
-                              onCheckedChange={(checked) => {
-                                updateSelectedDraft((current) => ({
-                                  ...current,
-                                  codexExcludeSlashTmp: checked,
-                                }))
-                              }}
-                              aria-label={t("codex.excludeSlashTmpLabel")}
-                            />
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-2xs text-muted-foreground">
-                        {t("codex.configTomlNative")}
-                      </label>
-                      <Textarea
-                        value={selectedDraft.codexConfigTomlText}
-                        onChange={(event) => {
-                          handleCodexConfigTomlTextChange(event.target.value)
-                        }}
-                        placeholder={`disable_response_storage = true
-model = "gpt-5"
-model_reasoning_effort = "high"
-model_provider = "codeg"
-
-[features]
-responses_websockets_v2 = true
-
-[model_providers.codeg]
-base_url = "https://api.openai.com/v1"
-supports_websockets = true`}
-                        className="min-h-40 max-h-80 font-mono text-xs"
-                      />
-                    </div>
-
-                    <div className="flex justify-end">
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          const codexEnvText =
-                            selectedDraft.codexAuthMode ===
-                            "chatgpt_subscription"
-                              ? patchEnvText(selectedDraft.envText, {
-                                  OPENAI_API_KEY: "",
-                                  OPENAI_BASE_URL: "",
-                                })
-                              : selectedDraft.envText
-                          // Persist sequentially, never in parallel: persistEnv
-                          // (acp_update_agent_env) rewrites ~/.codex/config.toml
-                          // to sync the root `model`, while persistConfig writes
-                          // the full config.toml including base_url. Running both
-                          // at once races two read-modify-write cycles on the same
-                          // file, letting the model sync clobber the just-written
-                          // base_url (the API key in auth.json is unaffected, so
-                          // the key saves but the URL silently does not).
-                          // persistConfig runs last so its authoritative
-                          // config.toml wins.
-                          persistEnv(
-                            selectedAgent.agent_type,
-                            selectedDraft.enabled,
-                            codexEnvText,
-                            selectedDraft.modelProviderId
-                          )
-                            .then(() =>
-                              persistConfig(
-                                selectedAgent.agent_type,
-                                selectedDraft.configText,
-                                {
-                                  codexAuthJsonText:
-                                    selectedDraft.codexAuthJsonText,
-                                  codexConfigTomlText:
-                                    selectedDraft.codexConfigTomlText,
-                                  codexModelCatalog:
-                                    serializeCodexModelConfig(
-                                      selectedDraft.codexModelList
-                                    ) ?? "",
-                                  codexSandbox:
-                                    codexSandboxSaveConfig(selectedDraft),
-                                }
-                              )
-                            )
-                            .then(() => {
-                              toast.success(t("toasts.codexSaved"), {
-                                description: t("toasts.configSavedHint"),
-                              })
+                            toast.error(t("toasts.saveEnvFailed"), {
+                              description: toErrorMessage(err),
                             })
-                            .catch((err) => {
-                              console.error(
-                                "[Settings] save codex native config failed:",
-                                err
-                              )
-                              const message = toErrorMessage(err)
-                              toast.error(t("toasts.saveCodexNativeFailed"), {
-                                description: message,
-                              })
-                            })
-                        }}
-                        disabled={selectedIsSavingEnv || selectedIsSavingConfig}
-                      >
-                        {selectedIsSavingEnv || selectedIsSavingConfig ? (
-                          <>
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            {t("actions.saving")}
-                          </>
-                        ) : (
-                          <>
-                            <Save className="h-3.5 w-3.5" />
-                            {t("actions.saveCodexConfig")}
-                          </>
-                        )}
-                      </Button>
+                          })
+                      }}
+                    />
+                    <div className="rounded-md border bg-muted/20 p-3 text-2xs text-muted-foreground">
+                      {t("providerSourceActiveHint")}
                     </div>
                   </div>
                 ) : selectedAgent.agent_type === "gemini" ? (
@@ -15087,6 +14480,56 @@ supports_websockets = true`}
                       selectedModelProviderApiTypes.length > 0 && (
                         <ModelProviderApiTypeBadges
                           apiTypes={selectedModelProviderApiTypes}
+                        />
+                      )}
+                    {selectedAgent.agent_type === "claude_code" &&
+                      selectedModelProviderApiTypes.length > 0 && (
+                        <ModelProviderSourceCard
+                          apiTypes={selectedModelProviderApiTypes}
+                          count={selectedCompatibleModelProviderCount}
+                          selected={selectedUsesModelProviderSource}
+                          onSelect={(selected) => {
+                            if (!selectedAgentKind) return
+                            const agentType = selectedAgentKind
+                            const previous =
+                              modelProviderSources[agentType] ?? false
+                            setModelProviderSources((prev) => ({
+                              ...prev,
+                              [agentType]: selected,
+                            }))
+                            acpUpdateAgentModelSource(
+                              agentType,
+                              selected ? "provider" : "native"
+                            )
+                              .then((affected) => {
+                                reportAffectedSessions(affected)
+                                setAgents((prev) =>
+                                  prev.map((agent) =>
+                                    agent.agent_type === agentType
+                                      ? {
+                                          ...agent,
+                                          model_source: selected
+                                            ? "provider"
+                                            : "native",
+                                        }
+                                      : agent
+                                  )
+                                )
+                              })
+                              .catch((err) => {
+                                console.error(
+                                  "[Settings] save model source failed:",
+                                  err
+                                )
+                                setModelProviderSources((prev) => ({
+                                  ...prev,
+                                  [agentType]: previous,
+                                }))
+                                toast.error(t("toasts.saveEnvFailed"), {
+                                  description: toErrorMessage(err),
+                                })
+                              })
+                          }}
                         />
                       )}
                     {selectedAgent.agent_type === "claude_code" && (

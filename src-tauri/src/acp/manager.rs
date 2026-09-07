@@ -695,6 +695,50 @@ impl ConnectionManager {
         stale_count
     }
 
+    /// Refresh staleness for only the live connection bound to
+    /// `conversation_id`. This is the conversation-selection counterpart to
+    /// [`Self::refresh_connection_staleness`]: a conversation's provider/model
+    /// row changes one session's effective launch env, not every session for
+    /// that agent type.
+    pub async fn refresh_connection_staleness_for_conversation(
+        &self,
+        conversation_id: i32,
+        fresh: &str,
+        kind: ConfigStaleKind,
+    ) -> usize {
+        let mut targets = Vec::new();
+        let mut stale_count = 0usize;
+        {
+            let mut connections = self.connections.lock().await;
+            for conn in connections.values_mut() {
+                let bound = {
+                    let state = conn.state.read().await;
+                    state.conversation_id == Some(conversation_id)
+                };
+                if !bound {
+                    continue;
+                }
+                let stale = fresh != conn.config_fingerprint;
+                if stale {
+                    stale_count += 1;
+                }
+                if fresh != conn.last_observed_fingerprint {
+                    conn.last_observed_fingerprint = fresh.to_string();
+                    targets.push((Arc::clone(&conn.state), conn.emitter.clone(), stale));
+                }
+            }
+        }
+        for (state, emitter, stale) in targets {
+            emit_with_state(
+                &state,
+                &emitter,
+                AcpEvent::SessionConfigStale { stale, kind },
+            )
+            .await;
+        }
+        stale_count
+    }
+
     /// Look up an existing live connection that we can reuse instead of
     /// spawning a new process. Reuse criteria, ALL must hold:
     /// - `session_id` is Some (we never dedup speculative / fresh connects)
@@ -3418,6 +3462,7 @@ impl crate::acp::delegation::spawner::ConnectionSpawner for ConnectionManagerSpa
         working_dir: Option<String>,
         preferred_mode_id: Option<String>,
         preferred_config_values: BTreeMap<String, String>,
+        parent_conversation_id: Option<i32>,
     ) -> Result<String, crate::acp::delegation::spawner::SpawnerError> {
         use crate::acp::delegation::spawner::SpawnerError;
         // Resolve the parent connection so we can inherit its emitter and
@@ -3449,11 +3494,12 @@ impl crate::acp::delegation::spawner::ConnectionSpawner for ConnectionManagerSpa
         // user-initiated session — disabled check, settings overrides,
         // model provider creds, git helper. Without this, delegated
         // subagents would skip the user's configuration entirely.
-        let runtime_env = crate::commands::acp::build_session_runtime_env(
+        let runtime_env = crate::commands::acp::build_session_runtime_env_with_conversation(
             &self.db,
             agent_type,
             None,
             self.data_dir.as_path(),
+            parent_conversation_id,
         )
         .await
         .map_err(|e| SpawnerError::Spawn(e.to_string()))?;
@@ -3538,6 +3584,7 @@ impl crate::acp::delegation::spawner::ConnectionSpawner for ConnectionManagerSpa
         external_session_id: &str,
         preferred_mode_id: Option<String>,
         preferred_config_values: BTreeMap<String, String>,
+        parent_conversation_id: Option<i32>,
     ) -> Result<
         crate::acp::delegation::spawner::ResumedSpawn,
         crate::acp::delegation::spawner::SpawnerError,
@@ -3566,11 +3613,12 @@ impl crate::acp::delegation::spawner::ConnectionSpawner for ConnectionManagerSpa
         };
         let effective_working_dir = working_dir.or(parent_working_dir);
 
-        let runtime_env = crate::commands::acp::build_session_runtime_env(
+        let runtime_env = crate::commands::acp::build_session_runtime_env_with_conversation(
             &self.db,
             agent_type,
             None,
             self.data_dir.as_path(),
+            parent_conversation_id,
         )
         .await
         .map_err(|e| SpawnerError::Spawn(e.to_string()))?;

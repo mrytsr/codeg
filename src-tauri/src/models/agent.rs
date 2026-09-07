@@ -9,6 +9,7 @@ pub const CUSTOM_AGENT_WIRE_PREFIX: &str = "custom:";
 /// Whether an agent's model/catalog configuration comes from its native
 /// config files or codeg's shared Model Provider catalog (`models.json`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum AgentModelSource {
     Native,
     Provider,

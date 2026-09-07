@@ -1278,11 +1278,11 @@ pub fn build_router(
         )
         // ─── Shared models.json providers ───
         .route(
-            "/model_provider_records",
+            "/model_provider_list",
             post(handlers::model_provider_file::list_model_provider_records),
         )
         .route(
-            "/model_provider_builtin_records",
+            "/model_provider_builtin_list",
             post(handlers::model_provider_file::list_builtin_model_providers),
         )
         .route(

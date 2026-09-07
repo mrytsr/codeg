@@ -2421,11 +2421,65 @@ pub async fn update_conversation_model_selection_core(
         .map_err(AppCommandError::from)
 }
 
+/// `update_conversation_model_selection_core` followed by a one-connection
+/// staleness refresh. The connection is found by the saved conversation id and
+/// the fresh fingerprint is recomputed with that same id, so a running owner
+/// sees the selection change instead of silently keeping the old model.
+pub(crate) async fn update_conversation_model_selection_and_refresh(
+    conn: &sea_orm::DatabaseConnection,
+    manager: &crate::acp::manager::ConnectionManager,
+    data_dir: &std::path::Path,
+    conversation_id: i32,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+) -> Result<(), AppCommandError> {
+    update_conversation_model_selection_core(
+        conn,
+        data_dir,
+        conversation_id,
+        provider_id,
+        model_id,
+    )
+    .await?;
+
+    let conv = conversation_service::find_raw_by_id(conn, conversation_id)
+        .await
+        .map_err(AppCommandError::from)?
+        .ok_or_else(|| {
+            AppCommandError::not_found(format!("Conversation not found: {conversation_id}"))
+        })?;
+    let agent_type: AgentType = serde_json::from_value(serde_json::Value::String(
+        conv.agent_type.clone(),
+    ))
+    .map_err(|e| {
+        AppCommandError::invalid_input("Invalid agent type for conversation")
+            .with_detail(e.to_string())
+    })?;
+    if let Ok(fresh) = crate::commands::acp::compute_conversation_config_fingerprint(
+        &crate::db::AppDatabase { conn: conn.clone() },
+        agent_type,
+        data_dir,
+        conversation_id,
+    )
+    .await
+    {
+        manager
+            .refresh_connection_staleness_for_conversation(
+                conversation_id,
+                &fresh,
+                crate::acp::types::ConfigStaleKind::ModelProvider,
+            )
+            .await;
+    }
+    Ok(())
+}
+
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn update_conversation_model_selection(
     app: tauri::AppHandle,
     db: tauri::State<'_, AppDatabase>,
+    manager: tauri::State<'_, crate::acp::manager::ConnectionManager>,
     conversation_id: i32,
     provider_id: Option<String>,
     model_id: Option<String>,
@@ -2436,8 +2490,9 @@ pub async fn update_conversation_model_selection(
         .app_data_dir()
         .map(|path| crate::paths::resolve_effective_data_dir(&path))
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    update_conversation_model_selection_core(
+    update_conversation_model_selection_and_refresh(
         &db.conn,
+        &manager,
         &data_dir,
         conversation_id,
         provider_id,
@@ -4916,6 +4971,74 @@ mod tests {
         assert_eq!(row.model_source, None);
         assert_eq!(row.model_provider_id, None);
         assert_eq!(row.model_provider_model_id, None);
+    }
+
+    #[tokio::test]
+    async fn claude_legacy_provider_binding_rejects_conversation_selection() {
+        let db = fresh_in_memory_db().await;
+        let catalog = tempfile::tempdir().expect("catalog dir");
+        let folder_id = seed_folder(&db, "/tmp/codeg-claude-legacy-provider").await;
+        let conv_id = create_conversation_core(&db.conn, folder_id, AgentType::ClaudeCode, None)
+            .await
+            .expect("create conversation");
+
+        let provider = crate::models::model_provider_file::ModelProviderDraft {
+            provider_id: "claude-provider".into(),
+            original_id: String::new(),
+            api: crate::models::model_provider_file::ModelProviderApiType::AnthropicMessages,
+            base_url: "https://example.com/v1".into(),
+            proxy: None,
+            api_key: "test-key".into(),
+            auth_header: true,
+            compat_supports_developer_role: None,
+            enabled: true,
+            models: vec![crate::models::model_provider_file::ModelEntryDraft {
+                id: "claude-model".into(),
+                reasoning: true,
+                input: crate::models::model_provider_file::WireModelInput::TextImage,
+                context_window: None,
+                max_tokens: None,
+                base_instructions: None,
+            }],
+            clear_api_key: None,
+        };
+        crate::commands::model_provider_file::create_model_provider_core(catalog.path(), provider)
+            .await
+            .expect("create provider");
+
+        agent_setting_service::ensure_defaults(
+            &db.conn,
+            &[agent_setting_service::AgentDefaultInput {
+                agent_type: AgentType::ClaudeCode,
+                registry_id: "claude-code".into(),
+                default_sort_order: 0,
+            }],
+        )
+        .await
+        .expect("ensure defaults");
+        agent_setting_service::update(
+            &db.conn,
+            AgentType::ClaudeCode,
+            agent_setting_service::AgentSettingsUpdate {
+                enabled: true,
+                env_json: None,
+                model_provider_id: Some(7),
+                model_source: "native".into(),
+            },
+        )
+        .await
+        .expect("bind legacy provider");
+
+        let err = update_conversation_model_selection_core(
+            &db.conn,
+            catalog.path(),
+            conv_id,
+            Some("claude-provider".into()),
+            Some("claude-model".into()),
+        )
+        .await
+        .expect_err("legacy binding alone must not authorize selection");
+        assert!(format!("{err:?}").contains("shared Model Provider source"));
     }
 
     #[tokio::test]

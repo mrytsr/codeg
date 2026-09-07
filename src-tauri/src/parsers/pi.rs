@@ -36,7 +36,7 @@ pub(crate) fn resolve_pi_sessions_dir() -> PathBuf {
     )
 }
 
-fn resolve_pi_sessions_dir_from(
+pub(crate) fn resolve_pi_sessions_dir_from(
     session_dir_env: Option<OsString>,
     agent_dir_env: Option<OsString>,
     home_dir: Option<PathBuf>,

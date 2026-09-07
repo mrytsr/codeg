@@ -52,10 +52,7 @@ pub fn models_json_path(data_dir: &Path) -> PathBuf {
 pub fn model_provider_api_types(agent_type: &AgentType) -> Vec<ModelProviderApiType> {
     match agent_type {
         AgentType::ClaudeCode => vec![ModelProviderApiType::AnthropicMessages],
-        AgentType::Codex => vec![
-            ModelProviderApiType::OpenAiCompletions,
-            ModelProviderApiType::OpenAiResponses,
-        ],
+        AgentType::Codex => vec![ModelProviderApiType::OpenAiResponses],
         AgentType::Gemini => vec![ModelProviderApiType::GoogleGenerativeAi],
         AgentType::OpenCode | AgentType::Pi | AgentType::KimiCode => vec![
             ModelProviderApiType::OpenAiCompletions,
@@ -196,6 +193,13 @@ fn set_developer_role_compat(provider: &mut ProviderFile, value: Option<bool>) {
     provider.compat = Some(Value::Object(compat));
 }
 
+fn provider_supports_developer_role(provider: &ProviderFile) -> Option<bool> {
+    match provider.compat.as_ref()?.get("supportsDeveloperRole") {
+        Some(Value::Bool(value)) => Some(*value),
+        _ => None,
+    }
+}
+
 fn provider_to_record(provider_id: &str, provider: &ProviderFile) -> ModelProviderRecord {
     let api = provider
         .api
@@ -215,6 +219,7 @@ fn provider_to_record(provider_id: &str, provider: &ProviderFile) -> ModelProvid
             .collect(),
         api_key_masked: mask_api_key(key),
         has_api_key: !key.trim().is_empty(),
+        compat_supports_developer_role: provider_supports_developer_role(provider),
     }
 }
 
@@ -832,11 +837,37 @@ mod tests {
         assert!(!result.record.has_api_key);
     }
 
+    #[tokio::test]
+    async fn developer_role_compat_is_returned_for_editing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut created = draft("provider");
+        created.compat_supports_developer_role = Some(false);
+        create_model_provider_core(dir.path(), created)
+            .await
+            .unwrap();
+
+        let record = list_model_provider_records_core(dir.path())
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(record.compat_supports_developer_role, Some(false));
+    }
+
     #[test]
     fn capability_table_matches_source_card_agents() {
         assert!(model_provider_api_types(&AgentType::OpenCode).len() == 4);
         assert!(model_provider_api_types(&AgentType::Cursor).is_empty());
         assert!(model_provider_api_types(&AgentType::Custom("x")).is_empty());
+    }
+
+    #[test]
+    fn codex_only_accepts_responses_api() {
+        assert_eq!(
+            model_provider_api_types(&AgentType::Codex),
+            vec![ModelProviderApiType::OpenAiResponses]
+        );
     }
 
     #[tokio::test]

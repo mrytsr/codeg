@@ -171,14 +171,9 @@ export function WorkspaceWindowHistoryProvider({
     return () => window.removeEventListener("popstate", onPopState)
   }, [])
 
-  const value = useMemo(
-    () => ({ open, close, attach }),
-    [attach, close, open]
-  )
+  const value = useMemo(() => ({ open, close, attach }), [attach, close, open])
   return (
-    <HistoryContext.Provider value={value}>
-      {children}
-    </HistoryContext.Provider>
+    <HistoryContext.Provider value={value}>{children}</HistoryContext.Provider>
   )
 }
 

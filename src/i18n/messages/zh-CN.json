@@ -1554,7 +1554,8 @@
     "customAgentRemoveWithData": "同时删除已记录的会话历史",
     "customAgentRemoved": "已移除 {name}",
     "customAgentBadge": "自定义",
-    "customAgentNotLaunchable": "该智能体在此环境无法启动：{reason}"
+    "customAgentNotLaunchable": "该智能体在此环境无法启动：{reason}",
+    "providerSourceActiveHint": "此智能体使用共享模型供应商目录，原生模型设置已隐藏。"
   },
   "SettingsPages": {
     "agentsLoading": "加载 Agent 设置中...",
@@ -5706,16 +5707,14 @@
     "canvasActions": "画布操作",
     "mergeIntoNewRegion": "新建区域"
   },
-  "ModelProviderPickerDemo": {
-    "demoTag": "DEMO",
+  "ModelProviderPicker": {
     "placeholder": "供应商 · 模型",
-    "providers": "供应商",
-    "models": "模型",
-    "disabled": "已停用",
     "noProviders": "暂无供应商",
     "noModels": "暂无模型",
     "vision": "视觉",
     "reasoning": "推理",
-    "openPicker": "演示供应商选择器"
+    "openPicker": "模型供应商",
+    "resetNative": "返回原生配置",
+    "saveFailed": "保存模型选择失败"
   }
 }

@@ -10,7 +10,7 @@ export const AGENT_MODEL_PROVIDER_API_TYPES: Partial<
   Record<AgentType, ModelProviderApiType[]>
 > = {
   claude_code: ["anthropic-messages"],
-  codex: ["openai-completions", "openai-responses"],
+  codex: ["openai-responses"],
   gemini: ["google-generative-ai"],
   open_code: [
     "openai-completions",
@@ -40,6 +40,8 @@ export const AGENT_MODEL_PROVIDER_API_TYPES: Partial<
 
 /** Agents whose existing panel does not already have a Model Provider mode. */
 export const MODEL_PROVIDER_SOURCE_CARD_AGENT_TYPES: AgentType[] = [
+  "claude_code",
+  "codex",
   "open_code",
   "cline",
   "hermes",

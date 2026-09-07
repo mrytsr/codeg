@@ -10296,6 +10296,28 @@ pub(crate) async fn compute_session_config_fingerprint(
     Ok(fingerprint_config(agent_type, &runtime_env))
 }
 
+/// [`compute_session_config_fingerprint`] for one conversation. Provider/model
+/// selections are part of the launch env, so the canonical fingerprint must use
+/// the same conversation the launched process was built for; the agent-wide
+/// function would compare a native env against a provider-selection env and
+/// never make the selection comparable.
+pub(crate) async fn compute_conversation_config_fingerprint(
+    db: &AppDatabase,
+    agent_type: AgentType,
+    data_dir: &Path,
+    conversation_id: i32,
+) -> Result<String, AcpError> {
+    let runtime_env = build_session_runtime_env_with_conversation(
+        db,
+        agent_type,
+        None,
+        data_dir,
+        Some(conversation_id),
+    )
+    .await?;
+    Ok(fingerprint_config(agent_type, &runtime_env))
+}
+
 /// After a settings save, recompute the effective config fingerprint for each of
 /// `agent_types` and tell every running connection of those agents whether it
 /// has drifted onto stale (launch-time) config. Best-effort: an agent whose
@@ -16391,6 +16413,122 @@ wire_api = "chat"
         )
         .expect("secrets json");
         assert_eq!(secrets["openAiApiKey"], "test-key");
+    }
+
+    #[tokio::test]
+    async fn claude_provider_source_selection_overrides_defaults() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let catalog = tempfile::tempdir().expect("catalog dir");
+        let folder = crate::db::test_helpers::seed_folder(&db, "/tmp/codeg-claude-selection").await;
+        let conv = conversation_service::create(
+            &db.conn,
+            folder,
+            AgentType::ClaudeCode,
+            Some("provider selection".to_string()),
+            None,
+        )
+        .await
+        .expect("create conversation");
+
+        crate::commands::model_provider_file::create_model_provider_core(
+            catalog.path(),
+            crate::models::model_provider_file::ModelProviderDraft {
+                provider_id: "claude-provider".to_string(),
+                original_id: String::new(),
+                api: crate::models::model_provider_file::ModelProviderApiType::AnthropicMessages,
+                base_url: "https://selected.example/v1".to_string(),
+                proxy: None,
+                api_key: "selected-key".to_string(),
+                auth_header: true,
+                compat_supports_developer_role: None,
+                enabled: true,
+                models: vec![crate::models::model_provider_file::ModelEntryDraft {
+                    id: "selected-model".to_string(),
+                    reasoning: true,
+                    input: crate::models::model_provider_file::WireModelInput::TextImage,
+                    context_window: None,
+                    max_tokens: None,
+                    base_instructions: None,
+                }],
+                clear_api_key: None,
+            },
+        )
+        .await
+        .expect("create provider");
+
+        agent_setting_service::ensure_defaults(
+            &db.conn,
+            &[agent_setting_service::AgentDefaultInput {
+                agent_type: AgentType::ClaudeCode,
+                registry_id: registry::registry_id_for(AgentType::ClaudeCode).to_string(),
+                default_sort_order: 0,
+            }],
+        )
+        .await
+        .expect("ensure defaults");
+        agent_setting_service::update(
+            &db.conn,
+            AgentType::ClaudeCode,
+            agent_setting_service::AgentSettingsUpdate {
+                enabled: true,
+                env_json: Some(
+                    r#"{"ANTHROPIC_BASE_URL":"https://legacy.example","ANTHROPIC_AUTH_TOKEN":"legacy-key","ANTHROPIC_MODEL":"legacy-model"}"#.to_string(),
+                ),
+                model_provider_id: None,
+                model_source: "provider".to_string(),
+            },
+        )
+        .await
+        .expect("bind legacy provider");
+
+        conversation_service::update_model_selection(
+            &db.conn,
+            conv.id,
+            Some("claude-provider".to_string()),
+            Some("selected-model".to_string()),
+        )
+        .await
+        .expect("save selection");
+
+        let env = build_session_runtime_env_with_conversation(
+            &db,
+            AgentType::ClaudeCode,
+            None,
+            catalog.path(),
+            Some(conv.id),
+        )
+        .await
+        .expect("build launch env with selection");
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://selected.example/v1")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("selected-key")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("selected-model")
+        );
+        assert_eq!(
+            env.get("CODEG_MODEL_SOURCE").map(String::as_str),
+            Some("provider")
+        );
+
+        conversation_service::update_model_selection(&db.conn, conv.id, None, None)
+            .await
+            .expect("clear selection");
+        let env = build_session_runtime_env_with_conversation(
+            &db,
+            AgentType::ClaudeCode,
+            None,
+            catalog.path(),
+            Some(conv.id),
+        )
+        .await
+        .expect("build launch env without selection");
+        assert!(!env.contains_key("CODEG_MODEL_SOURCE"));
     }
 
     #[tokio::test]

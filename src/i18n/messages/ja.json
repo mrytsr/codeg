@@ -1554,7 +1554,8 @@
     "customAgentRemoveWithData": "記録された会話履歴も削除する",
     "customAgentRemoved": "{name} を削除しました",
     "customAgentBadge": "カスタム",
-    "customAgentNotLaunchable": "この環境では起動できません: {reason}"
+    "customAgentNotLaunchable": "この環境では起動できません: {reason}",
+    "providerSourceActiveHint": "このエージェントは共有モデルプロバイダーカタログを使用します。ネイティブのモデル設定は非表示です。"
   },
   "SettingsPages": {
     "agentsLoading": "エージェント設定を読み込み中...",
@@ -5706,16 +5707,14 @@
     "canvasActions": "キャンバス操作",
     "mergeIntoNewRegion": "新しい領域"
   },
-  "ModelProviderPickerDemo": {
-    "demoTag": "DEMO",
+  "ModelProviderPicker": {
     "placeholder": "Provider · Model",
-    "providers": "Providers",
-    "models": "Models",
-    "disabled": "disabled",
     "noProviders": "No providers",
     "noModels": "No models",
     "vision": "vision",
     "reasoning": "reasoning",
-    "openPicker": "Demo provider picker"
+    "openPicker": "Model provider",
+    "resetNative": "Back to native config",
+    "saveFailed": "Failed to save model selection"
   }
 }

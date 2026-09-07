@@ -16,9 +16,17 @@ use crate::app_error::AppCommandError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ModelProviderApiType {
+    // Serde's kebab-case would render these as "open-ai-completions" /
+    // "open-ai-responses", but the wire value everywhere else (frontend,
+    // pios models.json, `as_str`) is "openai-completions" / "openai-responses".
+    // Pin the exact spelling so a copied pios file round-trips.
+    #[serde(rename = "openai-completions")]
     OpenAiCompletions,
+    #[serde(rename = "openai-responses")]
     OpenAiResponses,
+    #[serde(rename = "anthropic-messages")]
     AnthropicMessages,
+    #[serde(rename = "google-generative-ai")]
     GoogleGenerativeAi,
 }
 
@@ -152,6 +160,7 @@ pub struct ModelProviderRecord {
     pub models: Vec<ModelEntryDraft>,
     pub api_key_masked: String,
     pub has_api_key: bool,
+    pub compat_supports_developer_role: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -448,6 +457,60 @@ mod tests {
         let path = dir.path().join("models.json");
         std::fs::write(&path, "{not json").unwrap();
         assert!(read_models_file(&path).is_err());
+    }
+
+    #[test]
+    fn api_wire_values_round_trip_through_serde() {
+        // The frontend and pios use "openai-completions" (no hyphen after
+        // "open"); serde's kebab-case of `OpenAiCompletions` would otherwise
+        // produce "open-ai-completions" and reject the very files we read.
+        let parsed: ModelProviderApiType =
+            serde_json::from_str("\"openai-completions\"").expect("openai-completions");
+        assert_eq!(parsed, ModelProviderApiType::OpenAiCompletions);
+        let parsed: ModelProviderApiType =
+            serde_json::from_str("\"openai-responses\"").expect("openai-responses");
+        assert_eq!(parsed, ModelProviderApiType::OpenAiResponses);
+        assert_eq!(
+            serde_json::to_string(&ModelProviderApiType::OpenAiCompletions).unwrap(),
+            "\"openai-completions\""
+        );
+    }
+
+    #[test]
+    fn pios_style_file_parses_and_round_trips() {
+        // The exact shape pi writes today: camelCase, array `input`, no
+        // `version`, kebab api names. Codeg must read it as-is.
+        let raw = r#"{
+          "providers": {
+            "ark": {
+              "api": "openai-completions",
+              "baseUrl": "https://ark.example.com/v1",
+              "apiKey": "sk-test",
+              "authHeader": true,
+              "compat": { "supportsDeveloperRole": false },
+              "models": [
+                { "id": "glm-5.3", "reasoning": true, "input": ["text", "image"] },
+                { "id": "MiniMax-M2.7", "reasoning": true }
+              ]
+            }
+          }
+        }"#;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("models.json");
+        std::fs::write(&path, raw).unwrap();
+        let parsed = read_models_file(&path).expect("read pi-style file");
+        let provider = &parsed.providers["ark"];
+        assert_eq!(provider.api, Some(ModelProviderApiType::OpenAiCompletions));
+        assert_eq!(provider.models.len(), 2);
+        // Omitted `input` is preserved as an empty list (frontend maps it to
+        // text+image), and the api spelling survives a write.
+        write_models_file(&path, &parsed).unwrap();
+        let reparsed = read_models_file(&path).expect("re-read after write");
+        assert_eq!(
+            reparsed.providers["ark"].api,
+            Some(ModelProviderApiType::OpenAiCompletions)
+        );
+        assert_eq!(reparsed.providers["ark"].models[1].input, vec![]);
     }
 
     #[test]
