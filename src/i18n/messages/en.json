@@ -5904,8 +5904,7 @@
     "removeTerminalCard": "Remove terminal card",
     "terminalNoDirectory": "This card has no working directory",
     "confirmDeleteTerminals": "{count} running terminal(s) will be closed and their processes stopped.",
-    "confirmDeleteNotesAndTerminals": "{notes} note(s) you wrote will be permanently deleted, and {terminals} running terminal(s) will be stopped."
-  },
+    "confirmDeleteNotesAndTerminals": "{notes} note(s) you wrote will be permanently deleted, and {terminals} running terminal(s) will be stopped."  },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",
     "noProviders": "No providers",
@@ -5915,4 +5914,5 @@
     "openPicker": "Model provider",
     "resetNative": "Back to native config",
     "saveFailed": "Failed to save model selection"
-  }}
+  }
+}

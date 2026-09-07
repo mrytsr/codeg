@@ -2093,8 +2093,7 @@ mod tests {
             AgentType::OpenClaw,
             "2026.9.3",
             "openclaw@2026.9.3",
-            Some("24.16.0"),
-        );
+            Some("24.16.0"),        );
         assert_npx_version(AgentType::Cline, "3.0.61", "cline@3.0.61", Some("22.0.0"));
         assert_npx_version(
             AgentType::CodeBuddy,
@@ -2135,8 +2134,7 @@ mod tests {
             "@qoder-ai/qodercli@1.1.49",
             Some("20.0.0"),
         );
-        assert_binary_version(AgentType::OpenCode, "1.18.30", "/releases/download/v1.18.30/");
-        // Hermes rides the community npm bridge (upstream retired its PyPI
+        assert_binary_version(AgentType::OpenCode, "1.18.30", "/releases/download/v1.18.30/");        // Hermes rides the community npm bridge (upstream retired its PyPI
         // channel at 0.19.0; see the registry entry). The npm package version
         // tracks the upstream version 1:1, and the pin must stay EXACT — the
         // audited wrapper code is only what the pinned version ships.

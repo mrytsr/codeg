@@ -4336,8 +4336,7 @@ impl CodexParser {
                                             if is_list {
                                                 return build_collab_list_input(&output_obj);
                                             }
-                                            match output_obj.get("status").and_then(|s| s.as_object())
-                                            {
+                                            match output_obj.get("status").and_then(|s| s.as_object())                                            {
                                                 Some(status) => {
                                                     // Mark returned agents so the spawn
                                                     // capsule won't also show their
@@ -4358,8 +4357,7 @@ impl CodexParser {
                                                 None => native_team_wait_input(&output_obj),
                                             }
                                         },
-                                    );
-                                    if let Some((collab_input, is_error)) = capsule {
+                                    );                                    if let Some((collab_input, is_error)) = capsule {
                                         messages.push(UnifiedMessage {
                                             id: format!("tool-{}", messages.len()),
                                             role: MessageRole::Assistant,
@@ -6413,21 +6411,7 @@ mod tests {
     use super::serialize_preview;
     use super::truncate_str;
     use super::BudgetedSink;
-    use super::MCP_RESULT_FALLBACK_CAP;
-    use super::is_encrypted_envelope;
-    use super::merge_codex_context_window_stats;
-    use super::merge_codex_total_usage_stats;
-    use super::native_team_wait_input;
-    use super::parse_codex_subagent_stats;
-    use super::redact_encrypted_args;
-    use super::resolve_codex_home_dir_from;
-    use super::trim_subagent_replay_prefix;
-    use super::CODEX_PLAN_APPROVAL_PROMPT;
-    use super::CODEX_PLAN_APPROVED_OUTPUT;
-    use super::CODEX_SUBAGENT_LAUNCH_KEY;
-    use super::CODEX_SUBAGENT_STATE_KEY;
-    use super::COLLAB_OP_KEY;
-    use super::should_skip_duplicate_user_message;
+    use super::MCP_RESULT_FALLBACK_CAP;    use super::should_skip_duplicate_user_message;
     use super::strip_blocked_resource_mentions;
     use super::AgentParser;
     use super::CodexParser;

@@ -5904,8 +5904,7 @@
     "removeTerminalCard": "Quitar tarjeta de terminal",
     "terminalNoDirectory": "Esta tarjeta no tiene directorio de trabajo",
     "confirmDeleteTerminals": "Se cerrarán {count} terminal(es) en ejecución y se detendrán sus procesos.",
-    "confirmDeleteNotesAndTerminals": "Se eliminarán permanentemente {notes} nota(s) que escribiste y se detendrán {terminals} terminal(es) en ejecución."
-  },
+    "confirmDeleteNotesAndTerminals": "Se eliminarán permanentemente {notes} nota(s) que escribiste y se detendrán {terminals} terminal(es) en ejecución."  },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",
     "noProviders": "No providers",
@@ -5915,4 +5914,5 @@
     "openPicker": "Model provider",
     "resetNative": "Back to native config",
     "saveFailed": "Failed to save model selection"
-  }}
+  }
+}

@@ -1,12 +1,21 @@
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { resetModelProviderSelectionStore } from "@/stores/model-provider-selection-store"
+import {
+  clearModelProviderDraftSelection,
+  resetModelProviderSelectionStore,
+  setModelProviderDraftSelection,
+} from "@/stores/model-provider-selection-store"
+import {
+  loadRememberedAgentModelSelection,
+  rememberAgentModelSelection,
+} from "@/lib/remembered-agent-model-selection"
 
 import { ModelProviderPicker } from "./model-provider-picker"
 import enMessages from "@/i18n/messages/en.json"
 import type { ModelProviderRecord } from "@/lib/model-provider-types"
+import type { AgentType } from "@/lib/types"
 
 const reapplyConfig = vi.fn(async () => true)
 vi.mock("@/hooks/use-connection", () => ({
@@ -113,10 +122,15 @@ function recordsFixture(): ModelProviderRecord[] {
   ]
 }
 
-function renderPicker() {
+function renderPicker(
+  overrides: { agentType?: AgentType; tabId?: string } = {}
+) {
   return render(
     <NextIntlClientProvider locale="en" messages={enMessages}>
-      <ModelProviderPicker agentType="claude_code" tabId="tab-1" />
+      <ModelProviderPicker
+        agentType={overrides.agentType ?? "claude_code"}
+        tabId={overrides.tabId ?? "tab-1"}
+      />
     </NextIntlClientProvider>
   )
 }
@@ -126,6 +140,7 @@ describe("ModelProviderPicker", () => {
     updateSelection.mockReset()
     reapplyConfig.mockClear()
     resetModelProviderSelectionStore()
+    localStorage.clear()
     tabStoreState = { tabs: [{ id: "tab-1", conversationId: 42 }] }
   })
 
@@ -200,5 +215,129 @@ describe("ModelProviderPicker", () => {
       expect(reapplyConfig).toHaveBeenCalledTimes(1)
     })
     expect(reapplyConfig).toHaveBeenCalledWith(42)
+  })
+
+  it("saving a choice on a bound conversation remembers it per agent", async () => {
+    renderPicker()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Model provider" })
+    )
+    fireEvent.click(screen.getByText("claude-opus-4-5"))
+
+    await vi.waitFor(() => {
+      expect(loadRememberedAgentModelSelection("claude_code")).toEqual({
+        providerId: "anthropic",
+        modelId: "claude-opus-4-5",
+      })
+    })
+  })
+
+  it("restores the remembered choice on a new draft when it still exists", async () => {
+    rememberAgentModelSelection("claude_code", {
+      providerId: "anthropic",
+      modelId: "claude-opus-4-5",
+    })
+    tabStoreState = { tabs: [{ id: "tab-1", conversationId: null }] }
+
+    renderPicker()
+
+    expect(
+      within(screen.getByRole("button", { name: "Model provider" })).getByText(
+        "anthropic · claude-opus-4-5"
+      )
+    ).toBeInTheDocument()
+    expect(updateSelection).not.toHaveBeenCalled()
+  })
+
+  it("does not restore a remembered choice that no longer exists", async () => {
+    // The remembered model was removed from the (still enabled) provider.
+    rememberAgentModelSelection("claude_code", {
+      providerId: "anthropic",
+      modelId: "ghost-model",
+    })
+    tabStoreState = { tabs: [{ id: "tab-1", conversationId: null }] }
+
+    renderPicker()
+
+    const trigger = screen.getByRole("button", { name: "Model provider" })
+    expect(within(trigger).getByText("Provider · Model")).toBeInTheDocument()
+  })
+
+  it("does not override an explicit draft choice with the remembered one", async () => {
+    setModelProviderDraftSelection("tab-1", {
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    })
+    rememberAgentModelSelection("claude_code", {
+      providerId: "anthropic",
+      modelId: "claude-opus-4-5",
+    })
+    tabStoreState = { tabs: [{ id: "tab-1", conversationId: null }] }
+
+    renderPicker()
+
+    expect(
+      within(screen.getByRole("button", { name: "Model provider" })).getByText(
+        "anthropic · claude-sonnet-4-5"
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("does not re-restore after the user resets a draft to native", async () => {
+    rememberAgentModelSelection("claude_code", {
+      providerId: "anthropic",
+      modelId: "claude-opus-4-5",
+    })
+    tabStoreState = { tabs: [{ id: "tab-1", conversationId: null }] }
+
+    renderPicker()
+    const trigger = screen.getByRole("button", { name: "Model provider" })
+    expect(
+      within(trigger).getByText("anthropic · claude-opus-4-5")
+    ).toBeInTheDocument()
+
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByText("Back to native config"))
+
+    // The explicit reset settles the (tab, agent) key — no re-seed.
+    expect(
+      within(screen.getByRole("button", { name: "Model provider" })).getByText(
+        "Provider · Model"
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("restores the new agent's memory when the draft agent switches", async () => {
+    rememberAgentModelSelection("claude_code", {
+      providerId: "anthropic",
+      modelId: "claude-opus-4-5",
+    })
+    rememberAgentModelSelection("pi", {
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    })
+    tabStoreState = { tabs: [{ id: "tab-1", conversationId: null }] }
+
+    const { rerender } = renderPicker({ agentType: "claude_code" })
+    expect(
+      within(screen.getByRole("button", { name: "Model provider" })).getByText(
+        "anthropic · claude-opus-4-5"
+      )
+    ).toBeInTheDocument()
+
+    // The composer's agent switch handler clears the old draft before the
+    // picker sees the new agent; mirror that here.
+    act(() => clearModelProviderDraftSelection("tab-1"))
+    rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <ModelProviderPicker agentType="pi" tabId="tab-1" />
+      </NextIntlClientProvider>
+    )
+
+    expect(
+      within(screen.getByRole("button", { name: "Model provider" })).getByText(
+        "anthropic · claude-sonnet-4-5"
+      )
+    ).toBeInTheDocument()
   })
 })

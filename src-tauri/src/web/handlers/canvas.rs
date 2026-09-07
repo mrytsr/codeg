@@ -128,8 +128,7 @@ pub async fn canvas_delete_node(
             &state.terminal_manager,
             params.node_id,
         )
-            .await?,
-    ))
+            .await?,    ))
 }
 
 #[derive(Deserialize)]

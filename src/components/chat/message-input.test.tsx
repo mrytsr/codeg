@@ -67,6 +67,7 @@ const acpAgentsMock = vi.hoisted(() => ({
     agents: [] as Array<{
       agent_type: string
       model_source: "native" | "provider"
+      model_provider_id?: number | null
     }>,
     fresh: false,
     refresh: vi.fn(),

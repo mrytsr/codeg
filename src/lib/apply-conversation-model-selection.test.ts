@@ -4,6 +4,7 @@ import {
   applyDraftModelSelection,
   type ModelSelectionConnection,
 } from "./apply-conversation-model-selection"
+import { loadRememberedAgentModelSelection } from "./remembered-agent-model-selection"
 import {
   getModelProviderDraftSelection,
   resetModelProviderSelectionStore,
@@ -19,6 +20,7 @@ const { updateConversationModelSelection } = vi.mocked(
 )
 
 const selection = { providerId: "anthropic", modelId: "claude-opus-4-5" }
+const agentType = "claude_code"
 
 function connection(
   overrides: Partial<ModelSelectionConnection> = {}
@@ -35,9 +37,10 @@ describe("applyDraftModelSelection", () => {
   beforeEach(() => {
     resetModelProviderSelectionStore()
     updateConversationModelSelection.mockReset()
+    localStorage.clear()
   })
 
-  it("saves the draft and applies it to a fresh session", async () => {
+  it("saves the draft, applies it to a fresh session, and remembers it", async () => {
     setModelProviderDraftSelection("tab-1", selection)
     updateConversationModelSelection.mockResolvedValue(undefined)
     const conn = connection()
@@ -46,6 +49,7 @@ describe("applyDraftModelSelection", () => {
       applyDraftModelSelection({
         tabId: "tab-1",
         conversationId: 42,
+        agentType,
         connection: conn,
         freshSession: true,
       })
@@ -58,6 +62,7 @@ describe("applyDraftModelSelection", () => {
     )
     expect(conn.reapplyConfig).toHaveBeenCalledWith(42, { freshSession: true })
     expect(getModelProviderDraftSelection("tab-1")).toBeNull()
+    expect(loadRememberedAgentModelSelection(agentType)).toEqual(selection)
   })
 
   it("keeps resume semantics for an existing conversation", async () => {
@@ -68,12 +73,14 @@ describe("applyDraftModelSelection", () => {
     await applyDraftModelSelection({
       tabId: "tab-1",
       conversationId: 42,
+      agentType,
       connection: conn,
     })
 
     expect(conn.reapplyConfig).toHaveBeenCalledWith(42, {
       freshSession: false,
     })
+    expect(loadRememberedAgentModelSelection(agentType)).toEqual(selection)
   })
 
   it("does nothing when the draft has no selection", async () => {
@@ -83,12 +90,14 @@ describe("applyDraftModelSelection", () => {
       applyDraftModelSelection({
         tabId: "tab-1",
         conversationId: 42,
+        agentType,
         connection: conn,
       })
     ).resolves.toBeNull()
 
     expect(updateConversationModelSelection).not.toHaveBeenCalled()
     expect(conn.reapplyConfig).not.toHaveBeenCalled()
+    expect(loadRememberedAgentModelSelection(agentType)).toBeNull()
   })
 
   it("restores the draft and skips reconnect when saving fails", async () => {
@@ -100,12 +109,14 @@ describe("applyDraftModelSelection", () => {
       applyDraftModelSelection({
         tabId: "tab-1",
         conversationId: 42,
+        agentType,
         connection: conn,
       })
     ).rejects.toThrow("save failed")
 
     expect(conn.reapplyConfig).not.toHaveBeenCalled()
     expect(getModelProviderDraftSelection("tab-1")).toEqual(selection)
+    expect(loadRememberedAgentModelSelection(agentType)).toBeNull()
   })
 
   it("restores the draft when applying the saved selection fails", async () => {
@@ -121,11 +132,15 @@ describe("applyDraftModelSelection", () => {
       applyDraftModelSelection({
         tabId: "tab-1",
         conversationId: 42,
+        agentType,
         connection: conn,
       })
     ).rejects.toThrow("reconnect failed")
 
     expect(updateConversationModelSelection).toHaveBeenCalledTimes(1)
     expect(getModelProviderDraftSelection("tab-1")).toEqual(selection)
+    // The save succeeded, so the memory is written even though the reconnect
+    // afterwards failed (the retry will re-apply the same choice).
+    expect(loadRememberedAgentModelSelection(agentType)).toEqual(selection)
   })
 })

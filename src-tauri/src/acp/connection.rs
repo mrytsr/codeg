@@ -13147,8 +13147,7 @@ async fn emit_conversation_update(
                     return;
                 }
                 CodexSubagentActivity::Other => return,
-            };
-            let tool_call_id = tc.tool_call_id.to_string();
+            };            let tool_call_id = tc.tool_call_id.to_string();
             // Remember which capsule owns this child, so its eventual
             // `completed` / `interrupted` (announced under a synthetic id of its
             // own) can be routed back here.

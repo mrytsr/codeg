@@ -5904,8 +5904,7 @@
     "removeTerminalCard": "移除終端機卡片",
     "terminalNoDirectory": "這張卡片沒有工作目錄",
     "confirmDeleteTerminals": "{count} 個執行中的終端機會被關閉，其中的處理程序也會一併結束。",
-    "confirmDeleteNotesAndTerminals": "你寫下的 {notes} 則便條將被永久刪除，另有 {terminals} 個執行中的終端機會被結束。"
-  },
+    "confirmDeleteNotesAndTerminals": "你寫下的 {notes} 則便條將被永久刪除，另有 {terminals} 個執行中的終端機會被結束。"  },
   "ModelProviderPicker": {
     "placeholder": "供應商 · 模型",
     "noProviders": "暫無供應商",
@@ -5915,4 +5914,5 @@
     "openPicker": "模型供應商",
     "resetNative": "返回原生設定",
     "saveFailed": "儲存模型選擇失敗"
-  }}
+  }
+}

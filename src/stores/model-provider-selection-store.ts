@@ -10,9 +10,18 @@ export interface ModelProviderDraftSelection {
 
 interface ModelProviderSelectionStore {
   drafts: Record<string, ModelProviderDraftSelection>
+  /**
+   * (tabId, agentType) pairs whose remembered-choice auto-restore has already
+   * been offered (seeded) or explicitly declined (user reset). Keyed
+   * `${tabId}:${agentType}` so switching agents on a draft restores each
+   * agent's own memory, while an explicit reset is never fought.
+   */
+  restoreSettledKeys: Record<string, true>
   setDraft: (tabId: string, selection: ModelProviderDraftSelection) => void
   clearDraft: (tabId: string) => void
   consumeDraft: (tabId: string) => ModelProviderDraftSelection | null
+  markRestoreSettled: (key: string) => void
+  isRestoreSettled: (key: string) => boolean
 }
 
 /**
@@ -24,6 +33,7 @@ interface ModelProviderSelectionStore {
 const useModelProviderSelectionStore = create<ModelProviderSelectionStore>(
   (set, get) => ({
     drafts: {},
+    restoreSettledKeys: {},
     setDraft: (tabId, selection) =>
       set((state) => ({ drafts: { ...state.drafts, [tabId]: selection } })),
     clearDraft: (tabId) =>
@@ -38,6 +48,18 @@ const useModelProviderSelectionStore = create<ModelProviderSelectionStore>(
       if (selection) get().clearDraft(tabId)
       return selection
     },
+    markRestoreSettled: (key) =>
+      set((state) =>
+        key in state.restoreSettledKeys
+          ? state
+          : {
+              restoreSettledKeys: {
+                ...state.restoreSettledKeys,
+                [key]: true,
+              },
+            }
+      ),
+    isRestoreSettled: (key) => key in get().restoreSettledKeys,
   })
 )
 
@@ -79,7 +101,22 @@ export function consumeModelProviderDraftSelection(
   return useModelProviderSelectionStore.getState().consumeDraft(tabId)
 }
 
-/** Test-only: clear all tab-keyed draft selections. */
+/** Mark one (tab, agent) key as settled so remembered choices stop being
+ *  auto-restored for it (seeded once, or explicitly declined via reset). */
+export function markModelProviderRestoreSettled(key: string): void {
+  useModelProviderSelectionStore.getState().markRestoreSettled(key)
+}
+
+/** True once the remembered-choice auto-restore was offered/declined for a
+ *  (tab, agent) key. */
+export function isModelProviderRestoreSettled(key: string): boolean {
+  return useModelProviderSelectionStore.getState().isRestoreSettled(key)
+}
+
+/** Test-only: clear all tab-keyed draft selections and restore markers. */
 export function resetModelProviderSelectionStore(): void {
-  useModelProviderSelectionStore.setState({ drafts: {} })
+  useModelProviderSelectionStore.setState({
+    drafts: {},
+    restoreSettledKeys: {},
+  })
 }

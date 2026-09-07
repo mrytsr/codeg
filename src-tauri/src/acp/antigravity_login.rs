@@ -1688,8 +1688,7 @@ mod tests {
             "id": 1,
             "result": { "agentCapabilities": { "auth": { "logout": null } } },
         });
-        assert!(!advertises_logout(&nulled));
-    }
+        assert!(!advertises_logout(&nulled));    }
 
     #[test]
     fn finds_the_url_in_the_agents_prompt_line() {

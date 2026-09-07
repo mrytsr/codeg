@@ -4,6 +4,8 @@ import {
   clearModelProviderDraftSelection,
   getModelProviderDraftSelection,
   consumeModelProviderDraftSelection,
+  isModelProviderRestoreSettled,
+  markModelProviderRestoreSettled,
   resetModelProviderSelectionStore,
   setModelProviderDraftSelection,
 } from "./model-provider-selection-store"
@@ -50,6 +52,31 @@ describe("model provider draft selection store", () => {
       providerId: "provider-b",
       modelId: "model-b",
     })
+  })
+
+  it("marks restore keys settled without re-marking", () => {
+    expect(isModelProviderRestoreSettled("tab-1:claude_code")).toBe(false)
+
+    markModelProviderRestoreSettled("tab-1:claude_code")
+    expect(isModelProviderRestoreSettled("tab-1:claude_code")).toBe(true)
+
+    // Different key (agent switch) is independent.
+    expect(isModelProviderRestoreSettled("tab-1:codex")).toBe(false)
+    markModelProviderRestoreSettled("tab-1:codex")
+    expect(isModelProviderRestoreSettled("tab-1:codex")).toBe(true)
+  })
+
+  it("reset clears drafts and restore markers", () => {
+    setModelProviderDraftSelection("tab-1", {
+      providerId: "provider-a",
+      modelId: "model-a",
+    })
+    markModelProviderRestoreSettled("tab-1:claude_code")
+
+    resetModelProviderSelectionStore()
+
+    expect(getModelProviderDraftSelection("tab-1")).toBeNull()
+    expect(isModelProviderRestoreSettled("tab-1:claude_code")).toBe(false)
   })
 
   it("consumes a draft exactly once", () => {

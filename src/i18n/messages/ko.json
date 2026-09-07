@@ -5904,8 +5904,7 @@
     "removeTerminalCard": "터미널 카드 제거",
     "terminalNoDirectory": "이 카드에는 작업 디렉터리가 없습니다",
     "confirmDeleteTerminals": "실행 중인 터미널 {count}개가 닫히고 해당 프로세스도 종료됩니다.",
-    "confirmDeleteNotesAndTerminals": "직접 작성한 메모 {notes}개가 영구 삭제되고, 실행 중인 터미널 {terminals}개도 종료됩니다."
-  },
+    "confirmDeleteNotesAndTerminals": "직접 작성한 메모 {notes}개가 영구 삭제되고, 실행 중인 터미널 {terminals}개도 종료됩니다."  },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",
     "noProviders": "No providers",
@@ -5915,4 +5914,5 @@
     "openPicker": "Model provider",
     "resetNative": "Back to native config",
     "saveFailed": "Failed to save model selection"
-  }}
+  }
+}

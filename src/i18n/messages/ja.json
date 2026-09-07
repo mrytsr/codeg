@@ -5904,8 +5904,7 @@
     "removeTerminalCard": "ターミナルカードを削除",
     "terminalNoDirectory": "このカードには作業ディレクトリがありません",
     "confirmDeleteTerminals": "実行中のターミナル {count} 個が閉じられ、そのプロセスも終了します。",
-    "confirmDeleteNotesAndTerminals": "書き込んだメモ {notes} 件が完全に削除され、実行中のターミナル {terminals} 個も終了します。"
-  },
+    "confirmDeleteNotesAndTerminals": "書き込んだメモ {notes} 件が完全に削除され、実行中のターミナル {terminals} 個も終了します。"  },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",
     "noProviders": "No providers",
@@ -5915,4 +5914,5 @@
     "openPicker": "Model provider",
     "resetNative": "Back to native config",
     "saveFailed": "Failed to save model selection"
-  }}
+  }
+}

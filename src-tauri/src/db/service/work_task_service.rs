@@ -199,8 +199,7 @@ pub async fn list(
                 WorkTaskStatus::Preparing
                     | WorkTaskStatus::Running
                     | WorkTaskStatus::AwaitingInput
-                    | WorkTaskStatus::Merging
-            )
+                    | WorkTaskStatus::Merging            )
         })
         .map(|t| t.id)
         .collect();

@@ -5904,8 +5904,7 @@
     "removeTerminalCard": "移除终端卡片",
     "terminalNoDirectory": "这张卡片没有工作目录",
     "confirmDeleteTerminals": "{count} 个正在运行的终端会被关闭，其中的进程也会一并结束。",
-    "confirmDeleteNotesAndTerminals": "你写下的 {notes} 条便签将被永久删除，另有 {terminals} 个正在运行的终端会被结束。"
-  },
+    "confirmDeleteNotesAndTerminals": "你写下的 {notes} 条便签将被永久删除，另有 {terminals} 个正在运行的终端会被结束。"  },
   "ModelProviderPicker": {
     "placeholder": "供应商 · 模型",
     "noProviders": "暂无供应商",
@@ -5915,4 +5914,5 @@
     "openPicker": "模型供应商",
     "resetNative": "返回原生配置",
     "saveFailed": "保存模型选择失败"
-  }}
+  }
+}

@@ -1446,8 +1446,7 @@ mod tests {
                        {"type":"thinking","thinking":"check the build first","thinkingSignature":"sig"},
                        {"type":"text","text":"Running the build now."},
                        {"type":"toolCall","id":"call_1","name":"bash","arguments":{"command":"pnpm build"}}
-                     ]}}),
-            json!({"type":"message","id":"m3","parentId":"m2","timestamp":"2026-06-27T10:00:09.000Z",
+                     ]}}),            json!({"type":"message","id":"m3","parentId":"m2","timestamp":"2026-06-27T10:00:09.000Z",
                    "message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash",
                      "content":[{"type":"text","text":"Compiled successfully"}],"isError":false}}),
             json!({"type":"message","id":"m4","parentId":"m3","timestamp":"2026-06-27T10:00:10.000Z",
