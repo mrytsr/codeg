@@ -124,11 +124,17 @@ impl ClineParser {
         }
     }
 
-    /// Test-only constructor that lets callers point the parser at a fixture
-    /// directory instead of `~/.cline/data`.
-    #[cfg(any(test, feature = "test-utils"))]
+    /// Point the parser at an explicit Cline data dir (`CLINE_DIR`, containing
+    /// `tasks/` + `state/`) instead of the env-resolved `~/.cline/data` — the
+    /// provider workspace or a test fixture.
     pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self { base_dir }
+    }
+
+    #[cfg(test)]
+    /// Read-only access to the Cline data dir this parser reads from.
+    pub(crate) fn base_dir(&self) -> &std::path::Path {
+        &self.base_dir
     }
 }
 

@@ -150,6 +150,7 @@ pub async fn get_folder_conversation(
         &state.emitter,
         params.conversation_id,
         window,
+        Some(&state.data_dir),
     )
     .await?;
     Ok(Json(result))
@@ -172,6 +173,7 @@ pub async fn get_folder_conversation_turns(
         params.conversation_id,
         params.before_index,
         params.limit,
+        Some(&state.data_dir),
     )
     .await?;
     Ok(Json(result))

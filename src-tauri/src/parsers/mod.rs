@@ -18,7 +18,7 @@ pub mod qoder;
 mod summary_cache;
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// A root of external agent-CLI transcript data, archived under
@@ -277,9 +277,22 @@ pub enum ParseError {
     InvalidData(String),
 }
 
-pub trait AgentParser {
+pub trait AgentParser: AsAny {
     fn list_conversations(&self) -> Result<Vec<ConversationSummary>, ParseError>;
     fn get_conversation(&self, conversation_id: &str) -> Result<ConversationDetail, ParseError>;
+}
+
+/// Object-safety bridge for tests to downcast a `&dyn AgentParser` back to its
+/// concrete type (e.g. assert a workspace parser's `base_dir`). Every parser
+/// gets this via the blanket impl; the `'static` bound is what makes the
+/// `&self as &dyn Any` cast sound.
+pub trait AsAny: 'static {
+    fn as_any(&self) -> &dyn std::any::Any;
+}
+impl<T: 'static> AsAny for T {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// The ONE place a history parser is constructed.
@@ -311,6 +324,49 @@ pub fn build_agent_parser(agent_type: AgentType) -> Box<dyn AgentParser> {
         AgentType::Custom(_) => Box::new(acp_native::AcpNativeParser::new(agent_type)),
     };
     Box::new(RouteSanitized(inner))
+}
+
+/// Build a parser pointed at a conversation's shared-provider workspace, when
+/// the agent's session store lives inside that workspace.
+///
+/// The launch adapters redirect an agent's config home into a per-conversation
+/// workspace under `model-provider/<agent>/<conversation_id>/` (see
+/// `commands::model_provider_launch::workspace_dir`). For agents whose native
+/// session store lives under that home — Codex, OpenCode, Cline, Hermes and
+/// Kimi Code — refresh-time reads must point the parser at the workspace or
+/// the history is invisible (the parser's env-resolved home never sees it).
+/// Pi is intentionally excluded: its writer pins `PI_CODING_AGENT_SESSION_DIR`
+/// back to the native store, so its history stays in the native home.
+///
+/// Returns `None` when the workspace does not exist — native / env-only
+/// conversations, provider conversations that never spawned, or an agent whose
+/// sessions are not workspace-local — leaving the caller to fall back to
+/// [`build_agent_parser`].
+pub fn build_workspace_agent_parser(
+    agent_type: AgentType,
+    data_dir: &Path,
+    conversation_id: i32,
+) -> Option<Box<dyn AgentParser>> {
+    let ws =
+        crate::commands::model_provider_launch::workspace_dir(data_dir, agent_type, conversation_id);
+    if !ws.is_dir() {
+        return None;
+    }
+    let inner: Box<dyn AgentParser> = match agent_type {
+        AgentType::Codex => Box::new(codex::CodexParser::with_base_dir(ws.join("sessions"))),
+        AgentType::KimiCode => Box::new(kimi_code::KimiCodeParser::with_base_dir(
+            ws.join("sessions"),
+        )),
+        // opencode's data dir is `$XDG_DATA_HOME/opencode`; the writer points
+        // `XDG_DATA_HOME` at `ws/data`.
+        AgentType::OpenCode => Box::new(opencode::OpenCodeParser::with_base_dir(
+            ws.join("data").join("opencode"),
+        )),
+        AgentType::Cline => Box::new(cline::ClineParser::with_base_dir(ws.clone())),
+        AgentType::Hermes => Box::new(hermes::HermesParser::with_base_dir(ws)),
+        _ => return None,
+    };
+    Some(Box::new(RouteSanitized(inner)))
 }
 
 /// Removes Codeg's internal `@agent` routing frame from whatever a parser read
@@ -1846,9 +1902,9 @@ mod tests {
     use chrono::Utc;
 
     use super::{
-        backfill_turn_durations, fold_reference_links, infer_context_window_max_tokens,
-        is_safe_subagent_id, latest_turn_total_usage_tokens, merge_context_window_stats,
-        path_eq_for_matching, title_from_user_text,
+        backfill_turn_durations, build_workspace_agent_parser, fold_reference_links,
+        infer_context_window_max_tokens, is_safe_subagent_id, latest_turn_total_usage_tokens,
+        merge_context_window_stats, path_eq_for_matching, title_from_user_text,
     };
     use crate::models::{MessageTurn, SessionStats, TurnRole, TurnUsage};
 
@@ -2237,5 +2293,82 @@ mod tests {
             "C:\\Users\\demo\\workspace\\codeg",
             "C:/Users/demo/workspace/codeg"
         ));
+    }
+
+    /// `build_workspace_agent_parser` maps each workspace-writing agent to the
+    /// subdir inside the provider workspace where it actually keeps its
+    /// session store, and returns `None` when the workspace doesn't exist
+    /// (native read).
+    #[test]
+    fn workspace_parser_maps_agents_and_requires_existing_workspace() {
+        use crate::models::AgentType;
+
+        fn parser_base_dir(p: &dyn crate::parsers::AgentParser) -> Option<std::path::PathBuf> {
+            use crate::parsers::{cline::ClineParser, codex::CodexParser, hermes::HermesParser, kimi_code::KimiCodeParser, opencode::OpenCodeParser};
+            // `build_*` parsers are wrapped in `RouteSanitized`; unwrap one layer.
+            let ws = p.as_any().downcast_ref::<crate::parsers::RouteSanitized>()?;
+            let inner: &dyn crate::parsers::AgentParser = ws.0.as_ref();
+            let any = inner.as_any();
+            if let Some(c) = any.downcast_ref::<CodexParser>() {
+                return Some(c.base_dir().to_path_buf());
+            }
+            if let Some(c) = any.downcast_ref::<OpenCodeParser>() {
+                return Some(c.base_dir().to_path_buf());
+            }
+            if let Some(c) = any.downcast_ref::<ClineParser>() {
+                return Some(c.base_dir().to_path_buf());
+            }
+            if let Some(c) = any.downcast_ref::<HermesParser>() {
+                return Some(c.base_dir().to_path_buf());
+            }
+            if let Some(c) = any.downcast_ref::<KimiCodeParser>() {
+                return Some(c.base_dir().to_path_buf());
+            }
+            None
+        }
+
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let root = data_dir.path();
+        let ws = root.join("model-provider");
+
+        // No workspace at all → native parser (None), for every agent.
+        assert!(build_workspace_agent_parser(AgentType::Codex, root, 7).is_none());
+        assert!(build_workspace_agent_parser(AgentType::OpenCode, root, 7).is_none());
+        assert!(build_workspace_agent_parser(AgentType::Cline, root, 7).is_none());
+        assert!(build_workspace_agent_parser(AgentType::Hermes, root, 7).is_none());
+        assert!(build_workspace_agent_parser(AgentType::KimiCode, root, 7).is_none());
+        // Env-only / Pi agents have no workspace redirect: never workspace-parsed.
+        assert!(build_workspace_agent_parser(AgentType::ClaudeCode, root, 7).is_none());
+        assert!(build_workspace_agent_parser(AgentType::Pi, root, 7).is_none());
+
+        // Workspace present → parser whose base_dir lands on the right subdir.
+        let codex_ws = ws.join("codex").join("7");
+        std::fs::create_dir_all(&codex_ws).expect("create codex ws");
+        let p = build_workspace_agent_parser(AgentType::Codex, root, 7).expect("codex parser");
+        // Codex keeps sessions under `<ws>/sessions`; the parser must read that.
+        assert_eq!(parser_base_dir(p.as_ref()), Some(codex_ws.join("sessions")));
+
+        let opencode_ws = ws.join("open_code").join("7");
+        std::fs::create_dir_all(&opencode_ws).expect("create opencode ws");
+        let p = build_workspace_agent_parser(AgentType::OpenCode, root, 7).expect("opencode parser");
+        assert_eq!(
+            parser_base_dir(p.as_ref()),
+            Some(opencode_ws.join("data").join("opencode"))
+        );
+
+        let cline_ws = ws.join("cline").join("7");
+        std::fs::create_dir_all(&cline_ws).expect("create cline ws");
+        let p = build_workspace_agent_parser(AgentType::Cline, root, 7).expect("cline parser");
+        assert_eq!(parser_base_dir(p.as_ref()), Some(cline_ws.clone()));
+
+        let hermes_ws = ws.join("hermes").join("7");
+        std::fs::create_dir_all(&hermes_ws).expect("create hermes ws");
+        let p = build_workspace_agent_parser(AgentType::Hermes, root, 7).expect("hermes parser");
+        assert_eq!(parser_base_dir(p.as_ref()), Some(hermes_ws.clone()));
+
+        let kimi_ws = ws.join("kimi_code").join("7");
+        std::fs::create_dir_all(&kimi_ws).expect("create kimi ws");
+        let p = build_workspace_agent_parser(AgentType::KimiCode, root, 7).expect("kimi parser");
+        assert_eq!(parser_base_dir(p.as_ref()), Some(kimi_ws.join("sessions")));
     }
 }

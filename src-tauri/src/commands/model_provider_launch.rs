@@ -152,7 +152,7 @@ fn apply_proxy_env(
 }
 
 /// The per-conversation workspace path for an agent.
-fn workspace_dir(data_dir: &Path, agent_type: AgentType, conversation_id: i32) -> PathBuf {
+pub(crate) fn workspace_dir(data_dir: &Path, agent_type: AgentType, conversation_id: i32) -> PathBuf {
     data_dir
         .join(MODEL_PROVIDER_WORKSPACE_ROOT)
         .join(agent_type.as_wire().as_ref())

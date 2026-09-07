@@ -28,9 +28,15 @@ impl OpenCodeParser {
         Self { base_dir }
     }
 
-    /// Test-only constructor that lets callers point the parser at a fixture
-    /// directory containing an `opencode.db` SQLite file.
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(test)]
+    /// Read-only access to the session store directory this parser reads from.
+    pub(crate) fn base_dir(&self) -> &std::path::Path {
+        &self.base_dir
+    }
+
+    /// Point the parser at an explicit opencode data dir (parent of
+    /// `opencode.db`) instead of the env-resolved `$XDG_DATA_HOME/opencode` —
+    /// the provider workspace's `data/opencode/` or a test fixture.
     pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self { base_dir }
     }

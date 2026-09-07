@@ -44,11 +44,17 @@ impl HermesParser {
         }
     }
 
-    /// Test-only constructor that points the parser at a fixture directory
-    /// containing a `state.db` SQLite file.
-    #[cfg(any(test, feature = "test-utils"))]
+    /// Point the parser at an explicit Hermes home (containing `state.db`)
+    /// instead of the env-resolved `~/.hermes` — the provider workspace or a
+    /// test fixture.
     pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self { base_dir }
+    }
+
+    #[cfg(test)]
+    /// Read-only access to the Hermes home this parser reads from.
+    pub(crate) fn base_dir(&self) -> &std::path::Path {
+        &self.base_dir
     }
 
     fn sqlite_db_path(&self) -> PathBuf {

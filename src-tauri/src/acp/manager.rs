@@ -2023,6 +2023,11 @@ impl ConnectionManager {
                 match crate::commands::conversations::get_folder_conversation_core(
                     &db.conn,
                     conversation_id,
+                    // `ConnectionManager` carries no data_dir; a workspace
+                    // transcript missed here degrades to the tail fork (this
+                    // is a read-only best-effort resolution, see the comment
+                    // below).
+                    None,
                 )
                 .await
                 {

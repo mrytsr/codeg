@@ -985,7 +985,7 @@ pub async fn token_usage_sync_core(
     // Parse concurrently (each `get_folder_conversation_core` hands the file
     // read to the blocking pool), consume in order, write sequentially.
     let mut parsed = stream::iter(stale.into_iter().map(|candidate| async move {
-        let detail = get_folder_conversation_core(conn, candidate.id).await;
+        let detail = get_folder_conversation_core(conn, candidate.id, None).await;
         (candidate, detail)
     }))
     .buffered(PARSE_CONCURRENCY);
