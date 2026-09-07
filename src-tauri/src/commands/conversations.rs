@@ -18,7 +18,8 @@ use crate::models::*;
 // through `build_agent_parser`.
 use crate::parsers::codex::CodexParser;
 use crate::parsers::{
-    build_agent_parser, folder_name_from_path, normalize_path_for_matching, path_eq_for_matching,
+    build_agent_parser, build_workspace_agent_parser, folder_name_from_path,
+    normalize_path_for_matching, path_eq_for_matching,
     AgentParser, ParseError,
 };
 use crate::web::event_bridge::{
@@ -1194,9 +1195,17 @@ fn inject_delegation_meta(turns: &mut [MessageTurn], children: &[DbConversationS
 /// just read (`None` when no file matched). The live wrapper uses that title to
 /// backfill the DB row's title when the user hasn't locked it — reusing this
 /// already-happening per-turn parse rather than reading the file again.
+///
+/// `data_dir`: when `Some`, and the conversation row is bound to the shared
+/// Model Provider source, the parser is pointed at the conversation's provider
+/// workspace (`model-provider/<agent>/<conversation_id>`) instead of the
+/// env-resolved native home — that is where the agent actually wrote its
+/// sessions. `None` (or a workspace that doesn't exist) degrades to the native
+/// parser, unchanged.
 pub async fn get_folder_conversation_core(
     conn: &sea_orm::DatabaseConnection,
     conversation_id: i32,
+    data_dir: Option<&std::path::Path>,
 ) -> Result<(DbConversationDetail, Option<String>), AppCommandError> {
     let summary = conversation_service::get_by_id(conn, conversation_id)
         .await
@@ -1213,6 +1222,10 @@ pub async fn get_folder_conversation_core(
         let at = summary.agent_type;
         let eid = ext_id.clone();
         let db_created_at = summary.created_at;
+        // `model_source == "provider"` is the shared-catalog source the
+        // workspace writers serve; anything else stays on the native parser.
+        let model_source = summary.model_source.clone();
+        let data_dir_owned = data_dir.map(std::path::Path::to_path_buf);
         // Prefer the recorded origin cwd (set when a removed task worktree's
         // conversations were re-parented) over the current folder's path — the
         // session file still carries the ORIGINAL cwd, so matching on the new
@@ -1226,7 +1239,13 @@ pub async fn get_folder_conversation_core(
                 .map(|f| f.path),
         };
         tokio::task::spawn_blocking(move || -> Result<_, AppCommandError> {
-            let parser = build_agent_parser(at);
+            let parser = match (model_source.as_deref(), data_dir_owned.as_deref()) {
+                (Some("provider"), Some(dir)) => {
+                    build_workspace_agent_parser(at, dir, conversation_id)
+                        .unwrap_or_else(|| build_agent_parser(at))
+                }
+                _ => build_agent_parser(at),
+            };
             match parser.get_conversation(&eid) {
                 Ok(d) => Ok((
                     d.turns,
@@ -1567,8 +1586,10 @@ pub async fn get_folder_conversation_with_live_core(
     emitter: &EventEmitter,
     conversation_id: i32,
     window: Option<crate::commands::turn_window::TurnWindowReq>,
+    data_dir: Option<&std::path::Path>,
 ) -> Result<DbConversationDetail, AppCommandError> {
-    let (mut detail, parsed_title) = get_folder_conversation_core(conn, conversation_id).await?;
+    let (mut detail, parsed_title) =
+        get_folder_conversation_core(conn, conversation_id, data_dir).await?;
 
     // Per-turn auto-title backfill. The parse `get_folder_conversation_core`
     // just did already produced the session-file title; adopt it (and broadcast
@@ -1648,9 +1669,11 @@ pub async fn get_folder_conversation_turns_core(
     conversation_id: i32,
     before_index: usize,
     limit: usize,
+    data_dir: Option<&std::path::Path>,
 ) -> Result<ConversationTurnsPage, AppCommandError> {
     use crate::commands::turn_window;
-    let (detail, _parsed_title) = get_folder_conversation_core(conn, conversation_id).await?;
+    let (detail, _parsed_title) =
+        get_folder_conversation_core(conn, conversation_id, data_dir).await?;
     let turns = detail.turns;
     let (start, end) = turn_window::resolve_page_bounds(&turns, before_index, limit);
     let meta = turn_window::window_meta(&turns, start);
@@ -1678,6 +1701,11 @@ pub async fn get_folder_conversation(
     from_index: Option<usize>,
 ) -> Result<DbConversationDetail, AppCommandError> {
     let window = resolve_turn_window_req(tail_turns, from_index)?;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
     get_folder_conversation_with_live_core(
         &db.conn,
         &manager,
@@ -1685,6 +1713,7 @@ pub async fn get_folder_conversation(
         &EventEmitter::Tauri(app),
         conversation_id,
         window,
+        Some(&data_dir),
     )
     .await
 }
@@ -1692,12 +1721,19 @@ pub async fn get_folder_conversation(
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn get_folder_conversation_turns(
+    app: tauri::AppHandle,
     db: tauri::State<'_, AppDatabase>,
     conversation_id: i32,
     before_index: usize,
     limit: usize,
 ) -> Result<ConversationTurnsPage, AppCommandError> {
-    get_folder_conversation_turns_core(&db.conn, conversation_id, before_index, limit).await
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    get_folder_conversation_turns_core(&db.conn, conversation_id, before_index, limit, Some(&data_dir))
+        .await
 }
 
 /// Emit a `conversation://changed` Upsert for `conversation_id` so every
@@ -3477,11 +3513,111 @@ mod tests {
         .expect("child");
         // Parent has no external_id → no JSONL → no turns to inject into.
         // The call must still succeed without error.
-        let (detail, _parsed_title) = get_folder_conversation_core(&db.conn, parent_id)
+        let (detail, _parsed_title) = get_folder_conversation_core(&db.conn, parent_id, None)
             .await
             .expect("load");
         assert_eq!(detail.summary.id, parent_id);
         assert!(detail.turns.is_empty());
+    }
+
+    /// A shared-provider codex conversation writes its rollouts into
+    /// `<data_dir>/model-provider/codex/<conversation_id>/sessions/` — the
+    /// workspace the launch adapter points `CODEX_HOME` at. The detail read
+    /// must point the parser at that workspace; without `data_dir` it falls
+    /// back to the env-resolved home, which never matches, so the conversation
+    /// would come back empty after a refresh (the `ConversationNotFound`
+    /// silent-empty regression).
+    #[tokio::test]
+    async fn get_folder_conversation_core_reads_provider_workspace_sessions() {
+        use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
+
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/codeg-ws-test").await;
+        let conv_id = create_conversation_core(
+            &db.conn,
+            folder_id,
+            AgentType::Codex,
+            Some("ws".into()),
+        )
+        .await
+        .expect("create conversation");
+        let session_id = "01a0ws01-0000-7000-8000-000000000000";
+
+        // Bind the row to the shared Model Provider source (what
+        // `update_conversation_model_selection_core` does for a real selection)
+        // and record the session id the agent will write under.
+        let row = conversation::Entity::find_by_id(conv_id)
+            .one(&db.conn)
+            .await
+            .expect("read row")
+            .expect("exists");
+        let mut am = row.into_active_model();
+        am.model_source = Set(Some("provider".into()));
+        am.external_id = Set(Some(session_id.to_string()));
+        am.update(&db.conn).await.expect("update row");
+
+        // Lay down a real rollout in the workspace the spawn adapter creates.
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let rollout_dir = data_dir
+            .path()
+            .join("model-provider")
+            .join("codex")
+            .join(conv_id.to_string())
+            .join("sessions")
+            .join("2026")
+            .join("08")
+            .join("15");
+        std::fs::create_dir_all(&rollout_dir).expect("create rollout dir");
+        std::fs::write(
+            rollout_dir.join(format!("rollout-2026-08-15T16-00-00-{session_id}.jsonl")),
+            format!(
+                "{}\n",
+                [
+                    serde_json::json!({
+                        "timestamp": "2026-08-15T08:00:00Z",
+                        "type": "session_meta",
+                        "payload": {"id": session_id, "cwd": "/tmp/codeg-ws-test"}
+                    })
+                    .to_string(),
+                    serde_json::json!({
+                        "timestamp": "2026-08-15T08:00:01Z",
+                        "type": "event_msg",
+                        "payload": {"type": "user_message", "message": "hello workspace"}
+                    })
+                    .to_string(),
+                ]
+                .join("\n")
+            ),
+        )
+        .expect("write rollout");
+
+        // data_dir-aware read finds the workspace session.
+        let (detail, _parsed_title) =
+            get_folder_conversation_core(&db.conn, conv_id, Some(data_dir.path()))
+                .await
+                .expect("load with workspace");
+        let text: String = detail
+            .turns
+            .iter()
+            .flat_map(|t| t.blocks.iter())
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            text.contains("hello workspace"),
+            "workspace session must be read back, got {text:?}"
+        );
+
+        // Without data_dir the read falls back to the env home → no session.
+        let (empty, _) = get_folder_conversation_core(&db.conn, conv_id, None)
+            .await
+            .expect("load without workspace");
+        assert!(
+            empty.turns.is_empty(),
+            "env-home read must stay empty (no native rollout)"
+        );
     }
 
     #[tokio::test]
@@ -3967,7 +4103,7 @@ mod tests {
     #[tokio::test]
     async fn get_folder_conversation_core_missing_id_errors() {
         let db = fresh_in_memory_db().await;
-        let err = get_folder_conversation_core(&db.conn, 999_999)
+        let err = get_folder_conversation_core(&db.conn, 999_999, None)
             .await
             .expect_err("missing conversation must error, not panic");
         let msg = format!("{err:?}");
@@ -6380,7 +6516,7 @@ mod tests {
         let conv_id = create_conversation_core(&db.conn, folder_id, AgentType::ClaudeCode, None)
             .await
             .expect("create conversation");
-        let page = get_folder_conversation_turns_core(&db.conn, conv_id, 10, 5)
+        let page = get_folder_conversation_turns_core(&db.conn, conv_id, 10, 5, None)
             .await
             .expect("page fetch");
         assert_eq!(page.turns_total, 0);

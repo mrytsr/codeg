@@ -15,6 +15,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use std::path::PathBuf;
 
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
@@ -74,6 +75,10 @@ const MAX_CONCURRENT_PARSES: usize = 4;
 /// transcript parses. Construct via [`DbSessionInfoLookup::new`].
 pub struct DbSessionInfoLookup {
     pub db: Arc<AppDatabase>,
+    /// Optional codeg data dir, so a shared-provider conversation's transcript
+    /// is read from its provider workspace (see
+    /// `build_workspace_agent_parser`). `None` reads the native home.
+    data_dir: Option<PathBuf>,
     /// Limits concurrent `get_folder_conversation_core` parses (see
     /// [`MAX_CONCURRENT_PARSES`]).
     parse_limit: Arc<tokio::sync::Semaphore>,
@@ -81,8 +86,13 @@ pub struct DbSessionInfoLookup {
 
 impl DbSessionInfoLookup {
     pub fn new(db: Arc<AppDatabase>) -> Self {
+        Self::with_data_dir(db, None)
+    }
+
+    pub fn with_data_dir(db: Arc<AppDatabase>, data_dir: Option<PathBuf>) -> Self {
         Self {
             db,
+            data_dir,
             parse_limit: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PARSES)),
         }
     }
@@ -137,7 +147,10 @@ impl SessionInfoAccess for DbSessionInfoLookup {
         // degrade to metadata-only with an explanatory note rather than failing the
         // whole tool call.
         let conn_owned = self.db.conn.clone();
-        let parse = async move { get_folder_conversation_core(&conn_owned, session_id).await };
+        let data_dir = self.data_dir.clone();
+        let parse = async move {
+            get_folder_conversation_core(&conn_owned, session_id, data_dir.as_deref()).await
+        };
         match bounded_parse(self.parse_limit.clone(), PARSE_TIMEOUT, parse).await {
             ParseSlot::Ready(Ok((detail, parsed_title))) => {
                 if info.title.is_none() {

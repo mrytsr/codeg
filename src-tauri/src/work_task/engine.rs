@@ -2414,7 +2414,7 @@ impl TaskEngine {
             );
             return None;
         }
-        let (detail, _) = get_folder_conversation_core(&self.db.conn, conversation_id)
+        let (detail, _) = get_folder_conversation_core(&self.db.conn, conversation_id, Some(&self.data_dir))
             .await
             .ok()?;
         let stats = detail.session_stats?;

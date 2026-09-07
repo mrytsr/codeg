@@ -57,11 +57,17 @@ impl CodexParser {
         Self { base_dir }
     }
 
-    /// Test-only constructor that lets callers point the parser at a fixture
-    /// directory instead of `~/.codex/sessions`.
-    #[cfg(any(test, feature = "test-utils"))]
+    /// Point the parser at an explicit sessions directory instead of the
+    /// env-resolved `~/.codex/sessions` — the provider workspace's `sessions/`
+    /// (see `build_workspace_agent_parser`) or a test fixture.
     pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self { base_dir }
+    }
+
+    #[cfg(test)]
+    /// Read-only access to the sessions directory this parser reads from.
+    pub(crate) fn base_dir(&self) -> &Path {
+        &self.base_dir
     }
 
     /// Every line of a rollout, with a BY-REFERENCE fork's inherited history

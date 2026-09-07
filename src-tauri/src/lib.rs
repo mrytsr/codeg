@@ -832,10 +832,11 @@ mod tauri_app {
                             },
                         ),
                         std::sync::Arc::new(
-                            crate::commands::session_info::DbSessionInfoLookup::new(
+                            crate::commands::session_info::DbSessionInfoLookup::with_data_dir(
                                 std::sync::Arc::new(db::AppDatabase {
                                     conn: db_conn.clone(),
                                 }),
+                                Some(effective_data_dir.clone()),
                             ),
                         ),
                         std::sync::Arc::new(crate::work_task::EngineWorkTaskTools),

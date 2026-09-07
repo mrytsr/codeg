@@ -87,11 +87,17 @@ impl KimiCodeParser {
         }
     }
 
-    /// Construct a parser pointed at an explicit `sessions` directory (test
-    /// fixtures).
-    #[cfg(any(test, feature = "test-utils"))]
+    /// Construct a parser pointed at an explicit `sessions` directory instead
+    /// of the env-resolved `$KIMI_CODE_HOME/sessions` — the provider
+    /// workspace's `sessions/` or a test fixture.
     pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self { base_dir }
+    }
+
+    #[cfg(test)]
+    /// Read-only access to the sessions directory this parser reads from.
+    pub(crate) fn base_dir(&self) -> &Path {
+        &self.base_dir
     }
 
     /// Load `session_index.jsonl` (sibling of `sessions/`) into a
