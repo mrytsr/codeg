@@ -37,7 +37,11 @@ import {
   splitAbsPath,
 } from "@/lib/file-open-target"
 import { isAbsoluteFilePath } from "@/lib/file-path-display"
-import { pushClosedTab, snapshotFileTab } from "@/lib/closed-tab-stack"
+import {
+  batchCloseSlots,
+  pushClosedTab,
+  snapshotFileTab,
+} from "@/lib/closed-tab-stack"
 import {
   isBinaryImageFile,
   isHiddenPath,
@@ -138,9 +142,18 @@ interface WorkspaceActionsValue {
   // no folder to resolve against). Callers that only want the side effect
   // ignore it; a caller that must then FIND the tab (the file viewer drawer)
   // has no other way to reproduce this resolution.
+  //
+  // `index` is the strip slot for a tab that is not open yet, clamped to the
+  // strip; omitted = append. Reopening a closed tab passes the slot it was
+  // closed from. A tab that is already open is activated where it is.
   openFilePreview: (
     path: string,
-    options?: { line?: number; reload?: boolean; folderId?: number }
+    options?: {
+      line?: number
+      reload?: boolean
+      folderId?: number
+      index?: number
+    }
   ) => Promise<string | null>
   // Refetch the open tab matching the absolute `path` without changing
   // activeFileTabId. No-op when no tab matches or when the tab has unsaved
@@ -594,13 +607,18 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     [activateFilePane]
   )
 
-  // Insert a freshly created (loading, empty) tab. Caller has verified no tab
-  // with this id exists. If a race introduced one, leave it alone.
+  // Insert a freshly created (loading, empty) tab at `index` (clamped), or at
+  // the end. Caller has verified no tab with this id exists. If a race
+  // introduced one, leave it alone.
   const seedLoadingTab = useCallback(
-    (nextTab: FileWorkspaceTab) => {
+    (nextTab: FileWorkspaceTab, index?: number) => {
       setFileTabs((prev) => {
         if (prev.some((tab) => tab.id === nextTab.id)) return prev
-        return [...prev, nextTab]
+        const at =
+          index == null
+            ? prev.length
+            : Math.max(0, Math.min(index, prev.length))
+        return [...prev.slice(0, at), nextTab, ...prev.slice(at)]
       })
       setActiveFileTabId(nextTab.id)
       activateFilePane()
@@ -699,7 +717,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   }, [])
 
   const decideLoad = useCallback(
-    (seed: FileWorkspaceTab, reload: boolean): LoadDecision => {
+    (seed: FileWorkspaceTab, reload: boolean, index?: number): LoadDecision => {
       // Dedup synchronously. inFlightLoadsRef is updated immediately on
       // generation start, so rapid re-clicks within a single event loop
       // turn collapse here — unlike fileTabsRef.current, which only
@@ -715,7 +733,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         // e.g. the user closed it while a watcher-driven reload was in
         // flight — do not resurrect it as a phantom tab.
         if (reload) return { kind: "skip" }
-        seedLoadingTab(seed)
+        seedLoadingTab(seed, index)
         return { kind: "fetch", gen: beginFetchGeneration(seed.id) }
       }
 
@@ -1152,7 +1170,12 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const openFilePreview = useCallback(
     async (
       rawPath: string,
-      options?: { line?: number; reload?: boolean; folderId?: number }
+      options?: {
+        line?: number
+        reload?: boolean
+        folderId?: number
+        index?: number
+      }
     ) => {
       const absPath = await resolveOpenAbsolutePath(rawPath, options?.folderId)
       if (!absPath) return null
@@ -1191,7 +1214,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           image ? "image" : office ? "office" : languageFromPath(absPath)
         )
 
-        const decision = decideLoad(seed, options?.reload ?? false)
+        const decision = decideLoad(
+          seed,
+          options?.reload ?? false,
+          options?.index
+        )
         if (decision.kind === "skip") return
         const { gen } = decision
 
@@ -2294,7 +2321,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         // `pushClosedTab` keys on the tab id and moves an existing entry to the
         // top, so recording from inside this updater survives React invoking it
         // more than once (StrictMode, or a discarded render replayed).
-        const closed = snapshotFileTab(tab)
+        const closed = snapshotFileTab(tab, idx)
         if (closed) pushClosedTab(closed)
 
         const next = prev.filter((candidate) => candidate.id !== tabId)
@@ -2343,10 +2370,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           if (!confirmed) return prev
         }
 
-        for (const closing of closingTabs) {
-          // `pushClosedTab` is idempotent per tab id, which is what makes this
-          // safe inside an updater React may invoke more than once.
-          const closed = snapshotFileTab(closing)
+        // `pushClosedTab` is idempotent per tab id, which is what makes this
+        // safe inside an updater React may invoke more than once.
+        const slots = batchCloseSlots(prev, (tab) => tab.id !== tabId)
+        for (const [closing, slot] of slots) {
+          const closed = snapshotFileTab(closing, slot)
           if (closed) pushClosedTab(closed)
           inFlightLoadsRef.current.delete(closing.id)
         }
@@ -2368,8 +2396,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     }
 
     setFileTabs((prev) => {
-      for (const tab of prev) {
-        const closed = snapshotFileTab(tab)
+      for (const [tab, slot] of batchCloseSlots(prev)) {
+        const closed = snapshotFileTab(tab, slot)
         if (closed) pushClosedTab(closed)
       }
 
