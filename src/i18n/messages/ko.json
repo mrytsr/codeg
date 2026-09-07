@@ -1588,7 +1588,8 @@
     "customAgentRemoveWithData": "기록된 대화 기록도 삭제",
     "customAgentRemoved": "{name} 제거됨",
     "customAgentBadge": "사용자 지정",
-    "customAgentNotLaunchable": "이 환경에서는 실행할 수 없습니다: {reason}"
+    "customAgentNotLaunchable": "이 환경에서는 실행할 수 없습니다: {reason}",
+    "providerSourceActiveHint": "이 에이전트는 공유 모델 공급자 카탈로그를 사용합니다. 네이티브 모델 설정은 숨겨집니다."
   },
   "SettingsPages": {
     "agentsLoading": "에이전트 설정을 불러오는 중...",
@@ -5905,15 +5906,13 @@
     "confirmDeleteTerminals": "실행 중인 터미널 {count}개가 닫히고 해당 프로세스도 종료됩니다.",
     "confirmDeleteNotesAndTerminals": "직접 작성한 메모 {notes}개가 영구 삭제되고, 실행 중인 터미널 {terminals}개도 종료됩니다."
   },
-  "ModelProviderPickerDemo": {
-    "demoTag": "DEMO",
+  "ModelProviderPicker": {
     "placeholder": "Provider · Model",
-    "providers": "Providers",
-    "models": "Models",
-    "disabled": "disabled",
     "noProviders": "No providers",
     "noModels": "No models",
     "vision": "vision",
     "reasoning": "reasoning",
-    "openPicker": "Demo provider picker"  }
-}
+    "openPicker": "Model provider",
+    "resetNative": "Back to native config",
+    "saveFailed": "Failed to save model selection"
+  }}

@@ -55,6 +55,7 @@ export interface ModelProviderRecord {
   models: ModelEntryDraft[]
   apiKeyMasked: string
   hasApiKey: boolean
+  compatSupportsDeveloperRole: boolean | null
 }
 
 /** A curated built-in provider the user can clone into a custom provider. */
@@ -115,7 +116,7 @@ export function recordToDraft(record: ModelProviderRecord): ModelProviderDraft {
     proxy: record.proxy,
     apiKey: "",
     authHeader: record.hasApiKey,
-    compatSupportsDeveloperRole: null,
+    compatSupportsDeveloperRole: record.compatSupportsDeveloperRole ?? null,
     enabled: record.enabled,
     models: record.models.map((m) => ({ ...m })),
   }

@@ -2488,6 +2488,7 @@ impl DelegationBroker {
                 req.working_dir.clone(),
                 preferred_mode_id,
                 preferred_config_values,
+                Some(req.parent_conversation_id),
             )
             .await
         {
@@ -4059,6 +4060,7 @@ impl DelegationBroker {
                 &external_id,
                 preferred_mode_id,
                 preferred_config_values,
+                Some(req.parent_conversation_id),
             )
             .await
         {

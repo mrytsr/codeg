@@ -1588,7 +1588,8 @@
     "customAgentRemoveWithData": "حذف سجل المحادثات المسجل أيضًا",
     "customAgentRemoved": "تمت إزالة {name}",
     "customAgentBadge": "مخصص",
-    "customAgentNotLaunchable": "لا يمكن تشغيل هذا الوكيل هنا: {reason}"
+    "customAgentNotLaunchable": "لا يمكن تشغيل هذا الوكيل هنا: {reason}",
+    "providerSourceActiveHint": "يستخدم هذا الوكيل كتالوج مزودي النماذج المشترك، وإعدادات النموذج الأصلية مخفية."
   },
   "SettingsPages": {
     "agentsLoading": "جارٍ تحميل إعدادات الوكلاء...",
@@ -5905,15 +5906,13 @@
     "confirmDeleteTerminals": "سيتم إغلاق {count} من الطرفيات قيد التشغيل وإنهاء عملياتها.",
     "confirmDeleteNotesAndTerminals": "سيتم حذف {notes} من الملاحظات التي كتبتها نهائيًا، وإنهاء {terminals} من الطرفيات قيد التشغيل."
   },
-  "ModelProviderPickerDemo": {
-    "demoTag": "DEMO",
+  "ModelProviderPicker": {
     "placeholder": "Provider · Model",
-    "providers": "Providers",
-    "models": "Models",
-    "disabled": "disabled",
     "noProviders": "No providers",
     "noModels": "No models",
     "vision": "vision",
     "reasoning": "reasoning",
-    "openPicker": "Demo provider picker"  }
-}
+    "openPicker": "Model provider",
+    "resetNative": "Back to native config",
+    "saveFailed": "Failed to save model selection"
+  }}

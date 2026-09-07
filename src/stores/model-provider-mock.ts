@@ -136,6 +136,7 @@ const SEED_RECORDS: ModelProviderRecord[] = [
     ],
     apiKeyMasked: maskApiKey("sk-demo-deepseek-0123456789"),
     hasApiKey: true,
+    compatSupportsDeveloperRole: null,
   },
   {
     providerId: "openrouter",
@@ -157,6 +158,7 @@ const SEED_RECORDS: ModelProviderRecord[] = [
     ],
     apiKeyMasked: maskApiKey("sk-or-demo-abcdef012345"),
     hasApiKey: true,
+    compatSupportsDeveloperRole: null,
   },
   {
     providerId: "local-vllm",
@@ -166,6 +168,7 @@ const SEED_RECORDS: ModelProviderRecord[] = [
     models: [{ id: "qwen2.5-72b-instruct", reasoning: false, input: "text" }],
     apiKeyMasked: "",
     hasApiKey: false,
+    compatSupportsDeveloperRole: null,
   },
 ]
 
@@ -200,6 +203,7 @@ export function createMockModelProviderService(): ModelProviderService {
       models: draft.models.map((m) => ({ ...m })),
       apiKeyMasked: key ? maskApiKey(key) : "",
       hasApiKey: !!key,
+      compatSupportsDeveloperRole: draft.compatSupportsDeveloperRole,
     }
   }
 

@@ -22,6 +22,7 @@
 //! config observable for debugging.
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -48,6 +49,26 @@ const KIMI_SYNTHETIC_TOKEN_ACCESS: &str = "codeg-local-gate";
 /// Neutral thinking level for a reasoning-capable pi model. The user can change
 /// the level per session; pi clamps it to the model's supported vocabulary.
 const PI_DEFAULT_THINKING_LEVEL: &str = "medium";
+
+/// Resolve the Pi session store **before** the provider workspace replaces the
+/// agent home. Pi relocates its sessions independently of its config/auth
+/// files, so provider isolation must not make an existing session disappear.
+fn pi_native_sessions_dir(
+    runtime_env: &BTreeMap<String, String>,
+    home_dir: Option<PathBuf>,
+) -> PathBuf {
+    crate::parsers::pi::resolve_pi_sessions_dir_from(
+        runtime_env
+            .get("PI_CODING_AGENT_SESSION_DIR")
+            .cloned()
+            .map(OsString::from),
+        runtime_env
+            .get("PI_CODING_AGENT_DIR")
+            .cloned()
+            .map(OsString::from),
+        home_dir,
+    )
+}
 
 /// Apply the launch adapter for a resolved shared-provider selection.
 ///
@@ -265,11 +286,11 @@ fn write_codex_workspace(
     runtime_env: &mut BTreeMap<String, String>,
 ) -> Result<(), AcpError> {
     let wire_api = match api {
-        ModelProviderApiType::OpenAiCompletions => "chat",
         ModelProviderApiType::OpenAiResponses => "responses",
         other => {
             return Err(AcpError::protocol(format!(
-                "Codex cannot serve API type {}",
+                "Codex requires the OpenAI Responses API; provider {} uses {}",
+                selection.provider_id,
                 other.as_str()
             )))
         }
@@ -320,6 +341,45 @@ fn write_codex_workspace(
     Ok(())
 }
 
+/// Pi resolves OpenAI compatibility from the selected model. Project the
+/// provider-level developer-role override onto that model so providers such as
+/// Ark can force `system` instead of Pi's auto-detected `developer`.
+fn pi_model_compat(
+    selection: &ResolvedConversationModelSelection,
+    api: ModelProviderApiType,
+) -> Option<Value> {
+    if api != ModelProviderApiType::OpenAiCompletions {
+        return None;
+    }
+
+    let mut compat = match selection.model.compat.as_ref() {
+        Some(Value::Object(map)) => map.clone(),
+        _ => Map::new(),
+    };
+    let explicit_model_value = match selection
+        .model
+        .compat
+        .as_ref()
+        .and_then(|compat| compat.get("supportsDeveloperRole"))
+    {
+        Some(Value::Bool(value)) => Some(*value),
+        _ => None,
+    };
+    let provider_value = match selection
+        .provider
+        .compat
+        .as_ref()?
+        .get("supportsDeveloperRole")
+    {
+        Some(Value::Bool(value)) => Some(*value),
+        _ => None,
+    };
+    if let Some(value) = explicit_model_value.or(provider_value) {
+        compat.insert("supportsDeveloperRole".to_string(), Value::Bool(value));
+    }
+    (!compat.is_empty()).then_some(Value::Object(compat))
+}
+
 fn write_pi_workspace(
     ws: &Path,
     selection: &ResolvedConversationModelSelection,
@@ -367,6 +427,9 @@ fn write_pi_workspace(
     }
     provider.insert("api".to_string(), Value::String(api.as_str().to_string()));
     let mut model = Map::new();
+    if let Some(compat) = pi_model_compat(selection, api) {
+        model.insert("compat".to_string(), compat);
+    }
     model.insert("id".to_string(), Value::String(model_id.to_string()));
     model.insert("name".to_string(), Value::String(model_id.to_string()));
     model.insert(
@@ -381,6 +444,15 @@ fn write_pi_workspace(
     models_doc.insert("providers".to_string(), Value::Object(providers));
     write_json(&ws.join("models.json"), &models_doc, false)?;
 
+    // Keep the session store where the native/BYO Pi home put it. The provider
+    // workspace isolates config, auth, and model catalog—not conversation
+    // history—so resumed sessions remain discoverable after a model switch.
+    runtime_env.insert(
+        "PI_CODING_AGENT_SESSION_DIR".to_string(),
+        pi_native_sessions_dir(runtime_env, dirs::home_dir())
+            .to_string_lossy()
+            .into_owned(),
+    );
     runtime_env.insert(
         "PI_CODING_AGENT_DIR".to_string(),
         ws.to_string_lossy().into_owned(),
@@ -857,8 +929,31 @@ mod tests {
     }
 
     #[test]
-    fn codex_workspace_writes_auth_and_config() {
-        let (env, tmp) = run(AgentType::Codex, ModelProviderApiType::OpenAiCompletions);
+    fn codex_rejects_chat_completions_without_config() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut env = BTreeMap::new();
+        let s = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::OpenAiCompletions,
+        );
+
+        let result = apply_launch_adapter(AgentType::Codex, &s, &mut env, tmp.path(), 7);
+
+        assert!(result.is_err());
+        assert!(!env.contains_key("CODEX_HOME"));
+        assert!(!tmp
+            .path()
+            .join(MODEL_PROVIDER_WORKSPACE_ROOT)
+            .join("codex")
+            .join("7")
+            .join("config.toml")
+            .exists());
+    }
+
+    #[test]
+    fn codex_responses_workspace_writes_auth_and_config() {
+        let (env, tmp) = run(AgentType::Codex, ModelProviderApiType::OpenAiResponses);
         let home = PathBuf::from(env["CODEX_HOME"].as_str());
         assert_eq!(
             home,
@@ -880,16 +975,28 @@ mod tests {
             raw.contains("base_url = \"https://api.example.com/v1\""),
             "{raw}"
         );
-        assert!(raw.contains("wire_api = \"chat\""), "{raw}");
+        assert!(raw.contains("wire_api = \"responses\""), "{raw}");
         assert!(raw.contains("requires_openai_auth = true"), "{raw}");
     }
 
-    #[test]
-    fn codex_responses_wire_api_maps_to_responses() {
-        let (env, _tmp) = run(AgentType::Codex, ModelProviderApiType::OpenAiResponses);
-        let home = PathBuf::from(env["CODEX_HOME"].as_str());
-        let raw = fs::read_to_string(home.join("config.toml")).unwrap();
-        assert!(raw.contains("wire_api = \"responses\""), "{raw}");
+    fn run_pi(
+        initial_env: BTreeMap<String, String>,
+    ) -> (BTreeMap<String, String>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let ws = tmp
+            .path()
+            .join(MODEL_PROVIDER_WORKSPACE_ROOT)
+            .join("pi")
+            .join("7");
+        let s = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::AnthropicMessages,
+        );
+        let mut env = initial_env;
+        write_pi_workspace(&ws, &s, ModelProviderApiType::AnthropicMessages, &mut env)
+            .expect("pi adapter ok");
+        (env, tmp)
     }
 
     #[test]
@@ -923,6 +1030,171 @@ mod tests {
         assert_eq!(p["api"], "anthropic-messages");
         assert_eq!(p["models"][0]["id"], "model-1");
         assert_eq!(p["models"][0]["reasoning"], true);
+
+        // The default provider workspace must not become an empty Pi session
+        // store; sessions stay in the user's native/BYO Pi sessions root.
+        assert!(env.contains_key("PI_CODING_AGENT_SESSION_DIR"));
+        assert_ne!(
+            PathBuf::from(env["PI_CODING_AGENT_SESSION_DIR"].as_str()),
+            home.join("sessions")
+        );
+    }
+
+    #[test]
+    fn pi_workspace_preserves_explicit_session_store() {
+        let initial = BTreeMap::from([
+            (
+                "PI_CODING_AGENT_SESSION_DIR".to_string(),
+                "/custom/pi/sessions".to_string(),
+            ),
+            (
+                "PI_CODING_AGENT_DIR".to_string(),
+                "/custom/pi-home".to_string(),
+            ),
+        ]);
+        let (env, _tmp) = run_pi(initial);
+
+        assert_eq!(env["PI_CODING_AGENT_SESSION_DIR"], "/custom/pi/sessions");
+    }
+
+    #[test]
+    fn pi_workspace_preserves_byo_agent_session_store() {
+        let initial = BTreeMap::from([(
+            "PI_CODING_AGENT_DIR".to_string(),
+            "/custom/pi-home".to_string(),
+        )]);
+        let (env, _tmp) = run_pi(initial);
+
+        assert_eq!(
+            env["PI_CODING_AGENT_SESSION_DIR"],
+            "/custom/pi-home/sessions"
+        );
+    }
+
+    #[test]
+    fn pi_workspace_projects_provider_developer_role_compat() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut selection = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::OpenAiCompletions,
+        );
+        selection.provider.compat = Some(serde_json::json!({
+            "supportsDeveloperRole": false
+        }));
+        let mut env = BTreeMap::new();
+        write_pi_workspace(
+            &tmp.path().join("pi"),
+            &selection,
+            ModelProviderApiType::OpenAiCompletions,
+            &mut env,
+        )
+        .expect("pi adapter ok");
+
+        let models: Value = serde_json::from_str(
+            &fs::read_to_string(tmp.path().join("pi").join("models.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            models["providers"]["prov.example"]["models"][0]["compat"]["supportsDeveloperRole"],
+            false
+        );
+    }
+
+    #[test]
+    fn pi_workspace_prefers_model_developer_role_compat() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut selection = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::OpenAiCompletions,
+        );
+        selection.provider.compat = Some(serde_json::json!({
+            "supportsDeveloperRole": true
+        }));
+        selection.model.compat = Some(serde_json::json!({
+            "supportsDeveloperRole": false
+        }));
+        let mut env = BTreeMap::new();
+        write_pi_workspace(
+            &tmp.path().join("pi"),
+            &selection,
+            ModelProviderApiType::OpenAiCompletions,
+            &mut env,
+        )
+        .expect("pi adapter ok");
+
+        let models: Value = serde_json::from_str(
+            &fs::read_to_string(tmp.path().join("pi").join("models.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            models["providers"]["prov.example"]["models"][0]["compat"]["supportsDeveloperRole"],
+            false
+        );
+    }
+
+    #[test]
+    fn pi_workspace_omits_developer_role_compat_when_unset() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let selection = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::OpenAiCompletions,
+        );
+        let mut env = BTreeMap::new();
+        write_pi_workspace(
+            &tmp.path().join("pi"),
+            &selection,
+            ModelProviderApiType::OpenAiCompletions,
+            &mut env,
+        )
+        .expect("pi adapter ok");
+
+        let models: Value = serde_json::from_str(
+            &fs::read_to_string(tmp.path().join("pi").join("models.json")).unwrap(),
+        )
+        .unwrap();
+        let model = &models["providers"]["prov.example"]["models"][0];
+        assert!(model.get("compat").is_none(), "{model}");
+    }
+
+    #[test]
+    fn pi_workspace_ignores_developer_role_compat_for_other_apis() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut selection = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::AnthropicMessages,
+        );
+        selection.provider.compat = Some(serde_json::json!({
+            "supportsDeveloperRole": false
+        }));
+        let mut env = BTreeMap::new();
+        write_pi_workspace(
+            &tmp.path().join("pi"),
+            &selection,
+            ModelProviderApiType::AnthropicMessages,
+            &mut env,
+        )
+        .expect("pi adapter ok");
+
+        let models: Value = serde_json::from_str(
+            &fs::read_to_string(tmp.path().join("pi").join("models.json")).unwrap(),
+        )
+        .unwrap();
+        let model = &models["providers"]["prov.example"]["models"][0];
+        assert!(model.get("compat").is_none(), "{model}");
+    }
+
+    #[test]
+    fn pi_session_dir_resolution_keeps_native_default() {
+        let env = BTreeMap::new();
+
+        assert_eq!(
+            pi_native_sessions_dir(&env, Some(PathBuf::from("/home/demo"))),
+            PathBuf::from("/home/demo/.pi/agent/sessions")
+        );
     }
 
     #[test]

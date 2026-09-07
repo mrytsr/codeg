@@ -45,6 +45,21 @@ pub struct TestModelParams {
     pub api_key: Option<String>,
 }
 
+/// Web transport mirrors Tauri's named-argument convention, so the draft
+/// arrives wrapped (`{ draft: … }`) instead of as the bare draft object.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderDraftParams {
+    pub draft: ModelProviderDraft,
+}
+
+/// Same wrapper for probe, whose Tauri command also takes a named `params`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeParamsBody {
+    pub params: mp_file::ProbeParams,
+}
+
 pub async fn list_model_provider_records(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Result<Json<Vec<ModelProviderRecord>>, AppCommandError> {
@@ -63,18 +78,18 @@ pub async fn list_builtin_model_providers(
 
 pub async fn create_model_provider(
     Extension(state): Extension<Arc<AppState>>,
-    Json(draft): Json<ModelProviderDraft>,
+    Json(body): Json<ProviderDraftParams>,
 ) -> Result<Json<SaveResult>, AppCommandError> {
-    let result = mp_file::create_model_provider_core(&state.data_dir, draft).await?;
+    let result = mp_file::create_model_provider_core(&state.data_dir, body.draft).await?;
     mp_file::emit_event_for_web(&state.emitter);
     Ok(Json(result))
 }
 
 pub async fn update_model_provider(
     Extension(state): Extension<Arc<AppState>>,
-    Json(draft): Json<ModelProviderDraft>,
+    Json(body): Json<ProviderDraftParams>,
 ) -> Result<Json<SaveResult>, AppCommandError> {
-    let result = mp_file::update_model_provider_core(&state.data_dir, draft).await?;
+    let result = mp_file::update_model_provider_core(&state.data_dir, body.draft).await?;
     mp_file::emit_event_for_web(&state.emitter);
     Ok(Json(result))
 }
@@ -117,10 +132,10 @@ pub async fn clone_builtin_model_provider(
 }
 
 pub async fn probe_model_provider_models(
-    Json(params): Json<mp_file::ProbeParams>,
+    Json(body): Json<ProbeParamsBody>,
 ) -> Result<Json<ProbeOutcome>, AppCommandError> {
     Ok(Json(
-        mp_file::probe_model_provider_models_core(params).await?,
+        mp_file::probe_model_provider_models_core(body.params).await?,
     ))
 }
 

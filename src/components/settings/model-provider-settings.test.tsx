@@ -14,6 +14,19 @@ import enMessages from "@/i18n/messages/en.json"
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), info: vi.fn(), success: vi.fn(), dismiss: vi.fn() },
 }))
+// The settings page reads its data through the transport service. These UI
+// tests don't need a backend, so serve them from the in-memory mock contract —
+// one fresh instance per mounted component (matching the pre-transport
+// behaviour the suite was written against).
+vi.mock("@/stores/model-provider-transport", async () => {
+  const { createMockModelProviderService } =
+    await import("@/stores/model-provider-mock")
+  const { useMemo } = await import("react")
+  return {
+    useModelProviderService: () =>
+      useMemo(() => createMockModelProviderService(), []),
+  }
+})
 
 function renderPage() {
   return render(

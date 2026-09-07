@@ -1588,7 +1588,8 @@
     "customAgentRemoveWithData": "Supprimer aussi l'historique de conversation enregistré",
     "customAgentRemoved": "{name} supprimé",
     "customAgentBadge": "Personnalisé",
-    "customAgentNotLaunchable": "Cet agent ne peut pas démarrer ici : {reason}"
+    "customAgentNotLaunchable": "Cet agent ne peut pas démarrer ici : {reason}",
+    "providerSourceActiveHint": "Cet agent utilise le catalogue partagé de fournisseurs de modèles. Les paramètres natifs de modèle sont masqués."
   },
   "SettingsPages": {
     "agentsLoading": "Chargement des paramètres des agents...",
@@ -5905,15 +5906,13 @@
     "confirmDeleteTerminals": "{count} terminal(aux) en cours seront fermés et leurs processus arrêtés.",
     "confirmDeleteNotesAndTerminals": "{notes} note(s) que vous avez écrites seront définitivement supprimées, et {terminals} terminal(aux) en cours seront arrêtés."
   },
-  "ModelProviderPickerDemo": {
-    "demoTag": "DEMO",
+  "ModelProviderPicker": {
     "placeholder": "Provider · Model",
-    "providers": "Providers",
-    "models": "Models",
-    "disabled": "disabled",
     "noProviders": "No providers",
     "noModels": "No models",
     "vision": "vision",
     "reasoning": "reasoning",
-    "openPicker": "Demo provider picker"  }
-}
+    "openPicker": "Model provider",
+    "resetNative": "Back to native config",
+    "saveFailed": "Failed to save model selection"
+  }}

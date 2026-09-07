@@ -62,6 +62,30 @@ vi.mock("@/hooks/use-shortcut-settings", () => ({
 // scan mid-test; defaults to "no skills" for every other test in this file.
 const agentSkills = vi.hoisted(() => vi.fn(() => [] as unknown[]))
 vi.mock("@/hooks/use-agent-skills", () => ({ useAgentSkills: agentSkills }))
+const acpAgentsMock = vi.hoisted(() => ({
+  state: {
+    agents: [] as Array<{
+      agent_type: string
+      model_source: "native" | "provider"
+    }>,
+    fresh: false,
+    refresh: vi.fn(),
+  },
+}))
+vi.mock("@/hooks/use-acp-agents", () => ({
+  useAcpAgents: () => acpAgentsMock.state,
+}))
+vi.mock("./model-provider-picker", async () => {
+  const React = await import("react")
+  return {
+    ModelProviderPicker: () =>
+      React.createElement(
+        "button",
+        { type: "button", "aria-label": "Model provider" },
+        "Model provider"
+      ),
+  }
+})
 vi.mock("@/hooks/use-built-in-experts", () => ({ useBuiltInExperts: () => [] }))
 vi.mock("@/hooks/use-built-in-science", () => ({ useBuiltInScience: () => [] }))
 vi.mock("@/hooks/use-enabled-skill-ids", () => ({
@@ -107,8 +131,7 @@ vi.mock("@/hooks/use-open-file-target", () => ({
 // off the backend so the menu tests exercise only the menu.
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api")>()),
-  quickMessagesList: vi.fn(async () => []),
-}))
+  quickMessagesList: vi.fn(async () => []),}))
 // Real classifier only recognizes actual backend NoActiveTurn payloads; the
 // steering tests flip this per-case to drive the enqueue fallback.
 vi.mock("@/lib/turn-busy", () => ({
@@ -642,6 +665,84 @@ const AUTO_APPROVE_OPTION: SessionConfigOptionInfo = {
   category: null,
   kind: { type: "boolean", current_value: false },
 }
+
+describe("MessageInput shared model provider mode", () => {
+  afterEach(() => {
+    cleanup()
+    acpAgentsMock.state.agents = []
+    acpAgentsMock.state.fresh = false
+  })
+
+  it("shows the provider picker even when native config options are absent", async () => {
+    acpAgentsMock.state.agents = [
+      { agent_type: "codex", model_source: "provider" },
+    ]
+    acpAgentsMock.state.fresh = true
+    const { container } = renderInput({ agentType: "codex" })
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+    expect(
+      screen.getAllByRole("button", { name: "Model provider" }).length
+    ).toBeGreaterThan(0)
+  })
+
+  it("shows the Claude picker when the shared provider source is on", async () => {
+    acpAgentsMock.state.agents = [
+      {
+        agent_type: "claude_code",
+        model_source: "provider",
+        model_provider_id: null,
+      },
+    ]
+    acpAgentsMock.state.fresh = true
+    const { container } = renderInput({ agentType: "claude_code" })
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+    expect(
+      screen.getAllByRole("button", { name: "Model provider" }).length
+    ).toBeGreaterThan(0)
+  })
+
+  it("hides the Claude picker for a legacy provider binding only", async () => {
+    acpAgentsMock.state.agents = [
+      {
+        agent_type: "claude_code",
+        model_source: "native",
+        model_provider_id: 7,
+      },
+    ]
+    acpAgentsMock.state.fresh = true
+    const { container } = renderInput({ agentType: "claude_code" })
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+    expect(screen.queryByRole("button", { name: "Model provider" })).toBeNull()
+  })
+
+  it("shows the provider picker alongside non-model config options", async () => {
+    acpAgentsMock.state.agents = [
+      { agent_type: "codex", model_source: "provider" },
+    ]
+    acpAgentsMock.state.fresh = true
+    const onConfigOptionChange = vi.fn()
+    const { container } = renderInput({
+      agentType: "codex",
+      configOptions: [AUTO_APPROVE_OPTION],
+      onConfigOptionChange,
+    })
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+    expect(
+      screen.getAllByRole("button", { name: "Model provider" }).length
+    ).toBeGreaterThan(0)
+    expect(
+      screen.getByRole("button", { name: /Auto-approve tools/ })
+    ).toBeInTheDocument()
+  })
+})
 
 describe("MessageInput boolean config options", () => {
   afterEach(() => cleanup())
