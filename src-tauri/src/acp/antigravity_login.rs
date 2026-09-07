@@ -175,9 +175,8 @@ pub struct AntigravityLoginOutcome {
 /// state must expire on its own: in server mode a client disconnect drops the
 /// handler future mid-`await`, and a `Finishing` that nothing ever clears would
 /// refuse every later sign-in for the life of the process.
-const FINISH_BUDGET: Duration = Duration::from_secs(
-    REDIRECT_WAIT.as_secs() + AUTHENTICATE_WAIT.as_secs() + 30,
-);
+const FINISH_BUDGET: Duration =
+    Duration::from_secs(REDIRECT_WAIT.as_secs() + AUTHENTICATE_WAIT.as_secs() + 30);
 
 /// A sign-in waiting for its redirect.
 struct Pending {
@@ -495,9 +494,7 @@ async fn start_claimed(
         StartSignal::Url(url) => url,
         StartSignal::Authenticated => {
             let _ = child.kill().await;
-            tracing::info!(
-                "[ACP][Antigravity] {method_id} was already signed in; no link needed"
-            );
+            tracing::info!("[ACP][Antigravity] {method_id} was already signed in; no link needed");
             return Ok(AntigravityLoginStart {
                 already_signed_in: true,
                 handle: None,
@@ -604,9 +601,7 @@ pub async fn finish(handle: &str, pasted: &str) -> Result<AntigravityLoginOutcom
     let (target, pending, generation) = {
         let mut slot = pending_slot().lock().await;
         let SlotState::Waiting(pending) = &slot.state else {
-            return Err(AcpError::protocol(
-                "no sign-in is waiting; start a new one",
-            ));
+            return Err(AcpError::protocol("no sign-in is waiting; start a new one"));
         };
         if pending.handle != handle {
             return Err(AcpError::protocol(
@@ -778,9 +773,7 @@ pub async fn cancel(handle: &str) -> Result<(), AcpError> {
     let abandoned = {
         let mut slot = pending_slot().lock().await;
         let SlotState::Waiting(pending) = &slot.state else {
-            return Err(AcpError::protocol(
-                "no sign-in is waiting; start a new one",
-            ));
+            return Err(AcpError::protocol("no sign-in is waiting; start a new one"));
         };
         // A handle that is not the current one belongs to an attempt already
         // displaced (a stale browser tab, a double submit). Reporting that is
@@ -1269,7 +1262,9 @@ mod tests {
 
         // A second start displaces the published attempt AND reaps its child —
         // otherwise that agent holds its loopback listener for 300s.
-        let second = claim_slot().await.expect("a published attempt is displaceable");
+        let second = claim_slot()
+            .await
+            .expect("a published attempt is displaceable");
         assert!(second > first);
         assert_reaped(out1, "the displaced attempt").await;
 
@@ -1321,10 +1316,7 @@ mod tests {
             "a stale abandon must not release a newer start"
         );
         abandon_start(third).await;
-        assert!(matches!(
-            pending_slot().lock().await.state,
-            SlotState::Idle
-        ));
+        assert!(matches!(pending_slot().lock().await.state, SlotState::Idle));
 
         // And `release_finishing` is a no-op unless the slot is actually
         // completing, so a late one cannot cancel a fresh start.
@@ -1362,10 +1354,7 @@ mod tests {
         );
 
         release_finishing(attempt_b).await;
-        assert!(matches!(
-            pending_slot().lock().await.state,
-            SlotState::Idle
-        ));
+        assert!(matches!(pending_slot().lock().await.state, SlotState::Idle));
     }
 
     #[test]
@@ -1532,7 +1521,10 @@ mod tests {
             error_message(&with_data).as_deref(),
             Some("the long actionable one")
         );
-        assert_eq!(error_message(&serde_json::json!({"id": 2, "result": {}})), None);
+        assert_eq!(
+            error_message(&serde_json::json!({"id": 2, "result": {}})),
+            None
+        );
     }
 
     /// The agent's message is rendered in the panel, so it goes through the

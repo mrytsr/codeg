@@ -56,9 +56,7 @@ use crate::models::{
     WorkTaskMergeState, WorkTaskPreflight, WorkTaskQueuedMerge, DELIVERABLE_REPORT,
     STAGE_PROMPT_ALL,
 };
-use crate::web::event_bridge::{
-    emit_event, EventEmitter, WorkTaskChange, WORK_TASK_CHANGED_EVENT,
-};
+use crate::web::event_bridge::{emit_event, EventEmitter, WorkTaskChange, WORK_TASK_CHANGED_EVENT};
 use crate::work_task::compact;
 use crate::work_task::git as task_git;
 
@@ -702,8 +700,8 @@ impl TaskEngine {
                     "user",
                 )
                 .await
-                    .map_err(|e| e.to_string())?
-                    .is_some()
+                .map_err(|e| e.to_string())?
+                .is_some()
                 {
                     folder_claimed += 1;
                     self.emit_upsert(id);
@@ -868,7 +866,9 @@ impl TaskEngine {
         self.awaiting.lock().await.remove(&task_id);
 
         // Converge a stranded InProgress conversation.
-        let task = work_task_service::get_model(&self.db.conn, task_id).await.ok();
+        let task = work_task_service::get_model(&self.db.conn, task_id)
+            .await
+            .ok();
         if let Some(conv_id) = task.as_ref().and_then(|t| t.conversation_id) {
             if self.conversation_status(conv_id).await == Some(ConversationStatus::InProgress) {
                 self.cancel_conversation(conv_id).await;
@@ -966,28 +966,26 @@ impl TaskEngine {
                 .filter(|(_, owner)| owner.folder_id == folder_id)
                 .map(|(tid, _)| *tid)
                 .collect();
-            let active = match work_task_service::active_launched_count(&self.db.conn, folder_id)
-                .await
-            {
-                Ok(n) => n + launching.len() as u64,
-                Err(e) => {
-                    tracing::warn!("[work_task] pump count error: {e}");
-                    return;
-                }
-            };
+            let active =
+                match work_task_service::active_launched_count(&self.db.conn, folder_id).await {
+                    Ok(n) => n + launching.len() as u64,
+                    Err(e) => {
+                        tracing::warn!("[work_task] pump count error: {e}");
+                        return;
+                    }
+                };
             if max != 0 && active >= max {
                 return;
             }
-            let next = match work_task_service::next_queued(&self.db.conn, folder_id, &launching)
-                .await
-            {
-                Ok(Some(t)) => t,
-                Ok(None) => return,
-                Err(e) => {
-                    tracing::warn!("[work_task] pump next error: {e}");
-                    return;
-                }
-            };
+            let next =
+                match work_task_service::next_queued(&self.db.conn, folder_id, &launching).await {
+                    Ok(Some(t)) => t,
+                    Ok(None) => return,
+                    Err(e) => {
+                        tracing::warn!("[work_task] pump next error: {e}");
+                        return;
+                    }
+                };
             // Claimed synchronously: this loop iterates immediately, and the
             // task must already read as in-flight when it does.
             let token = self.claim_launch_slot(next.id, folder_id).await;
@@ -1107,8 +1105,7 @@ impl TaskEngine {
         // Effective agent + config: task override > folder task settings >
         // folder default agent. Audited via a config_effective event (values
         // are inherited live, never frozen).
-        let cfg: WorkTaskConfig =
-            serde_json::from_str(&task.config).unwrap_or_default();
+        let cfg: WorkTaskConfig = serde_json::from_str(&task.config).unwrap_or_default();
         let settings = work_task_service::settings_get_effective(&self.db.conn, task.folder_id)
             .await
             .unwrap_or_default();
@@ -1217,10 +1214,14 @@ impl TaskEngine {
             }
         };
 
-        let runtime_env =
-            build_session_runtime_env(&self.db, agent_type, resume_session_id.as_deref(), &self.data_dir)
-                .await
-                .map_err(|e| e.to_string())?;
+        let runtime_env = build_session_runtime_env(
+            &self.db,
+            agent_type,
+            resume_session_id.as_deref(),
+            &self.data_dir,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         verify_agent_installed(agent_type)
             .await
             .map_err(|e| e.to_string())?;
@@ -1495,7 +1496,10 @@ impl TaskEngine {
         // commits sit stranded on a branch nothing points to. Only when the
         // branch cannot be re-checked-out does the fresh mint below take over
         // (re-recording base + branch).
-        if let Some(wt) = self.recreate_worktree_from_branch(task, root, settings).await {
+        if let Some(wt) = self
+            .recreate_worktree_from_branch(task, root, settings)
+            .await
+        {
             return Ok(wt);
         }
 
@@ -1506,7 +1510,9 @@ impl TaskEngine {
         let (base_branch, base_sha, start_at) = match self.pr_checkout_point(task, root).await? {
             Some(point) => point,
             None => {
-                let head = resolve_git_head(&root.path).await.map_err(|e| e.to_string())?;
+                let head = resolve_git_head(&root.path)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 let base_branch = head.branch.ok_or_else(|| {
                     "project folder is not on a branch (detached HEAD?)".to_string()
                 })?;
@@ -1683,7 +1689,10 @@ impl TaskEngine {
         let base_sha = task_git::merge_base(&root.path, &base_tip, head_sha)
             .await
             .map_err(|e| {
-                format!("could not find where pull request #{} branched off: {e}", meta.number)
+                format!(
+                    "could not find where pull request #{} branched off: {e}",
+                    meta.number
+                )
             })?;
         // The refs stay for now — see `drop_pr_fetch_refs`: until the task's
         // branch exists, they are the only thing keeping what we just fetched
@@ -1705,7 +1714,8 @@ impl TaskEngine {
             return;
         }
         for suffix in ["pr-base", "pr-head"] {
-            task_git::delete_ref(&root.path, &format!("refs/codeg/task-{}/{suffix}", task.id)).await;
+            task_git::delete_ref(&root.path, &format!("refs/codeg/task-{}/{suffix}", task.id))
+                .await;
         }
     }
 
@@ -1798,7 +1808,10 @@ impl TaskEngine {
 
     /// The task's recorded worktree, required to exist on disk — the merge
     /// generation must never mint a fresh (empty) one.
-    async fn existing_worktree(&self, task: &crate::db::entities::work_task::Model) -> Result<WorktreeRef, String> {
+    async fn existing_worktree(
+        &self,
+        task: &crate::db::entities::work_task::Model,
+    ) -> Result<WorktreeRef, String> {
         let wt_id = task
             .worktree_folder_id
             .ok_or_else(|| "task has no worktree".to_string())?;
@@ -1845,8 +1858,12 @@ impl TaskEngine {
         if ok {
             Ok(())
         } else {
-            let code = exit_code.map(|c| c.to_string()).unwrap_or_else(|| "?".into());
-            Err(format!("worktree init command failed (exit {code}): {tail}"))
+            let code = exit_code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "?".into());
+            Err(format!(
+                "worktree init command failed (exit {code}): {tail}"
+            ))
         }
     }
 
@@ -2233,7 +2250,10 @@ impl TaskEngine {
     async fn compaction_still_running(&self, conn_id: &str) -> Option<CompactOutcome> {
         let Some(state) = self.manager.get_state(conn_id).await else {
             self.fence_completed_turns(conn_id).await;
-            return Some(CompactOutcome::new("failed", Some("connection lost".into())));
+            return Some(CompactOutcome::new(
+                "failed",
+                Some("connection lost".into()),
+            ));
         };
         let seq = {
             let s = state.read().await;
@@ -2243,7 +2263,10 @@ impl TaskEngine {
             s.event_seq
         };
         self.mark_compaction_turn(conn_id, seq).await;
-        Some(CompactOutcome::new("ok", Some("turn end not observed".into())))
+        Some(CompactOutcome::new(
+            "ok",
+            Some("turn end not observed".into()),
+        ))
     }
 
     /// Fence every `TurnComplete` this connection has emitted so far, for a
@@ -2449,7 +2472,10 @@ impl TaskEngine {
                 // A pre-prompt compaction's completion is the LAUNCH's signal,
                 // never the round's — see `compaction_turns` for why the index
                 // alone cannot tell them apart from in here.
-                if self.claim_compaction_turn(&env.connection_id, env.seq).await {
+                if self
+                    .claim_compaction_turn(&env.connection_id, env.seq)
+                    .await
+                {
                     return;
                 }
                 self.on_turn_complete(&env.connection_id, stop_reason).await;
@@ -2685,8 +2711,9 @@ impl TaskEngine {
                 // wholesale. Only a LATER retirement that is the last one out
                 // (or a cancel) does that, so it outlasts every generation the
                 // orphan is actually lying about.
-                Some(run_seq) => Self::retract_keys(&mut awaiting, task_id, &orphaned)
-                    .then_some(run_seq),
+                Some(run_seq) => {
+                    Self::retract_keys(&mut awaiting, task_id, &orphaned).then_some(run_seq)
+                }
             }
         };
 
@@ -2770,7 +2797,9 @@ impl TaskEngine {
         self.retire_connection(conn_id, task_id).await;
         let _ = self.manager.disconnect(conn_id).await;
 
-        let task = work_task_service::get_model(&self.db.conn, task_id).await.ok();
+        let task = work_task_service::get_model(&self.db.conn, task_id)
+            .await
+            .ok();
 
         // A merge generation settles from git truth whatever the stop reason —
         // the agent may have landed the merge and then errored or been stopped.
@@ -2873,8 +2902,7 @@ impl TaskEngine {
     /// (#447). A child's keys are prefixed with its connection id so
     /// [`Self::forget_delegation_child`] can retract them as a group.
     async fn track_request(&self, conn_id: &str, key: String, outstanding: bool) {
-        let Some(((task_id, run_seq), is_own_connection)) =
-            self.task_for_connection(conn_id).await
+        let Some(((task_id, run_seq), is_own_connection)) = self.task_for_connection(conn_id).await
         else {
             return;
         };
@@ -3059,7 +3087,9 @@ impl TaskEngine {
     /// from [`own_work_anchor`], not from the review baseline (see that
     /// function for why the two differ on a pull-request task).
     async fn snapshot_diff_stats(&self, task_id: i32) -> Option<(i32, i32, i32)> {
-        let task = work_task_service::get_model(&self.db.conn, task_id).await.ok()?;
+        let task = work_task_service::get_model(&self.db.conn, task_id)
+            .await
+            .ok()?;
         let wt_id = task.worktree_folder_id?;
         let wt = get_folder_core(&self.db, wt_id).await.ok()?;
         let anchor = own_work_anchor(&wt.path, &task).await?;
@@ -3080,8 +3110,8 @@ impl TaskEngine {
     /// Best-effort throughout: an unreadable worktree keeps whatever the row
     /// already says, which is exactly the pre-existing behaviour.
     async fn refresh_review_diff_stats(self: &Arc<Self>) {
-        let Ok(rows) = work_task_service::list_by_status(&self.db.conn, &[WorkTaskStatus::Review])
-            .await
+        let Ok(rows) =
+            work_task_service::list_by_status(&self.db.conn, &[WorkTaskStatus::Review]).await
         else {
             return;
         };
@@ -3100,13 +3130,8 @@ impl TaskEngine {
             {
                 continue;
             }
-            match work_task_service::refresh_diff_stats(
-                &self.db.conn,
-                task.id,
-                task.run_seq,
-                stats,
-            )
-            .await
+            match work_task_service::refresh_diff_stats(&self.db.conn, task.id, task.run_seq, stats)
+                .await
             {
                 Ok(true) => {
                     tracing::info!(
@@ -3307,8 +3332,15 @@ impl TaskEngine {
             .await;
             return;
         }
-        converge_worktree_removal(&self.db, &self.emitter, task_id, wt_id, task.folder_id, &wt.path)
-            .await;
+        converge_worktree_removal(
+            &self.db,
+            &self.emitter,
+            task_id,
+            wt_id,
+            task.folder_id,
+            &wt.path,
+        )
+        .await;
     }
 
     /// Whether the task worktree still has anything uncommitted (tracked edits
@@ -3448,7 +3480,7 @@ impl TaskEngine {
                 // re-sweeps on every settle; a parked unattended intent would
                 // outlive the setting that asked for it.
                 return Err(
-                    "another task of this project is already merging — wait for it".to_string()
+                    "another task of this project is already merging — wait for it".to_string(),
                 );
             }
             // Take (or keep) a place in line. Reusing the existing `queued_at`
@@ -3483,7 +3515,9 @@ impl TaskEngine {
             self.emit_upsert(task_id);
             return Ok(MergeDispatch::Queued);
         }
-        let head = resolve_git_head(&root.path).await.map_err(|e| e.to_string())?;
+        let head = resolve_git_head(&root.path)
+            .await
+            .map_err(|e| e.to_string())?;
         if head.branch.as_deref() != Some(base_branch.as_str()) {
             return Err(format!(
                 "project folder is on '{}', expected '{base_branch}' — switch back to merge",
@@ -3597,8 +3631,12 @@ impl TaskEngine {
             .as_deref()
             .and_then(|s| serde_json::from_str::<WorkTaskMergeState>(s).ok())
         else {
-            self.back_to_review(task_id, "merge state lost — please merge again".to_string(), None)
-                .await;
+            self.back_to_review(
+                task_id,
+                "merge state lost — please merge again".to_string(),
+                None,
+            )
+            .await;
             return;
         };
         let root = match get_folder_core(&self.db, task.folder_id).await {
@@ -3709,11 +3747,7 @@ impl TaskEngine {
     /// decides, and by then the row may already belong to a delivery someone
     /// started since — `status = merging` alone would let the stale pass bounce
     /// the live one.
-    async fn bounce_delivery(
-        &self,
-        task: &crate::db::entities::work_task::Model,
-        error: String,
-    ) {
+    async fn bounce_delivery(&self, task: &crate::db::entities::work_task::Model, error: String) {
         let _ = work_task_service::merge_back_to_review(
             &self.db.conn,
             task.id,
@@ -3875,9 +3909,11 @@ impl TaskEngine {
         match task_git::has_changes(&wt.path).await {
             Ok(false) => {}
             Ok(true) => {
-                return Err("the task worktree still has uncommitted changes — send it back for \
+                return Err(
+                    "the task worktree still has uncommitted changes — send it back for \
                             one more round so the agent commits them, then deliver"
-                    .to_string())
+                        .to_string(),
+                )
             }
             Err(e) => return Err(format!("could not read the task worktree's state: {e}")),
         }
@@ -4031,7 +4067,10 @@ impl TaskEngine {
         let Ok(task) = work_task_service::get_model(&self.db.conn, task_id).await else {
             return;
         };
-        if let Some(reason) = self.delivered_worktree_keep_reason(&task, published_head).await {
+        if let Some(reason) = self
+            .delivered_worktree_keep_reason(&task, published_head)
+            .await
+        {
             let _ =
                 work_task_service::set_cleanup_state(&self.db.conn, task_id, true, Some(reason))
                     .await;
@@ -4039,7 +4078,8 @@ impl TaskEngine {
             return;
         }
         // Broadcast omitted: the removal announces its own outcome.
-        self.remove_worktree_locked(task_id, Some(published_head)).await;
+        self.remove_worktree_locked(task_id, Some(published_head))
+            .await;
     }
 
     /// Why a delivered task's checkout must outlive the cleanup its user asked
@@ -4584,9 +4624,13 @@ impl TaskEngine {
 
         // The counters recorded when the run settled — reading git here would
         // fail on exactly the tasks whose worktree the merge just deleted.
-        let stats = task
-            .files_changed
-            .map(|files| (files, task.additions.unwrap_or(0), task.deletions.unwrap_or(0)));
+        let stats = task.files_changed.map(|files| {
+            (
+                files,
+                task.additions.unwrap_or(0),
+                task.deletions.unwrap_or(0),
+            )
+        });
         let base_branch = task.base_branch.clone().unwrap_or_default();
         let outcome = match &outcome {
             WritebackOutcome::Merged(commit) => TaskOutcome::Merged {
@@ -4643,9 +4687,10 @@ impl TaskEngine {
         state: &WorkTaskMergeState,
     ) {
         let task_id = task.id;
-        let (Some(remote_branch), Some(expected_head)) =
-            (state.remote_branch.as_deref(), state.expected_head.as_deref())
-        else {
+        let (Some(remote_branch), Some(expected_head)) = (
+            state.remote_branch.as_deref(),
+            state.expected_head.as_deref(),
+        ) else {
             self.bounce_delivery(
                 task,
                 "the delivery was interrupted and its state is incomplete — deliver again"
@@ -4708,7 +4753,10 @@ impl TaskEngine {
             &meta.owner_repo,
         ) {
             PrAdoption::Merged(pr) | PrAdoption::Open(pr) => {
-                if let Err(e) = self.settle_delivery(task_id, &meta, task.run_seq, &pr).await {
+                if let Err(e) = self
+                    .settle_delivery(task_id, &meta, task.run_seq, &pr)
+                    .await
+                {
                     self.bounce_delivery(task, e).await;
                 }
             }
@@ -4784,7 +4832,8 @@ impl TaskEngine {
         let repo_path = match get_folder_core(&self.db, task.folder_id).await {
             Ok(folder) => folder.path,
             Err(e) => {
-                self.bounce_delivery(task, format!("the delivery was interrupted: {e}")).await;
+                self.bounce_delivery(task, format!("the delivery was interrupted: {e}"))
+                    .await;
                 return;
             }
         };
@@ -4803,7 +4852,8 @@ impl TaskEngine {
             )
             .await
         {
-            self.bounce_delivery(task, format!("the delivery was interrupted: {reason}")).await;
+            self.bounce_delivery(task, format!("the delivery was interrupted: {reason}"))
+                .await;
             return;
         }
         // For a MERGED change the check above already PROVED the merge carries
@@ -4904,7 +4954,11 @@ impl TaskEngine {
                 // Only the intent we scanned can be refused; anything else on
                 // the row now is a change we have to re-read.
                 if !self
-                    .refuse_queued_merge(&task, &claim, "the task worktree no longer exists on disk")
+                    .refuse_queued_merge(
+                        &task,
+                        &claim,
+                        "the task worktree no longer exists on disk",
+                    )
                     .await
                 {
                     return DrainOutcome::Stale;
@@ -4996,12 +5050,10 @@ impl TaskEngine {
         match folder_id {
             Some(folder_id) => self.spawn_merge_pump(folder_id),
             None => {
-                let review = work_task_service::list_by_status(
-                    &self.db.conn,
-                    &[WorkTaskStatus::Review],
-                )
-                .await
-                .unwrap_or_default();
+                let review =
+                    work_task_service::list_by_status(&self.db.conn, &[WorkTaskStatus::Review])
+                        .await
+                        .unwrap_or_default();
                 let mut swept: HashSet<i32> = HashSet::new();
                 for task in review {
                     if swept.insert(task.folder_id) {
@@ -5064,10 +5116,7 @@ impl TaskEngine {
                 Ok(_) => {}
                 Err(e) if is_benign_merge_race(&e) => {}
                 Err(e) => {
-                    tracing::warn!(
-                        "[work_task] auto-merge of task {} refused: {e}",
-                        task.id
-                    );
+                    tracing::warn!("[work_task] auto-merge of task {} refused: {e}", task.id);
                     if work_task_service::set_review_error(
                         &self.db.conn,
                         task.id,
@@ -5505,10 +5554,7 @@ impl TaskEngine {
                 }
                 match work_task_service::abandon_setup(&self.db.conn, task.id, task.run_seq).await {
                     Ok(true) => {
-                        tracing::info!(
-                            "[work_task] requeued orphaned setup of task {}",
-                            task.id
-                        );
+                        tracing::info!("[work_task] requeued orphaned setup of task {}", task.id);
                         self.emit_upsert(task.id);
                     }
                     Ok(false) => {}
@@ -5748,7 +5794,10 @@ async fn own_work_anchor(
             .and_then(|m| m.head_sha)
             .filter(|s| !s.trim().is_empty());
         if let Some(head) = head {
-            if task_git::commit_present(wt_path, &head).await.unwrap_or(false) {
+            if task_git::commit_present(wt_path, &head)
+                .await
+                .unwrap_or(false)
+            {
                 return Some(head);
             }
         }
@@ -6164,9 +6213,7 @@ async fn compose_prompt(
                 blocks.extend(original);
             }
             let land_command = if strategy == "merge" {
-                format!(
-                    "git -C \"{root_path}\" merge --no-ff -m \"<message>\" {work_branch}"
-                )
+                format!("git -C \"{root_path}\" merge --no-ff -m \"<message>\" {work_branch}")
             } else {
                 format!(
                     "git -C \"{root_path}\" merge --squash {work_branch} && \
@@ -6276,10 +6323,7 @@ async fn compose_prompt(
 
 /// The user's own instructions for a stage: the `all` text (every stage) then
 /// the stage's own, as one trailing block. Empty when neither is configured.
-fn stage_prompt_block(
-    settings: &WorkTaskFolderSettings,
-    stage: &str,
-) -> Option<PromptInputBlock> {
+fn stage_prompt_block(settings: &WorkTaskFolderSettings, stage: &str) -> Option<PromptInputBlock> {
     let extras: Vec<&str> = [STAGE_PROMPT_ALL, stage]
         .into_iter()
         .filter_map(|key| settings.stage_prompts.get(key))
@@ -6348,13 +6392,17 @@ fn payload_blocks(payload: &serde_json::Value) -> Vec<serde_json::Value> {
 /// the instruction — losing one must not stop the run that carries the rest.
 fn attachment_blocks(raw: &[serde_json::Value], task_id: i32) -> Vec<PromptInputBlock> {
     raw.iter()
-        .filter_map(|v| match serde_json::from_value::<PromptInputBlock>(v.clone()) {
-            Ok(block) => Some(block),
-            Err(e) => {
-                tracing::warn!("[work_task] task {task_id}: dropping bad attachment block: {e}");
-                None
-            }
-        })
+        .filter_map(
+            |v| match serde_json::from_value::<PromptInputBlock>(v.clone()) {
+                Ok(block) => Some(block),
+                Err(e) => {
+                    tracing::warn!(
+                        "[work_task] task {task_id}: dropping bad attachment block: {e}"
+                    );
+                    None
+                }
+            },
+        )
         .collect()
 }
 
@@ -6492,10 +6540,7 @@ struct InstructionScan {
     interrupted: Option<FollowUpIntent>,
 }
 
-async fn instruction_scan(
-    conn: &sea_orm::DatabaseConnection,
-    task_id: i32,
-) -> InstructionScan {
+async fn instruction_scan(conn: &sea_orm::DatabaseConnection, task_id: i32) -> InstructionScan {
     // Newest-first, and narrowed IN THE QUERY to the two kinds that can settle
     // the question. Scanning raw events would let a chatty run bury the answer:
     // `agent_progress` volume is up to the agent, so a few hundred milestones
@@ -6900,10 +6945,7 @@ fn expand_home(path: &str, home: Option<&Path>) -> PathBuf {
     if path == "~" {
         return home.to_path_buf();
     }
-    match path
-        .strip_prefix("~/")
-        .or_else(|| path.strip_prefix("~\\"))
-    {
+    match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
         Some(rest) => home.join(rest),
         None => PathBuf::from(path),
     }
@@ -7266,8 +7308,7 @@ mod tests {
         };
         assert!(!auto_merge_candidate(&task, &gated));
         for status in ["running", "failed"] {
-            task.preflight =
-                Some(format!(r#"{{"status":"{status}","command":"pnpm test"}}"#));
+            task.preflight = Some(format!(r#"{{"status":"{status}","command":"pnpm test"}}"#));
             assert!(!auto_merge_candidate(&task, &gated), "{status} light");
         }
         task.preflight = Some(r#"{"status":"passed","command":"pnpm test"}"#.into());
@@ -7331,10 +7372,7 @@ mod tests {
             queued_at: chrono::DateTime::from_timestamp(1_800_000_000 + secs, 0)
                 .expect("valid instant"),
         };
-        let row = |id: i32| crate::db::entities::work_task::Model {
-            id,
-            ..task_row()
-        };
+        let row = |id: i32| crate::db::entities::work_task::Model { id, ..task_row() };
 
         let mut queue = [
             (intent(2), row(1)),
@@ -7491,8 +7529,14 @@ mod tests {
                  feedback. Address it in this same worktree:\n\nplease fix the copy",
             ),
             (FollowUpIntent::Continue, "accepted it as it stands"),
-            (FollowUpIntent::Question, "This is a question, not a work order"),
-            (FollowUpIntent::Verify, "read the full diff of this worktree"),
+            (
+                FollowUpIntent::Question,
+                "This is a question, not a work order",
+            ),
+            (
+                FollowUpIntent::Verify,
+                "read the full diff of this worktree",
+            ),
         ];
         for (intent, expected) in cases {
             let blocks = compose_prompt(
@@ -7751,7 +7795,9 @@ mod tests {
         .await
         .expect("compose");
         assert!(guard_of(&blocks).contains("Commit to the current branch as you like"));
-        assert!(texts(&blocks).join("\n").contains("it failed on CI, go again"));
+        assert!(texts(&blocks)
+            .join("\n")
+            .contains("it failed on CI, go again"));
 
         // The same note on a run that never reached review: still the
         // original report order.
@@ -8079,8 +8125,14 @@ mod tests {
         for c in [caps(true, true), caps(false, false)] {
             let mut blocks = vec![image(), embedded()];
             reencode_images(&mut blocks, &c);
-            assert!(matches!(&blocks[0], PromptInputBlock::Image { uri: None, .. }));
-            assert!(matches!(&blocks[1], PromptInputBlock::Resource { blob: Some(_), .. }));
+            assert!(matches!(
+                &blocks[0],
+                PromptInputBlock::Image { uri: None, .. }
+            ));
+            assert!(matches!(
+                &blocks[1],
+                PromptInputBlock::Resource { blob: Some(_), .. }
+            ));
         }
 
         // A non-image embedded resource (a pasted text file) is never turned
@@ -8251,7 +8303,10 @@ mod tests {
             .await
             .expect("compose");
             let joined = texts(&blocks).join("\n");
-            assert!(joined.contains("EVERY-STAGE"), "{expected}: missing all-stage text");
+            assert!(
+                joined.contains("EVERY-STAGE"),
+                "{expected}: missing all-stage text"
+            );
             assert!(joined.contains(expected), "{expected}: missing own text");
             for other in ["WORK-ONLY", "RETRY-ONLY", "RETURN-ONLY", "MERGE-ONLY"] {
                 if other != expected {
@@ -8279,7 +8334,9 @@ mod tests {
         let texts = texts(&blocks);
         // The merge generation replaces the guard (it forbids exactly what a
         // merge must do) — the user's extra still trails it.
-        assert!(texts.iter().all(|t| !t.starts_with("—— Work task context ——")));
+        assert!(texts
+            .iter()
+            .all(|t| !t.starts_with("—— Work task context ——")));
         assert!(texts[0].contains("land it onto the base branch"));
         assert!(texts
             .last()
@@ -8546,15 +8603,11 @@ mod tests {
         .expect("task");
         // Walk the real transition chain rather than writing the row directly,
         // so the run_seq the engine flips against is the one the CAS minted.
-        let run_seq = work_task_service::claim_for_run(
-            &db.conn,
-            task.id,
-            WorkTaskStatus::Todo,
-            "test",
-        )
-        .await
-        .expect("claim")
-        .expect("claimed");
+        let run_seq =
+            work_task_service::claim_for_run(&db.conn, task.id, WorkTaskStatus::Todo, "test")
+                .await
+                .expect("claim")
+                .expect("claimed");
         assert!(work_task_service::begin_setup(&db.conn, task.id, run_seq)
             .await
             .expect("begin_setup"));
@@ -8587,15 +8640,11 @@ mod tests {
             .await
             .expect("task row")
             .run_seq;
-        assert!(work_task_service::settle_review(
-            &engine.db.conn,
-            task_id,
-            run_seq,
-            None,
-            None,
-        )
-        .await
-        .expect("settle review"));
+        assert!(
+            work_task_service::settle_review(&engine.db.conn, task_id, run_seq, None, None,)
+                .await
+                .expect("settle review")
+        );
 
         engine.on_turn_complete(PARENT_CONN, "cancelled").await;
 
@@ -8622,15 +8671,11 @@ mod tests {
             .expect("task row");
         let (stale_seq, conv_id) = (row.run_seq, row.conversation_id.expect("conversation"));
         // Walk the real chain into the next generation: settle, requeue, run.
-        assert!(work_task_service::settle_review(
-            &engine.db.conn,
-            task_id,
-            stale_seq,
-            None,
-            None,
-        )
-        .await
-        .expect("settle review"));
+        assert!(
+            work_task_service::settle_review(&engine.db.conn, task_id, stale_seq, None, None,)
+                .await
+                .expect("settle review")
+        );
         let next_seq = work_task_service::claim_for_run(
             &engine.db.conn,
             task_id,
@@ -8641,9 +8686,11 @@ mod tests {
         .expect("claim")
         .expect("claimed");
         assert_ne!(next_seq, stale_seq);
-        assert!(work_task_service::begin_setup(&engine.db.conn, task_id, next_seq)
-            .await
-            .expect("begin_setup"));
+        assert!(
+            work_task_service::begin_setup(&engine.db.conn, task_id, next_seq)
+                .await
+                .expect("begin_setup")
+        );
         assert!(work_task_service::mark_running(
             &engine.db.conn,
             task_id,
@@ -8687,9 +8734,11 @@ mod tests {
         .await
         .expect("claim")
         .expect("claimed");
-        assert!(work_task_service::begin_setup(&engine.db.conn, task_id, next_seq)
-            .await
-            .expect("begin_setup"));
+        assert!(
+            work_task_service::begin_setup(&engine.db.conn, task_id, next_seq)
+                .await
+                .expect("begin_setup")
+        );
         assert!(work_task_service::mark_running(
             &engine.db.conn,
             task_id,
@@ -8772,9 +8821,7 @@ mod tests {
         );
 
         // ...and the surviving generation's own edge still swings both ways.
-        engine
-            .track_request("conn-next", "p:r9".into(), true)
-            .await;
+        engine.track_request("conn-next", "p:r9".into(), true).await;
         assert_eq!(
             status_of(&engine, task_id).await,
             WorkTaskStatus::AwaitingInput
@@ -8843,10 +8890,15 @@ mod tests {
         // `index`. Before the parent lookup existed it was dropped outright and
         // the board kept saying "running" for a run that was parked on the user.
         let (engine, task_id) = running_task().await;
-        engine.on_event(&delegation_started(PARENT_CONN, CHILD_CONN)).await;
+        engine
+            .on_event(&delegation_started(PARENT_CONN, CHILD_CONN))
+            .await;
         engine.on_event(&permission_request(CHILD_CONN, "r1")).await;
 
-        assert_eq!(status_of(&engine, task_id).await, WorkTaskStatus::AwaitingInput);
+        assert_eq!(
+            status_of(&engine, task_id).await,
+            WorkTaskStatus::AwaitingInput
+        );
 
         engine
             .on_event(&env(
@@ -8865,11 +8917,18 @@ mod tests {
         // permission was still pending leaves a key nothing can ever resolve,
         // pinning the row at awaiting_input for the rest of the run.
         let (engine, task_id) = running_task().await;
-        engine.on_event(&delegation_started(PARENT_CONN, CHILD_CONN)).await;
+        engine
+            .on_event(&delegation_started(PARENT_CONN, CHILD_CONN))
+            .await;
         engine.on_event(&permission_request(CHILD_CONN, "r1")).await;
-        assert_eq!(status_of(&engine, task_id).await, WorkTaskStatus::AwaitingInput);
+        assert_eq!(
+            status_of(&engine, task_id).await,
+            WorkTaskStatus::AwaitingInput
+        );
 
-        engine.on_event(&delegation_completed(PARENT_CONN, CHILD_CONN)).await;
+        engine
+            .on_event(&delegation_completed(PARENT_CONN, CHILD_CONN))
+            .await;
         assert_eq!(
             status_of(&engine, task_id).await,
             WorkTaskStatus::Running,
@@ -8884,8 +8943,12 @@ mod tests {
         // namespaced — otherwise resolving one would flip the row back while
         // the other is still waiting.
         let (engine, task_id) = running_task().await;
-        engine.on_event(&delegation_started(PARENT_CONN, CHILD_CONN)).await;
-        engine.on_event(&permission_request(PARENT_CONN, "r1")).await;
+        engine
+            .on_event(&delegation_started(PARENT_CONN, CHILD_CONN))
+            .await;
+        engine
+            .on_event(&permission_request(PARENT_CONN, "r1"))
+            .await;
         // Same request_id on the child: a plausible collision, since the two
         // agents mint ids independently.
         engine.on_event(&permission_request(CHILD_CONN, "r1")).await;
@@ -8951,7 +9014,9 @@ mod tests {
                 queued: 0,
             });
         }
-        engine.on_event(&delegation_started(PARENT_CONN, CHILD_CONN)).await;
+        engine
+            .on_event(&delegation_started(PARENT_CONN, CHILD_CONN))
+            .await;
         assert_eq!(
             status_of(&engine, task_id).await,
             WorkTaskStatus::AwaitingInput
@@ -8976,8 +9041,12 @@ mod tests {
         // the grandchild has to resolve through the chain rather than requiring
         // its parent to be the run's own connection.
         let (engine, task_id) = running_task().await;
-        engine.on_event(&delegation_started(PARENT_CONN, CHILD_CONN)).await;
-        engine.on_event(&delegation_started(CHILD_CONN, "conn-grandchild")).await;
+        engine
+            .on_event(&delegation_started(PARENT_CONN, CHILD_CONN))
+            .await;
+        engine
+            .on_event(&delegation_started(CHILD_CONN, "conn-grandchild"))
+            .await;
 
         engine
             .on_event(&permission_request("conn-grandchild", "r1"))
@@ -8995,8 +9064,12 @@ mod tests {
         // the row wedges at awaiting_input on a key nothing can resolve, and
         // the grandchild's mapping is stranded in the map forever.
         let (engine, task_id) = running_task().await;
-        engine.on_event(&delegation_started(PARENT_CONN, CHILD_CONN)).await;
-        engine.on_event(&delegation_started(CHILD_CONN, "conn-grandchild")).await;
+        engine
+            .on_event(&delegation_started(PARENT_CONN, CHILD_CONN))
+            .await;
+        engine
+            .on_event(&delegation_started(CHILD_CONN, "conn-grandchild"))
+            .await;
         engine
             .on_event(&permission_request("conn-grandchild", "r1"))
             .await;
@@ -9005,7 +9078,9 @@ mod tests {
             WorkTaskStatus::AwaitingInput
         );
 
-        engine.on_event(&delegation_completed(PARENT_CONN, CHILD_CONN)).await;
+        engine
+            .on_event(&delegation_completed(PARENT_CONN, CHILD_CONN))
+            .await;
         assert_eq!(status_of(&engine, task_id).await, WorkTaskStatus::Running);
         assert!(
             engine.delegation_parents.lock().await.is_empty(),
@@ -9142,8 +9217,13 @@ mod tests {
             if let Some(e) = &self.comment_error {
                 return Err(e.clone());
             }
-            self.comments.lock().await.push((kind, number, body.to_string()));
-            Ok(format!("https://github.test/acme/app/issues/{number}#issuecomment-1"))
+            self.comments
+                .lock()
+                .await
+                .push((kind, number, body.to_string()));
+            Ok(format!(
+                "https://github.test/acme/app/issues/{number}#issuecomment-1"
+            ))
         }
 
         async fn create_pull(
@@ -9248,12 +9328,22 @@ mod tests {
         // Its own `origin`: the fake forge fetches through it, so a test can
         // publish a real `refs/pull/7/head` and have git answer questions
         // about it exactly as it would against a server.
-        git_run(&root_path, &["remote", "add", "origin", root_path.to_str().unwrap()]);
+        git_run(
+            &root_path,
+            &["remote", "add", "origin", root_path.to_str().unwrap()],
+        );
 
         let worktree = root_path.join("wt");
         git_run(
             &root_path,
-            &["worktree", "add", "-q", "-b", "task/7", worktree.to_str().unwrap()],
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "task/7",
+                worktree.to_str().unwrap(),
+            ],
         );
         std::fs::write(worktree.join("a.txt"), "one\ntwo\n").expect("write");
         git_run(&worktree, &["commit", "-qam", "the work"]);
@@ -9307,11 +9397,7 @@ mod tests {
         let broadcaster = Arc::new(crate::web::event_bridge::WebEventBroadcaster::new());
         let events = broadcaster.subscribe();
         Delivery {
-            engine: test_engine_full(
-                db,
-                forge.clone(),
-                EventEmitter::test_web_only(broadcaster),
-            ),
+            engine: test_engine_full(db, forge.clone(), EventEmitter::test_web_only(broadcaster)),
             forge,
             events,
             task_id: task.id,
@@ -9345,12 +9431,21 @@ mod tests {
 
         assert_eq!(
             f.forge.pushes.lock().await.as_slice(),
-            [("acme/app".to_string(), "task/7".to_string(), "task/7".to_string())]
+            [(
+                "acme/app".to_string(),
+                "task/7".to_string(),
+                "task/7".to_string()
+            )]
         );
         let created = f.forge.created.lock().await.clone();
         assert_eq!(
             created,
-            [("Fix login".to_string(), "task/7".to_string(), "main".to_string(), false)],
+            [(
+                "Fix login".to_string(),
+                "task/7".to_string(),
+                "main".to_string(),
+                false
+            )],
             "title trimmed, head/base taken from the task's own record"
         );
 
@@ -9377,17 +9472,29 @@ mod tests {
     #[tokio::test]
     async fn a_delivery_takes_the_worktree_along_when_asked() {
         let f = delivery_fixture(FakeForge::default()).await;
-        let url = f.engine.deliver_pr(f.task_id, None, false, true).await.expect("delivery");
+        let url = f
+            .engine
+            .deliver_pr(f.task_id, None, false, true)
+            .await
+            .expect("delivery");
         assert_eq!(url, "https://github.test/acme/app/pull/42");
 
         let task = row(&f.engine, f.task_id).await;
         assert_eq!(task.status, WorkTaskStatus::Done);
         assert_eq!(task.completion_kind.as_deref(), Some("delivered_pr"));
         assert!(!f.worktree.exists(), "the checkout is gone from disk");
-        assert!(task.worktree_folder_id.is_none(), "and the row's pointer with it");
-        assert!(task.cleanup_state.is_none(), "a removal that worked flags nothing");
         assert!(
-            task_git::rev_parse(f.root.to_str().unwrap(), "refs/heads/task/7").await.is_err(),
+            task.worktree_folder_id.is_none(),
+            "and the row's pointer with it"
+        );
+        assert!(
+            task.cleanup_state.is_none(),
+            "a removal that worked flags nothing"
+        );
+        assert!(
+            task_git::rev_parse(f.root.to_str().unwrap(), "refs/heads/task/7")
+                .await
+                .is_err(),
             "the local branch goes too — the push that just ran is what makes that safe"
         );
         assert!(f.engine.merging.lock().await.is_empty());
@@ -9405,14 +9512,28 @@ mod tests {
             ..Default::default()
         })
         .await;
-        let url = f.engine.deliver_pr(f.task_id, None, false, true).await.expect("delivery");
+        let url = f
+            .engine
+            .deliver_pr(f.task_id, None, false, true)
+            .await
+            .expect("delivery");
         assert_eq!(url, "https://github.test/acme/app/pull/42");
 
         let task = row(&f.engine, f.task_id).await;
-        assert_eq!(task.status, WorkTaskStatus::Done, "the delivery still landed");
+        assert_eq!(
+            task.status,
+            WorkTaskStatus::Done,
+            "the delivery still landed"
+        );
         assert_eq!(task.completion_kind.as_deref(), Some("delivered_pr"));
-        assert!(f.worktree.join("scratch.txt").exists(), "the stray file survives");
-        assert!(task.worktree_folder_id.is_some(), "the checkout is still the task's");
+        assert!(
+            f.worktree.join("scratch.txt").exists(),
+            "the stray file survives"
+        );
+        assert!(
+            task.worktree_folder_id.is_some(),
+            "the checkout is still the task's"
+        );
         assert_eq!(
             task.cleanup_state.as_deref(),
             Some("failed"),
@@ -9433,11 +9554,19 @@ mod tests {
             ..Default::default()
         })
         .await;
-        let url = f.engine.deliver_pr(f.task_id, None, false, true).await.expect("delivery");
+        let url = f
+            .engine
+            .deliver_pr(f.task_id, None, false, true)
+            .await
+            .expect("delivery");
         assert_eq!(url, "https://github.test/acme/app/pull/42");
 
         let task = row(&f.engine, f.task_id).await;
-        assert_eq!(task.status, WorkTaskStatus::Done, "the delivery still landed");
+        assert_eq!(
+            task.status,
+            WorkTaskStatus::Done,
+            "the delivery still landed"
+        );
         assert_eq!(task.completion_kind.as_deref(), Some("delivered_pr"));
         assert!(f.worktree.exists(), "the checkout survives");
         assert!(task.worktree_folder_id.is_some(), "and stays the task's");
@@ -9448,7 +9577,9 @@ mod tests {
         );
         // Spotless — which is exactly why the other probe could not have
         // caught this, and why the tip check has to exist.
-        assert!(!task_git::has_changes(f.worktree.to_str().unwrap()).await.expect("status"));
+        assert!(!task_git::has_changes(f.worktree.to_str().unwrap())
+            .await
+            .expect("status"));
         let tip = task_git::rev_parse(f.root.to_str().unwrap(), "refs/heads/task/7")
             .await
             .expect("the branch is still there");
@@ -9472,7 +9603,11 @@ mod tests {
             base_ref: "main".into(),
         });
 
-        let url = f.engine.deliver_pr(f.task_id, None, false, false).await.expect("delivery");
+        let url = f
+            .engine
+            .deliver_pr(f.task_id, None, false, false)
+            .await
+            .expect("delivery");
         assert_eq!(url, "https://github.test/acme/app/pull/11");
         assert!(
             f.forge.created.lock().await.is_empty(),
@@ -9498,8 +9633,15 @@ mod tests {
             base_ref: "release/1.x".into(), // ← the only difference
         });
 
-        let url = f.engine.deliver_pr(f.task_id, None, false, false).await.expect("delivery");
-        assert_eq!(url, "https://github.test/acme/app/pull/42", "a new one was opened");
+        let url = f
+            .engine
+            .deliver_pr(f.task_id, None, false, false)
+            .await
+            .expect("delivery");
+        assert_eq!(
+            url, "https://github.test/acme/app/pull/42",
+            "a new one was opened"
+        );
         assert_eq!(f.forge.created.lock().await.len(), 1);
     }
 
@@ -9510,15 +9652,24 @@ mod tests {
     async fn any_failed_step_returns_the_task_to_review() {
         let cases = [
             (
-                FakeForge { push_error: Some("remote rejected".into()), ..Default::default() },
+                FakeForge {
+                    push_error: Some("remote rejected".into()),
+                    ..Default::default()
+                },
                 "could not push",
             ),
             (
-                FakeForge { find_error: Some("502 bad gateway".into()), ..Default::default() },
+                FakeForge {
+                    find_error: Some("502 bad gateway".into()),
+                    ..Default::default()
+                },
                 "could not check for an existing pull request",
             ),
             (
-                FakeForge { create_error: Some("422 no commits".into()), ..Default::default() },
+                FakeForge {
+                    create_error: Some("422 no commits".into()),
+                    ..Default::default()
+                },
                 "could not open the pull request",
             ),
         ];
@@ -9555,10 +9706,17 @@ mod tests {
             head_repo: "acme/app".into(),
             base_ref: "main".into(),
         });
-        let err = f.engine.deliver_pr(f.task_id, None, false, false).await.expect_err("must stop");
+        let err = f
+            .engine
+            .deliver_pr(f.task_id, None, false, false)
+            .await
+            .expect_err("must stop");
         assert!(err.contains("closed without merging"), "got {err}");
         assert!(f.forge.created.lock().await.is_empty());
-        assert_eq!(row(&f.engine, f.task_id).await.status, WorkTaskStatus::Review);
+        assert_eq!(
+            row(&f.engine, f.task_id).await.status,
+            WorkTaskStatus::Review
+        );
     }
 
     /// Preconditions are checked BEFORE the CAS, so a refusal leaves the task
@@ -9624,7 +9782,10 @@ mod tests {
                 .expect_err("must refuse");
             assert!(err.contains(needle), "got {err}");
             assert!(f.forge.pushes.lock().await.is_empty());
-            assert_eq!(row(&f.engine, f.task_id).await.status, WorkTaskStatus::Review);
+            assert_eq!(
+                row(&f.engine, f.task_id).await.status,
+                WorkTaskStatus::Review
+            );
         }
     }
 
@@ -9638,7 +9799,11 @@ mod tests {
             f.forge.existing.lock().await.push(ForgePr {
                 number: 21,
                 html_url: "https://github.test/acme/app/pull/21".into(),
-                state: if merged { "closed".into() } else { "open".into() },
+                state: if merged {
+                    "closed".into()
+                } else {
+                    "open".into()
+                },
                 merged,
                 head_sha: f.head.clone(),
                 head_ref: "task/7".into(),
@@ -9652,7 +9817,10 @@ mod tests {
             let task = row(&f.engine, f.task_id).await;
             assert_eq!(task.status, WorkTaskStatus::Done, "merged={merged}");
             assert_eq!(task.completion_kind.as_deref(), Some("delivered_pr"));
-            assert!(f.forge.created.lock().await.is_empty(), "recovery never creates");
+            assert!(
+                f.forge.created.lock().await.is_empty(),
+                "recovery never creates"
+            );
         }
     }
 
@@ -9755,8 +9923,14 @@ mod tests {
             .await
             .expect_err("must refuse");
         assert!(err.contains("not on the remote yet"), "got {err}");
-        assert!(f.forge.pushes.lock().await.is_empty(), "refused before the push");
-        assert_eq!(row(&f.engine, f.task_id).await.status, WorkTaskStatus::Review);
+        assert!(
+            f.forge.pushes.lock().await.is_empty(),
+            "refused before the push"
+        );
+        assert_eq!(
+            row(&f.engine, f.task_id).await.status,
+            WorkTaskStatus::Review
+        );
 
         // And an unreadable remote base is NOT reassurance: a base branch that
         // does not exist on the remote fails exactly the same way, and the push
@@ -9852,7 +10026,9 @@ mod tests {
         let current = row(&f.engine, f.task_id).await;
         assert!(current.run_seq > stale.run_seq);
 
-        f.engine.bounce_delivery(&stale, "stale bounce".into()).await;
+        f.engine
+            .bounce_delivery(&stale, "stale bounce".into())
+            .await;
 
         let after = row(&f.engine, f.task_id).await;
         assert_eq!(after.status, WorkTaskStatus::Merging, "still delivering");
@@ -9918,7 +10094,10 @@ mod tests {
         meta["writeback"] = serde_json::json!(wanted);
         let mut active = task.into_active_model();
         active.source_meta = Set(Some(meta.to_string()));
-        active.update(&f.engine.db.conn).await.expect("record the write-back answer");
+        active
+            .update(&f.engine.db.conn)
+            .await
+            .expect("record the write-back answer");
     }
 
     async fn enable_writeback(f: &Delivery) {
@@ -9994,9 +10173,13 @@ mod tests {
         active.files_changed = Set(Some(3));
         active.additions = Set(Some(42));
         active.deletions = Set(Some(7));
-        active.result_summary =
-            Set(Some("I refactored the auth module and rewrote the tests".to_string()));
-        active.update(&f.engine.db.conn).await.expect("record the run's result");
+        active.result_summary = Set(Some(
+            "I refactored the auth module and rewrote the tests".to_string(),
+        ));
+        active
+            .update(&f.engine.db.conn)
+            .await
+            .expect("record the run's result");
 
         f.engine
             .deliver_pr(f.task_id, None, false, false)
@@ -10012,13 +10195,21 @@ mod tests {
         let comments = f.forge.comments.lock().await.clone();
         assert_eq!(comments.len(), 1);
         let (kind, number, body) = &comments[0];
-        assert_eq!(*number, 7, "the comment goes on the issue the task came from");
+        assert_eq!(
+            *number, 7,
+            "the comment goes on the issue the task came from"
+        );
         assert_eq!(*kind, ForgeItemKind::Issue, "…in the issue's own thread");
-        assert!(body.contains("https://github.test/acme/app/pull/42"), "{body}");
+        assert!(
+            body.contains("https://github.test/acme/app/pull/42"),
+            "{body}"
+        );
         assert!(body.contains("(3 files, +42/-7)"), "{body}");
         assert!(!body.contains("refactored"), "agent text leaked: {body}");
         assert!(
-            events_of(&f.engine, f.task_id).await.contains(&"forge_writeback".to_string()),
+            events_of(&f.engine, f.task_id)
+                .await
+                .contains(&"forge_writeback".to_string()),
             "the comment belongs on the timeline"
         );
     }
@@ -10037,7 +10228,9 @@ mod tests {
         // as the enabled case gets before concluding it did not.
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(f.forge.comments.lock().await.is_empty());
-        assert!(!events_of(&f.engine, f.task_id).await.contains(&"forge_writeback".to_string()));
+        assert!(!events_of(&f.engine, f.task_id)
+            .await
+            .contains(&"forge_writeback".to_string()));
     }
 
     /// A row minted before the choice lived on the task carries no answer at
@@ -10060,7 +10253,9 @@ mod tests {
             .expect("delivery");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(f.forge.comments.lock().await.is_empty());
-        assert!(!events_of(&f.engine, f.task_id).await.contains(&"forge_writeback".to_string()));
+        assert!(!events_of(&f.engine, f.task_id)
+            .await
+            .contains(&"forge_writeback".to_string()));
     }
 
     /// Best-effort means best-effort: a comment that cannot be posted is a
@@ -10083,14 +10278,19 @@ mod tests {
         wait_for("the failure event", move || {
             let engine = engine.clone();
             async move {
-                events_of(&engine, task_id).await.contains(&"forge_writeback_failed".to_string())
+                events_of(&engine, task_id)
+                    .await
+                    .contains(&"forge_writeback_failed".to_string())
             }
         })
         .await;
         let task = row(&f.engine, f.task_id).await;
         assert_eq!(task.status, WorkTaskStatus::Done);
         assert_eq!(task.completion_kind.as_deref(), Some("delivered_pr"));
-        assert!(task.last_error.is_none(), "a failed comment is not a task failure");
+        assert!(
+            task.last_error.is_none(),
+            "a failed comment is not a task failure"
+        );
     }
 
     /// The OTHER settlement path: a task that landed on the base branch
@@ -10140,8 +10340,14 @@ mod tests {
         assert_eq!(comments.len(), 1, "one settle, one comment");
         let (kind, number, body) = &comments[0];
         assert_eq!((*kind, *number), (ForgeItemKind::Issue, 7));
-        assert!(body.contains(&landed_commit[..7]), "the commit that landed: {body}");
-        assert!(body.contains("`main`") && body.contains("(1 file, +1/-0)"), "{body}");
+        assert!(
+            body.contains(&landed_commit[..7]),
+            "the commit that landed: {body}"
+        );
+        assert!(
+            body.contains("`main`") && body.contains("(1 file, +1/-0)"),
+            "{body}"
+        );
 
         // A second recovery pass finds a `done` row and settles nothing, so the
         // issue does not collect a comment per sweep.
@@ -10592,7 +10798,10 @@ mod tests {
             f.worktree.exists(),
             "the checkout must survive while the launch holds the task lock"
         );
-        assert!(!removal.is_finished(), "and the removal must still be parked");
+        assert!(
+            !removal.is_finished(),
+            "and the removal must still be parked"
+        );
 
         drop(guard);
         removal.await.expect("join").expect("cleanup");
@@ -10661,7 +10870,10 @@ mod tests {
         let mut active = row(&f.engine, f.task_id).await.into_active_model();
         active.source_kind = Set(None);
         active.source_meta = Set(None);
-        active.update(&f.engine.db.conn).await.expect("clear source");
+        active
+            .update(&f.engine.db.conn)
+            .await
+            .expect("clear source");
 
         f.engine
             .forge_writeback(f.task_id, WritebackOutcome::Merged("abc1234".into()))
@@ -10765,14 +10977,20 @@ mod tests {
         )
         .await
         .expect("conversation");
-        let run_seq =
-            work_task_service::claim_for_run(&engine.db.conn, live.id, WorkTaskStatus::Todo, "test")
+        let run_seq = work_task_service::claim_for_run(
+            &engine.db.conn,
+            live.id,
+            WorkTaskStatus::Todo,
+            "test",
+        )
+        .await
+        .expect("claim")
+        .expect("claimed");
+        assert!(
+            work_task_service::begin_setup(&engine.db.conn, live.id, run_seq)
                 .await
-                .expect("claim")
-                .expect("claimed");
-        assert!(work_task_service::begin_setup(&engine.db.conn, live.id, run_seq)
-            .await
-            .expect("begin_setup"));
+                .expect("begin_setup")
+        );
         assert!(work_task_service::mark_running(
             &engine.db.conn,
             live.id,
@@ -10812,10 +11030,13 @@ mod tests {
         // Boot can finish now; the event has to survive it.
         drop(guard);
         let probe = engine.clone();
-        wait_for("the settle from an event published during boot", move || {
-            let probe = probe.clone();
-            async move { row(&probe, live.id).await.status == WorkTaskStatus::Review }
-        })
+        wait_for(
+            "the settle from an event published during boot",
+            move || {
+                let probe = probe.clone();
+                async move { row(&probe, live.id).await.status == WorkTaskStatus::Review }
+            },
+        )
         .await;
         assert_eq!(
             row(&engine, merging.id).await.status,
@@ -10837,7 +11058,11 @@ mod tests {
         git_run(&f.worktree, &["reset", "-q", "--mixed", "HEAD~1"]);
         std::fs::write(f.worktree.join("fresh.txt"), "a\nb\n").expect("write");
 
-        let stats = f.engine.snapshot_diff_stats(f.task_id).await.expect("stats");
+        let stats = f
+            .engine
+            .snapshot_diff_stats(f.task_id)
+            .await
+            .expect("stats");
         assert_eq!(stats, (2, 3, 0), "the edit and the new file both count");
         let task = row(&f.engine, f.task_id).await;
         assert!(
@@ -10913,7 +11138,10 @@ mod tests {
         active.source_kind = Set(Some(SOURCE_KIND_PR.to_string()));
         active.source_key = Set(Some("github:github.com:acme/app:pr:7".to_string()));
         active.source_meta = Set(Some(meta.to_string()));
-        active.update(&f.engine.db.conn).await.expect("as a pull request task");
+        active
+            .update(&f.engine.db.conn)
+            .await
+            .expect("as a pull request task");
     }
 
     fn open_pull(head_sha: &str, head_ref: &str, head_repo: &str) -> ForgePr {
@@ -10962,7 +11190,10 @@ mod tests {
         let pull_head = task_git::rev_parse(origin.to_str().unwrap(), "HEAD")
             .await
             .expect("pull head");
-        git_run(&origin, &["update-ref", &provider.change_head_ref(7), &pull_head]);
+        git_run(
+            &origin,
+            &["update-ref", &provider.change_head_ref(7), &pull_head],
+        );
         // …and the base branch moving on underneath it, which is what makes
         // "merge base" and "base tip" different commits.
         git_run(&origin, &["checkout", "-q", "main"]);
@@ -10973,7 +11204,12 @@ mod tests {
         let root = home.path().join("root");
         git_run(
             home.path(),
-            &["clone", "-q", origin.to_str().unwrap(), root.to_str().unwrap()],
+            &[
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                root.to_str().unwrap(),
+            ],
         );
 
         let db = crate::db::test_helpers::fresh_in_memory_db().await;
@@ -11001,7 +11237,10 @@ mod tests {
             run_seq: Set(1),
             sort_order: Set(0),
             source_kind: Set(Some(SOURCE_KIND_PR.to_string())),
-            source_key: Set(Some(format!("{}:github.com:acme/app:pr:7", provider.as_str()))),
+            source_key: Set(Some(format!(
+                "{}:github.com:acme/app:pr:7",
+                provider.as_str()
+            ))),
             source_meta: Set(Some(meta.to_string())),
             created_at: Set(now),
             updated_at: Set(now),
@@ -11032,7 +11271,9 @@ mod tests {
         let (engine, task_id, home, pull_head, branch_point) =
             pull_checkout_fixture(None, crate::forge::ForgeProvider::GitHub).await;
         let task = row(&engine, task_id).await;
-        let root = get_folder_core(&engine.db, task.folder_id).await.expect("root");
+        let root = get_folder_core(&engine.db, task.folder_id)
+            .await
+            .expect("root");
 
         let wt = engine
             .ensure_worktree(&task, &root, &WorkTaskFolderSettings::default())
@@ -11076,7 +11317,9 @@ mod tests {
         let (engine, task_id, home, _pull_head, branch_point) =
             pull_checkout_fixture(None, crate::forge::ForgeProvider::GitHub).await;
         let task = row(&engine, task_id).await;
-        let root = get_folder_core(&engine.db, task.folder_id).await.expect("root");
+        let root = get_folder_core(&engine.db, task.folder_id)
+            .await
+            .expect("root");
         let wt = engine
             .ensure_worktree(&task, &root, &WorkTaskFolderSettings::default())
             .await
@@ -11133,7 +11376,9 @@ mod tests {
         let (engine, task_id, home, _pull_head, _branch_point) =
             pull_checkout_fixture(None, crate::forge::ForgeProvider::GitHub).await;
         let task = row(&engine, task_id).await;
-        let root = get_folder_core(&engine.db, task.folder_id).await.expect("root");
+        let root = get_folder_core(&engine.db, task.folder_id)
+            .await
+            .expect("root");
         let wt = engine
             .ensure_worktree(&task, &root, &WorkTaskFolderSettings::default())
             .await
@@ -11181,7 +11426,9 @@ mod tests {
         let (engine, task_id, home, _pull_head, _branch_point) =
             pull_checkout_fixture(None, crate::forge::ForgeProvider::GitHub).await;
         let task = row(&engine, task_id).await;
-        let root = get_folder_core(&engine.db, task.folder_id).await.expect("root");
+        let root = get_folder_core(&engine.db, task.folder_id)
+            .await
+            .expect("root");
         engine
             .ensure_worktree(&task, &root, &WorkTaskFolderSettings::default())
             .await
@@ -11194,7 +11441,10 @@ mod tests {
         active.files_changed = Set(Some(1));
         active.additions = Set(Some(1));
         active.deletions = Set(Some(0));
-        active.update(&engine.db.conn).await.expect("stale review row");
+        active
+            .update(&engine.db.conn)
+            .await
+            .expect("stale review row");
 
         engine.refresh_review_diff_stats().await;
 
@@ -11217,7 +11467,9 @@ mod tests {
         let (engine, task_id, home, mr_head, branch_point) =
             pull_checkout_fixture(None, crate::forge::ForgeProvider::GitLab).await;
         let task = row(&engine, task_id).await;
-        let root = get_folder_core(&engine.db, task.folder_id).await.expect("root");
+        let root = get_folder_core(&engine.db, task.folder_id)
+            .await
+            .expect("root");
 
         let wt = engine
             .ensure_worktree(&task, &root, &WorkTaskFolderSettings::default())
@@ -11246,7 +11498,9 @@ mod tests {
         let (engine, task_id, home, _pull_head, _base) =
             pull_checkout_fixture(Some(gone), crate::forge::ForgeProvider::GitHub).await;
         let task = row(&engine, task_id).await;
-        let root = get_folder_core(&engine.db, task.folder_id).await.expect("root");
+        let root = get_folder_core(&engine.db, task.folder_id)
+            .await
+            .expect("root");
 
         let err = engine
             .ensure_worktree(&task, &root, &WorkTaskFolderSettings::default())
@@ -11267,7 +11521,8 @@ mod tests {
         for (label, mutate, expect) in [
             (
                 "closed while we pushed",
-                Box::new(|pr: &mut ForgePr| pr.state = "closed".into()) as Box<dyn Fn(&mut ForgePr)>,
+                Box::new(|pr: &mut ForgePr| pr.state = "closed".into())
+                    as Box<dyn Fn(&mut ForgePr)>,
                 "closed without merging",
             ),
             (
@@ -11336,7 +11591,10 @@ mod tests {
         f.forge.existing.lock().await.push(pr.clone());
         // A real child commit of the task's head, published where the forge
         // publishes a change's head.
-        git_run(&f.worktree, &["commit", "-q", "--allow-empty", "-m", "on top of the task"]);
+        git_run(
+            &f.worktree,
+            &["commit", "-q", "--allow-empty", "-m", "on top of the task"],
+        );
         let descendant = task_git::rev_parse(f.worktree.to_str().unwrap(), "HEAD")
             .await
             .expect("descendant");
@@ -11379,7 +11637,10 @@ mod tests {
             .await
             .expect_err("a merge without our commit is not a delivery");
         assert!(err.contains("does not contain it"), "{err}");
-        assert_eq!(row(&f.engine, f.task_id).await.status, WorkTaskStatus::Review);
+        assert_eq!(
+            row(&f.engine, f.task_id).await.status,
+            WorkTaskStatus::Review
+        );
         // The scratch ref is scoped to the task (siblings in one folder do not
         // share a lock) and is gone whichever way the answer went — on this
         // failing path as much as on the settling one above.
@@ -11422,7 +11683,11 @@ mod tests {
         assert_eq!(url, "https://github.test/acme/app/pull/7");
         assert_eq!(
             f.forge.pushes.lock().await.as_slice(),
-            [("acme/app".to_string(), "task/7".to_string(), "feature".to_string())],
+            [(
+                "acme/app".to_string(),
+                "task/7".to_string(),
+                "feature".to_string()
+            )],
             "the work branch goes to the pull request's head branch"
         );
         assert!(
@@ -11450,14 +11715,25 @@ mod tests {
     async fn a_fork_pull_request_task_pushes_back_to_the_fork() {
         let f = delivery_fixture(FakeForge::default()).await;
         // Canonical casing, as the API answers it — the push URL normalizes.
-        let pr = open_pull("whatever-the-branch-points-at", "feature", "Contributor/App");
+        let pr = open_pull(
+            "whatever-the-branch-points-at",
+            "feature",
+            "Contributor/App",
+        );
         as_pull_request_task(&f, pr.clone()).await;
         f.forge.existing.lock().await.push(pr);
 
-        f.engine.deliver_pr(f.task_id, None, false, false).await.expect("fork push back");
+        f.engine
+            .deliver_pr(f.task_id, None, false, false)
+            .await
+            .expect("fork push back");
         assert_eq!(
             f.forge.pushes.lock().await.as_slice(),
-            [("contributor/app".to_string(), "task/7".to_string(), "feature".to_string())],
+            [(
+                "contributor/app".to_string(),
+                "task/7".to_string(),
+                "feature".to_string()
+            )],
             "the push lands in the fork, not in the source repository"
         );
         let task = row(&f.engine, f.task_id).await;
@@ -11561,10 +11837,17 @@ mod tests {
             "acme/app",
         ));
 
-        f.engine.deliver_pr(f.task_id, None, false, false).await.expect("push back");
+        f.engine
+            .deliver_pr(f.task_id, None, false, false)
+            .await
+            .expect("push back");
         assert_eq!(
             f.forge.pushes.lock().await.as_slice(),
-            [("acme/app".to_string(), "task/7".to_string(), "feature".to_string())]
+            [(
+                "acme/app".to_string(),
+                "task/7".to_string(),
+                "feature".to_string()
+            )]
         );
         assert_eq!(row(&f.engine, f.task_id).await.status, WorkTaskStatus::Done);
     }
@@ -11587,7 +11870,10 @@ mod tests {
             .expect_err("closed");
         assert!(err.contains("no longer open"), "{err}");
         assert!(closed.forge.pushes.lock().await.is_empty());
-        assert_eq!(row(&closed.engine, closed.task_id).await.status, WorkTaskStatus::Review);
+        assert_eq!(
+            row(&closed.engine, closed.task_id).await.status,
+            WorkTaskStatus::Review
+        );
 
         // A fork codeg cannot NAME — GitLab's unresolved `project-{id}`
         // placeholder — has no push URL, ever. Refused before the CAS.
@@ -11600,7 +11886,10 @@ mod tests {
             .expect_err("unnameable fork");
         assert!(err.contains("cannot see"), "{err}");
         assert!(fork.forge.pushes.lock().await.is_empty());
-        assert_eq!(row(&fork.engine, fork.task_id).await.status, WorkTaskStatus::Review);
+        assert_eq!(
+            row(&fork.engine, fork.task_id).await.status,
+            WorkTaskStatus::Review
+        );
 
         // Retargeted under us: the pull request now tracks another branch, so
         // pushing to the recorded one delivers into nothing.
@@ -11619,7 +11908,10 @@ mod tests {
             .expect_err("retargeted");
         assert!(err.contains("now tracks branch"), "{err}");
         assert!(moved.forge.pushes.lock().await.is_empty());
-        assert_eq!(row(&moved.engine, moved.task_id).await.status, WorkTaskStatus::Review);
+        assert_eq!(
+            row(&moved.engine, moved.task_id).await.status,
+            WorkTaskStatus::Review
+        );
     }
 
     /// Landing a pull request's work on the local base would take its changes
@@ -11635,7 +11927,10 @@ mod tests {
             .await
             .expect_err("must refuse");
         assert!(err.contains("deliver it back"), "{err}");
-        assert_eq!(row(&f.engine, f.task_id).await.status, WorkTaskStatus::Review);
+        assert_eq!(
+            row(&f.engine, f.task_id).await.status,
+            WorkTaskStatus::Review
+        );
     }
 
     /// Recovery of an interrupted push-back settles on ONE piece of evidence:
@@ -11644,9 +11939,17 @@ mod tests {
     async fn recovery_settles_a_push_back_only_on_the_commit_it_pushed() {
         for (head_sha, expect_done) in [("<the task head>", true), ("0000000", false)] {
             let f = delivery_fixture(FakeForge::default()).await;
-            let sha = if expect_done { f.head.clone() } else { head_sha.to_string() };
+            let sha = if expect_done {
+                f.head.clone()
+            } else {
+                head_sha.to_string()
+            };
             as_pull_request_task(&f, open_pull(&sha, "feature", "acme/app")).await;
-            f.forge.existing.lock().await.push(open_pull(&sha, "feature", "acme/app"));
+            f.forge
+                .existing
+                .lock()
+                .await
+                .push(open_pull(&sha, "feature", "acme/app"));
             interrupt_delivery(&f, "feature").await;
 
             f.engine.recover_merging(f.task_id).await;
@@ -11657,7 +11960,10 @@ mod tests {
             } else {
                 assert_eq!(task.status, WorkTaskStatus::Review);
                 assert!(
-                    task.last_error.as_deref().unwrap_or_default().contains("does not show"),
+                    task.last_error
+                        .as_deref()
+                        .unwrap_or_default()
+                        .contains("does not show"),
                     "{:?}",
                     task.last_error
                 );
@@ -11684,7 +11990,9 @@ mod tests {
         // A delegation from an ordinary chat tab has no board row to flip; the
         // map must not grow for it.
         let (engine, _task_id) = running_task().await;
-        engine.on_event(&delegation_started("conn-chat", "conn-other-child")).await;
+        engine
+            .on_event(&delegation_started("conn-chat", "conn-other-child"))
+            .await;
         assert!(engine.delegation_parents.lock().await.is_empty());
     }
 
@@ -11749,8 +12057,7 @@ mod tests {
             .await;
         if let Some((used, size)) = usage {
             let state = engine.manager.get_state(COMPACT_CONN).await.expect("state");
-            state.write().await.usage =
-                Some(crate::acp::session_state::UsageInfo { used, size });
+            state.write().await.usage = Some(crate::acp::session_state::UsageInfo { used, size });
         }
         CompactFixture {
             engine,
@@ -11890,8 +12197,8 @@ mod tests {
     async fn the_configured_command_is_sent_verbatim() {
         let mut f = compact_fixture(Some((90_000, 100_000))).await;
 
-        let sent = run_compaction(&mut f, compact_settings(80, Some("/summarize")), "end_turn")
-            .await;
+        let sent =
+            run_compaction(&mut f, compact_settings(80, Some("/summarize")), "end_turn").await;
 
         assert_eq!(sent.as_deref(), Some("/summarize"));
     }
@@ -12126,7 +12433,9 @@ mod tests {
             },
         );
 
-        f.engine.release_compact_slot(f.task_id, f.run_seq - 1).await;
+        f.engine
+            .release_compact_slot(f.task_id, f.run_seq - 1)
+            .await;
         assert!(
             f.engine.compacting.lock().await.contains_key(&f.task_id),
             "an older generation must not release the live slot"

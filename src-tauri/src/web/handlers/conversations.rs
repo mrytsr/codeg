@@ -359,6 +359,32 @@ pub async fn update_conversation_title(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UpdateConversationModelSelectionParams {
+    pub conversation_id: i32,
+    pub provider_id: Option<String>,
+    pub model_id: Option<String>,
+}
+
+pub async fn update_conversation_model_selection(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<UpdateConversationModelSelectionParams>,
+) -> Result<Json<()>, AppCommandError> {
+    conv_commands::update_conversation_model_selection_and_refresh(
+        &state.db.conn,
+        &state.connection_manager,
+        &state.data_dir,
+        params.conversation_id,
+        params.provider_id,
+        params.model_id,
+    )
+    .await?;
+    conv_commands::emit_conversation_upsert(&state.emitter, &state.db.conn, params.conversation_id)
+        .await;
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateConversationPinnedParams {
     pub conversation_id: i32,
     pub pinned: bool,
@@ -395,5 +421,9 @@ pub async fn delete_conversation(
         params.conversation_id,
     )
     .await?;
+    crate::commands::model_provider_launch::cleanup_conversation_workspaces(
+        &state.data_dir,
+        params.conversation_id,
+    );
     Ok(Json(()))
 }

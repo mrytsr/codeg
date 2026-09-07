@@ -24,7 +24,7 @@ function pointerDown(element: Element, pointerType: string) {
   fireEvent(element, event)
 }
 
-function renderGuarded(onContextMenu: (event: Event) => void) {
+function renderGuarded(onContextMenu: React.MouseEventHandler<HTMLDivElement>) {
   const { result } = renderHook(() => useContextMenuPointerGuard())
 
   return render(
