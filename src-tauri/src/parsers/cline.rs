@@ -161,7 +161,10 @@ impl AgentParser for ClineParser {
             let folder_path = entry.cwd_on_task_initialization.clone();
             let folder_name = folder_path.as_deref().map(folder_name_from_path);
 
-            let title = entry.task.as_deref().map(|t| title_from_user_text(t.trim()));
+            let title = entry
+                .task
+                .as_deref()
+                .map(|t| title_from_user_text(t.trim()));
 
             // Count messages from api_conversation_history.json
             let api_path = tasks_dir.join("api_conversation_history.json");
@@ -286,7 +289,7 @@ impl AgentParser for ClineParser {
                         duration_ms: None,
                         model,
                         completed_at: Some(timestamp),
-                    agent_message_id: None,
+                        agent_message_id: None,
                     });
                 }
                 "user" => {
@@ -307,7 +310,7 @@ impl AgentParser for ClineParser {
                             duration_ms: None,
                             model: None,
                             completed_at: Some(timestamp),
-                        agent_message_id: None,
+                            agent_message_id: None,
                         });
                     }
 
@@ -323,7 +326,7 @@ impl AgentParser for ClineParser {
                             duration_ms: None,
                             model: None,
                             completed_at: Some(timestamp),
-                        agent_message_id: None,
+                            agent_message_id: None,
                         });
                     }
                 }
