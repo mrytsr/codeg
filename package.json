@@ -13,7 +13,7 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "server:build": "cd src-tauri && cargo build --bin codeg-server --no-default-features",
-    "buildall": "next build && cd src-tauri && cargo build --bin codeg-server --no-default-features",
+    "buildall": "next build && cd src-tauri && cargo build --bin codeg-server --no-default-features && cargo build --bin codeg-mcp --no-default-features",
     "server:dev": "cd src-tauri && cargo run --bin codeg-server --no-default-features",
     "tauri:prepare-sidecars": "node src-tauri/scripts/prepare-sidecars.mjs",
     "tauri:before-dev": "pnpm tauri:prepare-sidecars && pnpm dev",
