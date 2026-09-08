@@ -1274,6 +1274,7 @@ const ConversationTabView = memo(function ConversationTabView({
       pinTab,
       refreshConversations,
       selectedAgent,
+      draftAgentType,
       setDbConversationId,
       setExternalId,
       conn.isViewer,
