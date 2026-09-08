@@ -1435,10 +1435,11 @@ mod tests {
     fn rewrite_is_idempotent() {
         let tmp = tempfile::tempdir().expect("tempdir");
         // KimiCode needs a non-completions API to exercise its workspace path
-        // (OpenAiCompletions is env-only); every other workspace agent here is
-        // exercised on completions.
+        // (OpenAiCompletions is env-only); Codex requires the OpenAI
+        // Responses API; every other workspace agent here is exercised on
+        // completions.
         for (agent, api) in [
-            (AgentType::Codex, ModelProviderApiType::OpenAiCompletions),
+            (AgentType::Codex, ModelProviderApiType::OpenAiResponses),
             (AgentType::Pi, ModelProviderApiType::OpenAiCompletions),
             (AgentType::OpenCode, ModelProviderApiType::OpenAiCompletions),
             (AgentType::Cline, ModelProviderApiType::OpenAiCompletions),
@@ -1464,7 +1465,7 @@ mod tests {
         let s = sel(
             "prov.example",
             "model-1",
-            ModelProviderApiType::OpenAiCompletions,
+            ModelProviderApiType::OpenAiResponses,
         );
         let mut env = BTreeMap::new();
         apply_launch_adapter(AgentType::Codex, &s, &mut env, tmp.path(), 9).expect("adapter");
@@ -1495,7 +1496,7 @@ mod tests {
         let s = sel(
             "prov.example",
             "model-1",
-            ModelProviderApiType::OpenAiCompletions,
+            ModelProviderApiType::OpenAiResponses,
         );
         let mut env3 = BTreeMap::new();
         apply_launch_adapter(AgentType::Codex, &s, &mut env3, tmp.path(), 5).expect("adapter");
