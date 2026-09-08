@@ -1082,6 +1082,7 @@ const ConversationTabView = memo(function ConversationTabView({
           try {
             await applyDraftModelSelection({
               tabId,
+              agentType: draftAgentType,
               conversationId: persistedId,
               connection: {
                 isViewer: conn.isViewer,
@@ -1203,6 +1204,7 @@ const ConversationTabView = memo(function ConversationTabView({
           isApplyingModelSelection = true
           await applyDraftModelSelection({
             tabId,
+            agentType: draftAgentType,
             conversationId: newConversationId,
             connection: {
               isViewer: conn.isViewer,

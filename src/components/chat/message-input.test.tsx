@@ -120,8 +120,6 @@ vi.mock("@/lib/platform", () => ({
   subscribe: vi.fn().mockResolvedValue(() => {}),
   onTransportReconnect: () => null,
   openUrl: platform.openUrl,
-  subscribe: vi.fn().mockResolvedValue(() => {}),
-  onTransportReconnect: () => null,
 }))
 vi.mock("@/lib/transport", () => ({
   getActiveRemoteConnectionId: () => null,
@@ -131,11 +129,6 @@ vi.mock("@/lib/transport", () => ({
     onReconnect: undefined,
   }),
   isDesktop: () => false,
-  getTransport: () => ({
-    call: vi.fn(),
-    subscribe: vi.fn().mockResolvedValue(() => {}),
-    onReconnect: undefined,
-  }),
 }))
 // A local-file link target routes to the workspace file column, whose provider
 // this suite deliberately renders without.
