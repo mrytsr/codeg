@@ -2430,6 +2430,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       if (!confirmed) return false
     }
 
+    setFileTabs((prev) => {
       for (const [tab, slot] of batchCloseSlots(prev)) {
         const closed = snapshotFileTab(tab, slot)
         if (closed) pushClosedTab(closed)
