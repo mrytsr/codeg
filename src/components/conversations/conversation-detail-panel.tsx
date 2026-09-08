@@ -1082,6 +1082,7 @@ const ConversationTabView = memo(function ConversationTabView({
           try {
             await applyDraftModelSelection({
               tabId,
+              agentType: draftAgentType,
               conversationId: persistedId,
               agentType: selectedAgent,
               connection: {
@@ -1204,6 +1205,7 @@ const ConversationTabView = memo(function ConversationTabView({
           isApplyingModelSelection = true
           await applyDraftModelSelection({
             tabId,
+            agentType: draftAgentType,
             conversationId: newConversationId,
             agentType: selectedAgent,
             connection: {
