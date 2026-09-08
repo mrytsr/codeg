@@ -585,4 +585,3 @@ async fn model_provider_update_and_set_enabled_match_web_wire_shape() {
     let body: Value = resp.json();
     assert_eq!(body[0]["enabled"], true);
 }
-}

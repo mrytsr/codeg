@@ -67,6 +67,7 @@ const acpAgentsMock = vi.hoisted(() => ({
     agents: [] as Array<{
       agent_type: string
       model_source: "native" | "provider"
+      model_provider_id?: number | null
     }>,
     fresh: false,
     refresh: vi.fn(),
@@ -116,12 +117,19 @@ const platform = vi.hoisted(() => ({ openUrl: vi.fn(async () => {}) }))
 vi.mock("@/lib/platform", () => ({
   isDesktop: () => false,
   openFileDialog: vi.fn(),
+  subscribe: vi.fn().mockResolvedValue(() => {}),
+  onTransportReconnect: () => null,
   openUrl: platform.openUrl,
   subscribe: vi.fn().mockResolvedValue(() => {}),
   onTransportReconnect: () => null,
 }))
 vi.mock("@/lib/transport", () => ({
   getActiveRemoteConnectionId: () => null,
+  getTransport: () => ({
+    call: vi.fn(),
+    subscribe: vi.fn().mockResolvedValue(() => {}),
+    onReconnect: undefined,
+  }),
   isDesktop: () => false,
   getTransport: () => ({
     call: vi.fn(),

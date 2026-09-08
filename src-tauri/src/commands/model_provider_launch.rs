@@ -32,6 +32,10 @@ use crate::acp::error::AcpError;
 use crate::commands::acp::ResolvedConversationModelSelection;
 use crate::models::agent::AgentType;
 use crate::models::model_provider_file::ModelProviderApiType;
+use crate::acp::codex_model_catalog::{
+    expand_customs_only, fallback_base_slug, CodexCustomEntry, CodexModelConfig,
+};
+use crate::acp::codex_model_catalog::CATALOG_REL as CODEX_WORKSPACE_CATALOG_REL;
 
 /// Directory (under codeg's data dir) that holds the per-conversation session
 /// workspaces for agents requiring a real config dir at launch.
@@ -148,7 +152,7 @@ fn apply_proxy_env(
 }
 
 /// The per-conversation workspace path for an agent.
-fn workspace_dir(data_dir: &Path, agent_type: AgentType, conversation_id: i32) -> PathBuf {
+pub(crate) fn workspace_dir(data_dir: &Path, agent_type: AgentType, conversation_id: i32) -> PathBuf {
     data_dir
         .join(MODEL_PROVIDER_WORKSPACE_ROOT)
         .join(agent_type.as_wire().as_ref())
@@ -303,8 +307,42 @@ fn write_codex_workspace(
         write_json(&ws.join("auth.json"), &auth, true)?;
     }
 
+    // codeg-model-catalog.json — codex's `model_catalog_json` is a
+    // whole-table replace, and the per-conversation workspace is a fresh
+    // Codex home that has no inherited catalog. Without an explicit
+    // `model_catalog_json` codex falls back to its bundled OpenAI-only
+    // catalog and rejects the selected provider model with
+    // `Model metadata for '<model_id>' not found in model catalog`. Emit
+    // a customs-only catalog so the selected model is the only entry —
+    // the workspace is per-conversation and the picker is not in play.
+    {
+        let snapshot = crate::acp::codex_catalog_source::cached_or_bundled_snapshot();
+        let base = fallback_base_slug(&snapshot).ok_or_else(|| {
+            AcpError::protocol("codex bundled snapshot is empty; cannot build workspace catalog")
+        })?;
+        let custom = CodexCustomEntry {
+            slug: selection.model_id.clone(),
+            display_name: selection.model.name.clone(),
+            context_window: selection.model.context_window.and_then(|n| u64::try_from(n).ok()),
+            base,
+            overrides: Map::new(),
+        };
+        let cfg = CodexModelConfig {
+            customs: vec![custom],
+            excluded_officials: Vec::new(),
+            default: None,
+        };
+        let catalog = expand_customs_only(&cfg, &snapshot);
+        let body = serde_json::to_string_pretty(&catalog).map_err(|e| {
+            AcpError::protocol(format!("serialize codex workspace catalog failed: {e}"))
+        })?;
+        write_file(&ws.join(CODEX_WORKSPACE_CATALOG_REL), &format!("{body}\n"), false)?;
+    }
+
     // config.toml — a self-contained `[model_providers.<id>]` block pointing
-    // at the provider and selecting the model.
+    // at the provider and selecting the model. `model_catalog_json` is
+    // resolved against `CODEX_HOME` (the workspace dir), so a bare file
+    // name is enough.
     let mut root = toml::map::Map::new();
     root.insert(
         "model".to_string(),
@@ -313,6 +351,10 @@ fn write_codex_workspace(
     root.insert(
         "model_provider".to_string(),
         toml::Value::String(selection.provider_id.clone()),
+    );
+    root.insert(
+        "model_catalog_json".to_string(),
+        toml::Value::String(CODEX_WORKSPACE_CATALOG_REL.to_string()),
     );
     let mut providers = toml::map::Map::new();
     let mut provider = toml::map::Map::new();
@@ -977,6 +1019,73 @@ mod tests {
         );
         assert!(raw.contains("wire_api = \"responses\""), "{raw}");
         assert!(raw.contains("requires_openai_auth = true"), "{raw}");
+        // The workspace is a fresh Codex home; without an explicit
+        // `model_catalog_json` codex falls back to its bundled OpenAI-only
+        // catalog and rejects the selected provider model. The adapter must
+        // write a customs-only catalog and point config.toml at it.
+        assert!(
+            raw.contains("model_catalog_json = \"codeg-model-catalog.json\""),
+            "{raw}"
+        );
+        let catalog_path = home.join("codeg-model-catalog.json");
+        let catalog: Value = serde_json::from_str(
+            &fs::read_to_string(&catalog_path).expect("workspace catalog exists"),
+        )
+        .unwrap();
+        let models = catalog["models"].as_array().expect("models array");
+        assert_eq!(models.len(), 1, "customs-only catalog has exactly one entry");
+        assert_eq!(models[0]["slug"], "model-1");
+        assert_eq!(models[0]["visibility"], "list");
+        assert_eq!(models[0]["supported_in_api"], true);
+        assert!(models[0]["upgrade"].is_null());
+    }
+
+    /// A provider-defined `context_window` on the selected model is the one
+    /// the workspace catalog advertises; `max_context_window` must be at
+    /// least that value so a smaller custom does not shrink the upper
+    /// bound the clone base carried.
+    #[test]
+    fn codex_workspace_uses_selection_context_window() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let ws = tmp
+            .path()
+            .join(MODEL_PROVIDER_WORKSPACE_ROOT)
+            .join("codex")
+            .join("11");
+        let mut s = sel(
+            "prov.example",
+            "deepseek-v4-flash",
+            ModelProviderApiType::OpenAiResponses,
+        );
+        s.model.context_window = Some(8_192);
+        s.model.name = Some("DeepSeek V4 Flash".to_string());
+        let mut env = BTreeMap::new();
+        write_codex_workspace(
+            &ws,
+            &s,
+            ModelProviderApiType::OpenAiResponses,
+            &mut env,
+        )
+        .expect("adapter ok");
+
+        let catalog: Value = serde_json::from_str(
+            &fs::read_to_string(ws.join("codeg-model-catalog.json")).unwrap(),
+        )
+        .unwrap();
+        let entry = &catalog["models"][0];
+        assert_eq!(entry["slug"], "deepseek-v4-flash");
+        assert_eq!(entry["display_name"], "DeepSeek V4 Flash");
+        assert_eq!(entry["context_window"].as_u64(), Some(8_192));
+        assert!(
+            entry["max_context_window"].as_u64().unwrap() >= 8_192,
+            "max_context_window must be >= the custom's context_window"
+        );
+        // `model_catalog_json` in config.toml still points at the file.
+        let raw = fs::read_to_string(ws.join("config.toml")).unwrap();
+        assert!(
+            raw.contains("model_catalog_json = \"codeg-model-catalog.json\""),
+            "{raw}"
+        );
     }
 
     fn run_pi(

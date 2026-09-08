@@ -1,4 +1,6 @@
 import { updateConversationModelSelection } from "@/lib/api"
+import { rememberAgentModelSelection } from "@/lib/remembered-agent-model-selection"
+import type { AgentType } from "@/lib/types"
 import {
   consumeModelProviderDraftSelection,
   setModelProviderDraftSelection,
@@ -17,6 +19,8 @@ export interface ModelSelectionConnection {
 export interface ApplyDraftModelSelectionParams {
   tabId: string
   conversationId: number
+  /** The agent whose remembered provider/model choice should be updated. */
+  agentType: AgentType
   connection: ModelSelectionConnection
   /** New conversations have no history; start a new session instead of loading
    *  the unused session that was launched before the provider was selected. */
@@ -31,6 +35,7 @@ export interface ApplyDraftModelSelectionParams {
 export async function applyDraftModelSelection({
   tabId,
   conversationId,
+  agentType,
   connection,
   freshSession = false,
 }: ApplyDraftModelSelectionParams) {
@@ -43,6 +48,9 @@ export async function applyDraftModelSelection({
       selection.providerId,
       selection.modelId
     )
+    // The choice was actually applied to a conversation — remember it for the
+    // agent so the next new conversation can restore it.
+    rememberAgentModelSelection(agentType, selection)
   } catch (error) {
     setModelProviderDraftSelection(tabId, selection)
     throw error

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Check, ChevronDown, Loader2, Server } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -24,7 +24,14 @@ import {
   clearModelProviderDraftSelection,
   setModelProviderDraftSelection,
   useModelProviderDraftSelection,
+  markModelProviderRestoreSettled,
+  isModelProviderRestoreSettled,
 } from "@/stores/model-provider-selection-store"
+import {
+  loadRememberedAgentModelSelection,
+  isRememberedAgentModelSelectionAvailable,
+  rememberAgentModelSelection,
+} from "@/lib/remembered-agent-model-selection"
 import type { AgentType } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -103,6 +110,45 @@ export function ModelProviderPicker({
     ? `${selection.providerId} · ${selection.modelId}`
     : t("placeholder")
 
+  // A per-agent remembered choice (from a previous conversation) pre-seeds a
+  // NEW draft so the user doesn't re-pick it. Seeded only once per (tab,
+  // agent) key; an explicit reset settles the key so the composer never
+  // fights the user's intent. "If it still exists" is enforced against the
+  // live catalog before seeding.
+  const rememberedForAgent = useMemo(
+    () =>
+      agentType != null ? loadRememberedAgentModelSelection(agentType) : null,
+    [agentType]
+  )
+
+  useEffect(() => {
+    if (tabId == null || agentType == null) return
+    if (conversationId != null) return // bound conversation owns its selection
+    if (draftSelection != null) return // user already made an explicit choice
+    if (rememberedForAgent == null) return
+    if (records == null) return // catalog not settled yet
+    const key = `${tabId}:${agentType}`
+    if (isModelProviderRestoreSettled(key)) return
+    if (
+      !isRememberedAgentModelSelectionAvailable(
+        agentType,
+        rememberedForAgent,
+        records
+      )
+    ) {
+      return
+    }
+    setModelProviderDraftSelection(tabId, rememberedForAgent)
+    markModelProviderRestoreSettled(key)
+  }, [
+    tabId,
+    agentType,
+    conversationId,
+    draftSelection,
+    rememberedForAgent,
+    records,
+  ])
+
   const persistSelection = useCallback(
     async (providerId: string | null, modelId: string | null) => {
       if (conversationId == null) return
@@ -127,6 +173,12 @@ export function ModelProviderPicker({
           providerId,
           modelId
         )
+        // The choice was actually saved to a conversation — remember it for
+        // the agent so the next new conversation can restore it. A reset to
+        // native (null/null) must NOT overwrite the memory.
+        if (agentType != null && providerId != null && modelId != null) {
+          rememberAgentModelSelection(agentType, { providerId, modelId })
+        }
         // A provider selection changes launch env. If this surface owns a live
         // idle connection, apply immediately; a busy owner gets the existing
         // backend staleness event/banner instead of being interrupted mid-turn.
@@ -155,7 +207,7 @@ export function ModelProviderPicker({
         clearModelProviderDraftSelection(tabId ?? "")
       }
     },
-    [connection, conversationId, t, tabId]
+    [agentType, connection, conversationId, t, tabId]
   )
 
   const handleSelect = useCallback(
@@ -172,9 +224,16 @@ export function ModelProviderPicker({
 
   const handleReset = useCallback(() => {
     setOpen(false)
-    if (tabId != null) clearModelProviderDraftSelection(tabId)
+    if (tabId != null) {
+      clearModelProviderDraftSelection(tabId)
+      // An explicit reset is user intent — never auto-restore the remembered
+      // choice again for this (tab, agent) episode.
+      if (agentType != null) {
+        markModelProviderRestoreSettled(`${tabId}:${agentType}`)
+      }
+    }
     if (conversationId != null) void persistSelection(null, null)
-  }, [conversationId, persistSelection, tabId])
+  }, [agentType, conversationId, persistSelection, tabId])
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
