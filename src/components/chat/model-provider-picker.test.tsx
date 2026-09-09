@@ -72,7 +72,9 @@ vi.mock("@/stores/app-workspace-store", async () => {
   return { useAppWorkspaceStore: store }
 })
 const updateSelection = vi.fn()
-const openSettingsWindow = vi.fn(async () => {})
+const openSettingsWindow = vi.fn<(...args: unknown[]) => Promise<void>>(
+  async () => {}
+)
 vi.mock("@/lib/api", () => ({
   updateConversationModelSelection: (...args: unknown[]) =>
     updateSelection(...args),
