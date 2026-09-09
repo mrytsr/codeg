@@ -72,9 +72,11 @@ vi.mock("@/stores/app-workspace-store", async () => {
   return { useAppWorkspaceStore: store }
 })
 const updateSelection = vi.fn()
+const openSettingsWindow = vi.fn(async () => {})
 vi.mock("@/lib/api", () => ({
   updateConversationModelSelection: (...args: unknown[]) =>
     updateSelection(...args),
+  openSettingsWindow: (...args: unknown[]) => openSettingsWindow(...args),
 }))
 
 function recordsFixture(): ModelProviderRecord[] {
@@ -138,6 +140,7 @@ function renderPicker(
 describe("ModelProviderPicker", () => {
   beforeEach(() => {
     updateSelection.mockReset()
+    openSettingsWindow.mockClear()
     reapplyConfig.mockClear()
     resetModelProviderSelectionStore()
     localStorage.clear()
@@ -203,18 +206,13 @@ describe("ModelProviderPicker", () => {
     ).toBeInTheDocument()
   })
 
-  it("offers a native reset that clears the conversation selection", async () => {
+  it("opens the model providers settings page from the picker footer", async () => {
     renderPicker()
-    const trigger = await screen.findByRole("button", {
-      name: "Model provider",
-    })
-    fireEvent.click(trigger)
-    fireEvent.click(screen.getByText("Back to native config"))
-    expect(updateSelection).toHaveBeenCalledWith(42, null, null)
-    await vi.waitFor(() => {
-      expect(reapplyConfig).toHaveBeenCalledTimes(1)
-    })
-    expect(reapplyConfig).toHaveBeenCalledWith(42)
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Model provider" })
+    )
+    fireEvent.click(screen.getByText("Configure model providers"))
+    expect(openSettingsWindow).toHaveBeenCalledWith("model-providers")
   })
 
   it("saving a choice on a bound conversation remembers it per agent", async () => {
@@ -279,30 +277,6 @@ describe("ModelProviderPicker", () => {
     expect(
       within(screen.getByRole("button", { name: "Model provider" })).getByText(
         "anthropic · claude-sonnet-4-5"
-      )
-    ).toBeInTheDocument()
-  })
-
-  it("does not re-restore after the user resets a draft to native", async () => {
-    rememberAgentModelSelection("claude_code", {
-      providerId: "anthropic",
-      modelId: "claude-opus-4-5",
-    })
-    tabStoreState = { tabs: [{ id: "tab-1", conversationId: null }] }
-
-    renderPicker()
-    const trigger = screen.getByRole("button", { name: "Model provider" })
-    expect(
-      within(trigger).getByText("anthropic · claude-opus-4-5")
-    ).toBeInTheDocument()
-
-    fireEvent.click(trigger)
-    fireEvent.click(screen.getByText("Back to native config"))
-
-    // The explicit reset settles the (tab, agent) key — no re-seed.
-    expect(
-      within(screen.getByRole("button", { name: "Model provider" })).getByText(
-        "Provider · Model"
       )
     ).toBeInTheDocument()
   })

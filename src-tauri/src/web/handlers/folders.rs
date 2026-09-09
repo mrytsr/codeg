@@ -408,6 +408,7 @@ pub async fn open_settings_window(
     let route = match params.section.as_deref() {
         Some("appearance") => "settings/appearance",
         Some("agents") => "settings/agents",
+        Some("model-providers") => "settings/model-providers",
         Some("mcp") => "settings/mcp",
         Some("skills") => "settings/skills",
         Some("experts") => "settings/experts",

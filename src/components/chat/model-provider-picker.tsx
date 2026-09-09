@@ -16,7 +16,7 @@ import { useConnection } from "@/hooks/use-connection"
 import { useModelProviders } from "@/hooks/use-model-providers"
 import { useTabStore } from "@/stores/tab-store"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
-import { updateConversationModelSelection } from "@/lib/api"
+import { openSettingsWindow, updateConversationModelSelection } from "@/lib/api"
 import { getModelProviderApiTypes } from "@/lib/model-provider-capabilities"
 import type { ModelProviderRecord } from "@/lib/model-provider-types"
 import {
@@ -112,9 +112,8 @@ export function ModelProviderPicker({
 
   // A per-agent remembered choice (from a previous conversation) pre-seeds a
   // NEW draft so the user doesn't re-pick it. Seeded only once per (tab,
-  // agent) key; an explicit reset settles the key so the composer never
-  // fights the user's intent. "If it still exists" is enforced against the
-  // live catalog before seeding.
+  // agent) key. "If it still exists" is enforced against the live catalog
+  // before seeding.
   const rememberedForAgent = useMemo(
     () =>
       agentType != null ? loadRememberedAgentModelSelection(agentType) : null,
@@ -150,7 +149,7 @@ export function ModelProviderPicker({
   ])
 
   const persistSelection = useCallback(
-    async (providerId: string | null, modelId: string | null) => {
+    async (providerId: string, modelId: string) => {
       if (conversationId == null) return
       const hadDraftSelection =
         getModelProviderDraftSelection(tabId ?? "") != null
@@ -161,10 +160,10 @@ export function ModelProviderPicker({
       if (row) {
         useAppWorkspaceStore.getState().applyConversationUpsert({
           ...row,
-          model_source: providerId != null ? "provider" : null,
+          model_source: "provider",
           model_provider_id: providerId,
           model_provider_model_id: modelId,
-          model: modelId ?? row.model,
+          model: modelId,
         })
       }
       try {
@@ -174,9 +173,8 @@ export function ModelProviderPicker({
           modelId
         )
         // The choice was actually saved to a conversation — remember it for
-        // the agent so the next new conversation can restore it. A reset to
-        // native (null/null) must NOT overwrite the memory.
-        if (agentType != null && providerId != null && modelId != null) {
+        // the agent so the next new conversation can restore it.
+        if (agentType != null) {
           rememberAgentModelSelection(agentType, { providerId, modelId })
         }
         // A provider selection changes launch env. If this surface owns a live
@@ -194,7 +192,7 @@ export function ModelProviderPicker({
         }
       } catch (err) {
         toast.error(t("saveFailed"), { description: String(err) })
-        if (hadDraftSelection && providerId != null && modelId != null) {
+        if (hadDraftSelection) {
           setModelProviderDraftSelection(tabId ?? "", {
             providerId,
             modelId,
@@ -203,9 +201,7 @@ export function ModelProviderPicker({
         // Re-sync the authoritative row on failure.
         void useAppWorkspaceStore.getState().refreshConversations()
       }
-      if (providerId != null && modelId != null) {
-        clearModelProviderDraftSelection(tabId ?? "")
-      }
+      clearModelProviderDraftSelection(tabId ?? "")
     },
     [agentType, connection, conversationId, t, tabId]
   )
@@ -222,18 +218,12 @@ export function ModelProviderPicker({
     [conversationId, persistSelection, tabId]
   )
 
-  const handleReset = useCallback(() => {
+  const handleOpenProvidersSettings = useCallback(() => {
     setOpen(false)
-    if (tabId != null) {
-      clearModelProviderDraftSelection(tabId)
-      // An explicit reset is user intent — never auto-restore the remembered
-      // choice again for this (tab, agent) episode.
-      if (agentType != null) {
-        markModelProviderRestoreSettled(`${tabId}:${agentType}`)
-      }
-    }
-    if (conversationId != null) void persistSelection(null, null)
-  }, [agentType, conversationId, persistSelection, tabId])
+    void openSettingsWindow("model-providers").catch((err) => {
+      console.warn("[ModelProviderPicker] open settings failed", err)
+    })
+  }, [])
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -283,17 +273,15 @@ export function ModelProviderPicker({
                   {t("noProviders")}
                 </div>
               )}
-              {selection != null && (
-                <div className="border-t pt-1">
-                  <button
-                    type="button"
-                    onClick={handleReset}
-                    className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-2xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                  >
-                    {t("resetNative")}
-                  </button>
-                </div>
-              )}
+              <div className="border-t pt-1">
+                <button
+                  type="button"
+                  onClick={handleOpenProvidersSettings}
+                  className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-2xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                >
+                  {t("configureProviders")}
+                </button>
+              </div>
             </div>
           </ScrollArea>
         )}

@@ -5911,7 +5911,7 @@
     "vision": "视觉",
     "reasoning": "推理",
     "openPicker": "模型供应商",
-    "resetNative": "返回原生配置",
+    "configureProviders": "配置供应商模型",
     "saveFailed": "保存模型选择失败"
   }
 }

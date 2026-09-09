@@ -337,6 +337,7 @@ fn resolve_settings_route(section: Option<&str>) -> &'static str {
         Some("general") => "settings/general",
         Some("appearance") => "settings/appearance",
         Some("agents") => "settings/agents",
+        Some("model-providers") => "settings/model-providers",
         Some("mcp") => "settings/mcp",
         Some("skills") => "settings/skills",
         Some("experts") => "settings/experts",
