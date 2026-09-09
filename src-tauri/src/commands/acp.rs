@@ -4612,8 +4612,13 @@ const KIMI_SYNTHETIC_TOKEN_ACCESS: &str = "codeg-local-gate";
 /// `[models.<alias>].max_context_size` to be a positive integer — omitting it makes
 /// kimi discard the whole model block ("Ignored invalid config … models.codeg-managed"),
 /// which leaves `default_model` dangling and every prompt ends with no reply. So we
-/// always write one, defaulting to the kimi-k2 256K window when the user leaves it blank.
-const KIMI_DEFAULT_MAX_CONTEXT_SIZE: i64 = 262_144;
+/// always write one. Kimi derives the request's `max_completion_tokens` from this
+/// number, and a provider validating it against a smaller model limit (e.g.
+/// Volcengine ARK caps GLM models at their 131072-token window) 400s every request —
+/// an error kimi-acp never surfaces, so the turn shows up as "no reply". 128K is the
+/// largest value every current OpenAI-compatible coding endpoint accepts; the old
+/// 256K (kimi-k2) default silently broke those providers.
+const KIMI_DEFAULT_MAX_CONTEXT_SIZE: i64 = 131_072;
 /// The six native provider `type` values Kimi accepts in `[providers.<name>]`.
 const KIMI_INTERFACE_TYPES: &[&str] = &[
     "kimi",
@@ -5364,7 +5369,12 @@ async fn clear_kimi_model_env(db: &AppDatabase) -> Result<(), AcpError> {
         .unwrap_or_default();
     let had = env.remove(KIMI_MODEL_BASE_URL_ENV).is_some()
         | env.remove(KIMI_MODEL_API_KEY_ENV).is_some()
-        | env.remove(KIMI_MODEL_NAME_ENV).is_some();
+        | env.remove(KIMI_MODEL_NAME_ENV).is_some()
+        // The env-model size bounds written alongside a bound model (see
+        // `parse_provider_model`) are inert without the name, but remove them
+        // in the same sweep so the row never carries half a binding.
+        | env.remove("KIMI_MODEL_MAX_CONTEXT_SIZE").is_some()
+        | env.remove("KIMI_MODEL_MAX_OUTPUT_SIZE").is_some();
     if !had {
         return Ok(());
     }
@@ -9558,9 +9568,11 @@ pub(crate) fn build_runtime_env_from_setting(
         .unwrap_or_default();
 
     let Some(raw_config_json) = local_config_json else {
+        heal_kimi_env_model_context_window(agent_type, &mut merged);
         return merged;
     };
     let Ok(config) = serde_json::from_str::<AgentRuntimeConfig>(raw_config_json) else {
+        heal_kimi_env_model_context_window(agent_type, &mut merged);
         return merged;
     };
 
@@ -9585,7 +9597,42 @@ pub(crate) fn build_runtime_env_from_setting(
         }
     }
 
+    heal_kimi_env_model_context_window(agent_type, &mut merged);
     merged
+}
+
+/// Launch-time backstop for the kimi env model.
+///
+/// The `KIMI_MODEL_*` env family synthesizes `__kimi_env_model__`, whose
+/// hardcoded 262144-token window becomes the request's `max_completion_tokens`
+/// — a value providers with smaller model limits (ARK's 128K GLM models)
+/// reject with a 400 kimi-acp never surfaces. Bindings written before the
+/// cascade learned to set `KIMI_MODEL_MAX_CONTEXT_SIZE` would keep that
+/// default forever, so whenever the env model is active and carries no
+/// explicit window, inject the bounded one here. An explicit value (written by
+/// the cascade, or hand-edited by the user) always wins.
+fn heal_kimi_env_model_context_window(
+    agent_type: AgentType,
+    env: &mut BTreeMap<String, String>,
+) {
+    if agent_type != AgentType::KimiCode {
+        return;
+    }
+    let model_active = env
+        .get("KIMI_MODEL_NAME")
+        .is_some_and(|v| !v.trim().is_empty());
+    if !model_active {
+        return;
+    }
+    let explicit = env
+        .get("KIMI_MODEL_MAX_CONTEXT_SIZE")
+        .is_some_and(|v| !v.trim().is_empty());
+    if !explicit {
+        env.insert(
+            "KIMI_MODEL_MAX_CONTEXT_SIZE".to_string(),
+            KIMI_DEFAULT_MAX_CONTEXT_SIZE.to_string(),
+        );
+    }
 }
 
 /// Resolve model provider credentials into runtime env vars if `model_provider_id` is set.
@@ -9674,11 +9721,20 @@ pub(crate) fn parse_provider_model(
             out.insert("GEMINI_MODEL".to_string(), trimmed_raw.map(str::to_string));
         }
         // Kimi reads its model name from KIMI_MODEL_NAME (the `KIMI_MODEL_*`
-        // family), not OPENAI_MODEL — see `agent_env_keys`.
+        // family), not OPENAI_MODEL — see `agent_env_keys`. The bound env model
+        // must also carry a bounded context window: kimi derives the request's
+        // `max_completion_tokens` from it, and its own 262144-token env-model
+        // default makes providers with smaller limits (ARK's 128K GLM models)
+        // 400 every request — an error kimi-acp ends the turn without
+        // surfacing. `None` (unbind) clears the window along with the name.
         AgentType::KimiCode => {
             out.insert(
                 "KIMI_MODEL_NAME".to_string(),
                 trimmed_raw.map(str::to_string),
+            );
+            out.insert(
+                "KIMI_MODEL_MAX_CONTEXT_SIZE".to_string(),
+                trimmed_raw.map(|_| KIMI_DEFAULT_MAX_CONTEXT_SIZE.to_string()),
             );
         }
         // deepseek-acp's launcher reads DEEPSEEK_ACP_MODEL (`readEnv`) and
@@ -18776,6 +18832,59 @@ wire_api = "chat"
             Some(&Some("kimi-for-coding".to_string()))
         );
         assert!(!out.contains_key("OPENAI_MODEL"));
+        // The bound env model always carries a bounded context window — kimi
+        // derives `max_completion_tokens` from it, and its 256K env-model
+        // default 400'd every request on 128K-window providers (see the
+        // KIMI_DEFAULT_MAX_CONTEXT_SIZE doc).
+        assert_eq!(
+            out.get("KIMI_MODEL_MAX_CONTEXT_SIZE"),
+            Some(&Some(KIMI_DEFAULT_MAX_CONTEXT_SIZE.to_string()))
+        );
+        // Unbinding clears both.
+        let cleared = parse_provider_model(AgentType::KimiCode, Some(""));
+        assert_eq!(cleared.get("KIMI_MODEL_NAME"), Some(&None));
+        assert_eq!(cleared.get("KIMI_MODEL_MAX_CONTEXT_SIZE"), Some(&None));
+    }
+
+    /// Launch-time backstop: a pre-existing env-model binding (written before
+    /// the cascade learned to carry a window) must still launch with the
+    /// bounded window, while explicit values survive untouched.
+    #[test]
+    fn kimi_runtime_env_heals_a_windowless_env_model() {
+        let bound = BTreeMap::from([
+            ("KIMI_MODEL_NAME".to_string(), "glm-5.3-flash".to_string()),
+            (
+                "KIMI_MODEL_BASE_URL".to_string(),
+                "https://ark.example/api/v3".to_string(),
+            ),
+        ]);
+        let mut env = bound.clone();
+        heal_kimi_env_model_context_window(AgentType::KimiCode, &mut env);
+        assert_eq!(
+            env.get("KIMI_MODEL_MAX_CONTEXT_SIZE").map(String::as_str),
+            Some("131072"),
+            "windowless binding gets the bounded default"
+        );
+
+        // An explicit window (cascade-written or hand-edited) always wins.
+        let mut explicit = bound.clone();
+        explicit.insert(
+            "KIMI_MODEL_MAX_CONTEXT_SIZE".to_string(),
+            "262144".to_string(),
+        );
+        heal_kimi_env_model_context_window(AgentType::KimiCode, &mut explicit);
+        assert_eq!(
+            explicit.get("KIMI_MODEL_MAX_CONTEXT_SIZE").map(String::as_str),
+            Some("262144")
+        );
+
+        // No env model → nothing injected; other agents → never touched.
+        let mut unbound = BTreeMap::new();
+        heal_kimi_env_model_context_window(AgentType::KimiCode, &mut unbound);
+        assert!(!unbound.contains_key("KIMI_MODEL_MAX_CONTEXT_SIZE"));
+        let mut other = BTreeMap::from([("KIMI_MODEL_NAME".to_string(), "x".to_string())]);
+        heal_kimi_env_model_context_window(AgentType::Codex, &mut other);
+        assert!(!other.contains_key("KIMI_MODEL_MAX_CONTEXT_SIZE"));
     }
 
     #[test]
@@ -18876,6 +18985,11 @@ wire_api = "chat"
                 "expected a positive max_context_size for input {ctx:?}, got {written}"
             );
             assert_eq!(written, KIMI_DEFAULT_MAX_CONTEXT_SIZE);
+            // Pin the fallback itself: a 256K default made kimi send
+            // `max_completion_tokens = 262144`, which ARK's 128K-window models
+            // (glm-5.3 / glm-5.3-flash) rejected with a 400 kimi-acp never
+            // surfaced — every prompt died as a silent empty turn.
+            assert_eq!(KIMI_DEFAULT_MAX_CONTEXT_SIZE, 131_072);
         }
     }
 
