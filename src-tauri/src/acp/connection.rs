@@ -40,7 +40,7 @@ use crate::acp::file_system_runtime::{
 use crate::acp::host_tools_policy::{HostToolsPolicy, HOST_TOOLS_ENV};
 use crate::acp::registry::{self, AgentDistribution};
 use crate::acp::session_state::SessionState;
-use crate::acp::stderr_tail::{summarize_parser_error, StderrTail, TailScope};
+use crate::acp::stderr_tail::{sanitize_diagnostic, summarize_parser_error, StderrTail, TailScope};
 use crate::acp::terminal_runtime::{
     TerminalRuntime, TerminalRuntimeError, TerminalShellRuntimeConfig,
 };
@@ -8685,7 +8685,11 @@ const MAX_DETAILS_BYTES: usize = 1200;
 ///
 /// Every fragment is already redacted at its source (`TurnOutputProbe` for
 /// parser errors, `StderrTail` for stderr), so this only formats.
-fn build_empty_turn_details(probe: &TurnOutputProbe, stderr_tail: &StderrTail) -> Option<String> {
+fn build_empty_turn_details(
+    probe: &TurnOutputProbe,
+    stderr_tail: &StderrTail,
+    agent_failure: Option<&str>,
+) -> Option<String> {
     let mut sections: Vec<String> = Vec::new();
 
     if probe.dropped_total() > 0 {
@@ -8699,6 +8703,13 @@ fn build_empty_turn_details(probe: &TurnOutputProbe, stderr_tail: &StderrTail) -
             line.push_str(&format!("; first ({}): {summary}", site.label()));
         }
         sections.push(line);
+    }
+
+    // The agent's own account of why the turn died (kimi only — see
+    // [`kimi_turn_failure_evidence`]). Already redacted and bounded by the
+    // caller.
+    if let Some(failure) = agent_failure.map(str::trim).filter(|f| !f.is_empty()) {
+        sections.push(format!("agent turn failure: {failure}"));
     }
 
     let tail = stderr_tail.tail_since(
@@ -8735,6 +8746,34 @@ fn build_empty_turn_details(probe: &TurnOutputProbe, stderr_tail: &StderrTail) -
     Some(format!("{}…", &joined[..end]))
 }
 
+/// For kimi, the agent's own record of why the turn failed.
+///
+/// kimi-acp maps a failed model call (provider 4xx/5xx) to a plain ACP
+/// `end_turn`: the failure never crosses the protocol, so an empty turn's
+/// diagnosis has nothing to point at. Kimi's own `wire.jsonl` does record it
+/// (`turn.step.interrupted` + `turn.ended reason=failed`), and reading the
+/// latest such record lets the banner say e.g.
+/// `400 … max_completion_tokens … expected <= 131072` instead of "no reply".
+/// Returns `None` for every other agent, or when kimi recorded no failure.
+///
+/// The message is provider-side text redacted with the same
+/// [`sanitize_diagnostic`] pass as stderr and bounded before it leaves here.
+fn kimi_turn_failure_evidence(agent_type: AgentType, session_id: &str) -> Option<String> {
+    if agent_type != AgentType::KimiCode {
+        return None;
+    }
+    sanitize_kimi_failure(crate::parsers::kimi_code::last_turn_failure_evidence(session_id)?)
+}
+
+/// Redaction + trim for the kimi wire failure message. Split out from
+/// [`kimi_turn_failure_evidence`] (which touches the real kimi home) so the
+/// redaction contract has a direct test.
+fn sanitize_kimi_failure(raw: String) -> Option<String> {
+    let sanitized = sanitize_diagnostic(&raw);
+    let trimmed = sanitized.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
 /// Resolve a turn's final stop reason and, when it is `"empty"`, the diagnosis
 /// behind it.
 ///
@@ -8747,12 +8786,13 @@ fn finish_turn_reason<'a>(
     probe: &TurnOutputProbe,
     raw_reason_str: &'a str,
     stderr_tail: &StderrTail,
+    agent_failure: Option<&str>,
 ) -> (&'a str, Option<EmptyTurnReport>) {
     if raw_reason_str != "end_turn" || probe.saw_agent_output {
         return (raw_reason_str, None);
     }
     let cause = diagnose_empty_turn(probe);
-    let details = build_empty_turn_details(probe, stderr_tail);
+    let details = build_empty_turn_details(probe, stderr_tail, agent_failure);
     ("empty", Some(EmptyTurnReport { cause, details }))
 }
 
@@ -9296,8 +9336,12 @@ async fn run_conversation_loop<'a>(
                                     // this exit deliberately does NOT call
                                     // `record_turn_end`, unlike the
                                     // prompt-response exit.
-                                    let (reason_str, empty_report) =
-                                        finish_turn_reason(&probe, raw_reason_str, stderr_tail);
+                                    let (reason_str, empty_report) = finish_turn_reason(
+                                        &probe,
+                                        raw_reason_str,
+                                        stderr_tail,
+                                        kimi_turn_failure_evidence(agent_type, &sid.0).as_deref(),
+                                    );
                                     if let Some(err_event) = turn_failure_error_event(
                                         reason_str,
                                         agent_type,
@@ -9519,7 +9563,12 @@ async fn run_conversation_loop<'a>(
                             {
                                 (raw_reason_str, None)
                             } else {
-                                finish_turn_reason(&probe, raw_reason_str, stderr_tail)
+                                finish_turn_reason(
+                                    &probe,
+                                    raw_reason_str,
+                                    stderr_tail,
+                                    kimi_turn_failure_evidence(agent_type, &sid.0).as_deref(),
+                                )
                             };
                             if let Some(err_event) =
                                 turn_failure_error_event(reason_str, agent_type, empty_report.as_ref())
@@ -17911,7 +17960,7 @@ mod tests {
         probe.saw_agent_output = true;
 
         for reason in ["end_turn", "cancelled", "refusal", "max_tokens", "unknown"] {
-            let (out, report) = finish_turn_reason(&probe, reason, &tail);
+            let (out, report) = finish_turn_reason(&probe, reason, &tail, None);
             assert_eq!(out, reason);
             assert!(report.is_none());
         }
@@ -17919,10 +17968,13 @@ mod tests {
         // Without agent output, only `end_turn` is rewritten.
         let silent = TurnOutputProbe::new(0);
         assert_eq!(
-            finish_turn_reason(&silent, "cancelled", &tail).0,
+            finish_turn_reason(&silent, "cancelled", &tail, None).0,
             "cancelled"
         );
-        assert_eq!(finish_turn_reason(&silent, "end_turn", &tail).0, "empty");
+        assert_eq!(
+            finish_turn_reason(&silent, "end_turn", &tail, None).0,
+            "empty"
+        );
     }
 
     /// Guards the two-exit refactor: the helper only computes, so calling it
@@ -17933,8 +17985,8 @@ mod tests {
         tail.push("boom");
         let probe = TurnOutputProbe::new(0);
 
-        let (first_reason, first) = finish_turn_reason(&probe, "end_turn", &tail);
-        let (second_reason, second) = finish_turn_reason(&probe, "end_turn", &tail);
+        let (first_reason, first) = finish_turn_reason(&probe, "end_turn", &tail, None);
+        let (second_reason, second) = finish_turn_reason(&probe, "end_turn", &tail, None);
         assert_eq!(first_reason, second_reason);
         assert_eq!(
             first.as_ref().map(|r| r.cause),
@@ -17953,7 +18005,8 @@ mod tests {
         let probe = TurnOutputProbe::new(tail.mark());
         tail.push("Error: 401 Unauthorized");
 
-        let details = build_empty_turn_details(&probe, &tail).expect("details");
+        let details =
+            build_empty_turn_details(&probe, &tail, None).expect("details");
         assert!(details.contains("stderr (this turn"), "{details}");
         assert!(details.contains("Error: 401 Unauthorized"));
         assert!(!details.contains("older line"));
@@ -17965,7 +18018,8 @@ mod tests {
         tail.push("connect-time failure");
         let probe = TurnOutputProbe::new(tail.mark());
 
-        let details = build_empty_turn_details(&probe, &tail).expect("details");
+        let details =
+            build_empty_turn_details(&probe, &tail, None).expect("details");
         assert!(details.contains("stderr (recent"), "{details}");
         assert!(details.contains("connect-time failure"));
     }
@@ -17977,7 +18031,8 @@ mod tests {
         probe.note_dropped(DropSite::Decode, &drop_err("trailing characters"));
         probe.note_dropped(DropSite::Dispatch, &drop_err("EOF while parsing a value"));
 
-        let details = build_empty_turn_details(&probe, &tail).expect("details");
+        let details =
+            build_empty_turn_details(&probe, &tail, None).expect("details");
         assert!(
             details.contains("dropped 2 update(s) (1 decode, 1 dispatch)"),
             "{details}"
@@ -17992,7 +18047,7 @@ mod tests {
     fn empty_turn_details_are_none_without_evidence() {
         let tail = StderrTail::new();
         let probe = TurnOutputProbe::new(0);
-        assert!(build_empty_turn_details(&probe, &tail).is_none());
+        assert!(build_empty_turn_details(&probe, &tail, None).is_none());
     }
 
     #[test]
@@ -18002,8 +18057,48 @@ mod tests {
             tail.push(&format!("{i:03} {}", "x".repeat(200)));
         }
         let probe = TurnOutputProbe::new(0);
-        let details = build_empty_turn_details(&probe, &tail).expect("details");
+        let details =
+            build_empty_turn_details(&probe, &tail, None).expect("details");
         assert!(details.len() <= MAX_DETAILS_BYTES + '…'.len_utf8());
+    }
+
+    /// Kimi's wire-log failure rides its own labeled section, ahead of the
+    /// (usually empty) stderr tail.
+    #[test]
+    fn empty_turn_details_include_the_agent_failure_evidence() {
+        let tail = StderrTail::new();
+        let probe = TurnOutputProbe::new(0);
+        let details = build_empty_turn_details(
+            &probe,
+            &tail,
+            Some("[provider.api_error] 400 Model only support text input"),
+        )
+        .expect("details");
+        assert!(
+            details.contains(
+                "agent turn failure: [provider.api_error] 400 Model only support text input"
+            ),
+            "{details}"
+        );
+    }
+
+    /// Whitespace-only agent evidence is treated as absent, not as a section.
+    #[test]
+    fn empty_turn_details_ignore_blank_agent_failure() {
+        let tail = StderrTail::new();
+        let probe = TurnOutputProbe::new(0);
+        assert!(build_empty_turn_details(&probe, &tail, Some("   ")).is_none());
+    }
+
+    /// The kimi failure message is provider-side text — the same redaction
+    /// pass as stderr must apply, and blank input yields no evidence.
+    #[test]
+    fn kimi_failure_evidence_is_redacted() {
+        const SECRET: &str = "sk-live-abcdefghijklmnop";
+        let out = sanitize_kimi_failure(format!("400 unauthorized: {SECRET}"))
+            .expect("non-empty after sanitize");
+        assert!(!out.contains(SECRET), "leaked: {out}");
+        assert!(sanitize_kimi_failure("   ".to_string()).is_none());
     }
 
     /// The existing non-empty reasons must keep their exact codes and stay

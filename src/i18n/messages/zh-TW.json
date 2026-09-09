@@ -5867,7 +5867,7 @@
     "vision": "視覺",
     "reasoning": "推理",
     "openPicker": "模型供應商",
-    "resetNative": "返回原生設定",
+    "configureProviders": "配置供應商模型",
     "saveFailed": "儲存模型選擇失敗"
   }
 }

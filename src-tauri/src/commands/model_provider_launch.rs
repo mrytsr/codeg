@@ -47,7 +47,17 @@ pub const MODEL_PROVIDER_WORKSPACE_ROOT: &str = "model-provider";
 /// ACP gate token without re-reading the legacy writer.
 const KIMI_MANAGED_PROVIDER: &str = "codeg";
 const KIMI_MANAGED_MODEL_ALIAS: &str = "codeg-managed";
-const KIMI_DEFAULT_MAX_CONTEXT_SIZE: i64 = 262_144;
+/// Fallback context window for a kimi model whose metadata carries none. Kimi
+/// derives the request's `max_completion_tokens` from this number, and a
+/// provider that validates it against a smaller model limit rejects the whole
+/// request with a 400 the ACP layer never surfaces (the turn just ends with no
+/// output). 128K is the largest value every current OpenAI-compatible coding
+/// endpoint accepts — e.g. Volcengine ARK caps `max_completion_tokens` at the
+/// model's 131072-token window, so the previous 256K (kimi-k2) default turned
+/// every GLM request into a silent failure. When the selection DOES carry a
+/// context window (or a max output size), those win — see
+/// [`apply_kimi_env_model_metadata`] and [`write_kimi_workspace`].
+const KIMI_DEFAULT_MAX_CONTEXT_SIZE: i64 = 131_072;
 const KIMI_SYNTHETIC_TOKEN_ACCESS: &str = "codeg-local-gate";
 
 /// Neutral thinking level for a reasoning-capable pi model. The user can change
@@ -110,6 +120,7 @@ pub(crate) fn apply_launch_adapter(
         // mode; every other API family needs a structured config.toml.
         AgentType::KimiCode if api == ModelProviderApiType::OpenAiCompletions => {
             apply_env_only(agent_type, selection, runtime_env)?;
+            apply_kimi_env_model_metadata(selection, runtime_env);
         }
         AgentType::Codex => write_codex_workspace(&ws, selection, api, runtime_env)?,
         AgentType::Pi => write_pi_workspace(&ws, selection, api, runtime_env)?,
@@ -277,6 +288,45 @@ fn apply_env_only(
 
 fn non_empty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// Project the selection's size metadata into kimi's env-model overlay.
+///
+/// Kimi synthesizes the `KIMI_MODEL_*` env model (`__kimi_env_model__`) with
+/// hardcoded defaults: a 262144-token context window and no output cap. It then
+/// sends `max_completion_tokens` equal to that window, so any provider whose
+/// model limit is smaller (ARK's GLM models cap at 131072) 400s the request —
+/// and kimi-acp ends the turn without forwarding the error, which codeg can
+/// only report as "status updates, no reply".
+///
+/// Two env keys close the gap, both consumed by kimi's `kimiModelEnvOverlay`:
+/// `KIMI_MODEL_MAX_CONTEXT_SIZE` (kimi's window belief, and the
+/// `max_completion_tokens` source when no output cap exists) and
+/// `KIMI_MODEL_MAX_OUTPUT_SIZE` (the hard output cap, which wins over the
+/// window). Real model metadata is used when the catalog entry carries it; the
+/// bounded [`KIMI_DEFAULT_MAX_CONTEXT_SIZE`] fallback replaces kimi's 256K one.
+fn apply_kimi_env_model_metadata(
+    selection: &ResolvedConversationModelSelection,
+    runtime_env: &mut BTreeMap<String, String>,
+) {
+    let context_window = positive_int(selection.model.context_window)
+        .unwrap_or(KIMI_DEFAULT_MAX_CONTEXT_SIZE);
+    runtime_env.insert(
+        "KIMI_MODEL_MAX_CONTEXT_SIZE".to_string(),
+        context_window.to_string(),
+    );
+    if let Some(max_output) = positive_int(selection.model.max_tokens) {
+        runtime_env.insert(
+            "KIMI_MODEL_MAX_OUTPUT_SIZE".to_string(),
+            max_output.to_string(),
+        );
+    }
+}
+
+/// Keep only usable positive integers from model metadata (`0`, negatives, and
+/// `i64::MIN`-style sentinels mean "unset").
+fn positive_int(value: Option<i64>) -> Option<i64> {
+    value.filter(|v| *v > 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -751,10 +801,24 @@ fn write_kimi_workspace(
         "model".to_string(),
         toml::Value::String(selection.model_id.clone()),
     );
+    // Kimi derives the request's `max_completion_tokens` from
+    // `max_context_size` when no output cap is set, so an oversized window
+    // makes providers with a smaller model limit (e.g. ARK's 128K GLM models)
+    // 400 every request. Real metadata wins; the fallback is the largest
+    // value every current OpenAI-compatible endpoint accepts (see
+    // [`KIMI_DEFAULT_MAX_CONTEXT_SIZE`]).
+    let context_window = positive_int(selection.model.context_window)
+        .unwrap_or(KIMI_DEFAULT_MAX_CONTEXT_SIZE);
     model.insert(
         "max_context_size".to_string(),
-        toml::Value::Integer(KIMI_DEFAULT_MAX_CONTEXT_SIZE),
+        toml::Value::Integer(context_window),
     );
+    if let Some(max_output) = positive_int(selection.model.max_tokens) {
+        model.insert(
+            "max_output_size".to_string(),
+            toml::Value::Integer(max_output),
+        );
+    }
     let mut capabilities = vec![
         "image_in".to_string(),
         "video_in".to_string(),
@@ -805,10 +869,17 @@ fn write_kimi_workspace(
     )?;
 
     // The KIMI_MODEL_* env family takes priority over config.toml; clear any
-    // stale settings-level values so the workspace config is authoritative.
-    runtime_env.remove("KIMI_MODEL_BASE_URL");
-    runtime_env.remove("KIMI_MODEL_API_KEY");
-    runtime_env.remove("KIMI_MODEL_NAME");
+    // stale settings-level values (including the env-model size bounds, inert
+    // without a model name) so the workspace config is authoritative.
+    for var in [
+        "KIMI_MODEL_BASE_URL",
+        "KIMI_MODEL_API_KEY",
+        "KIMI_MODEL_NAME",
+        "KIMI_MODEL_MAX_CONTEXT_SIZE",
+        "KIMI_MODEL_MAX_OUTPUT_SIZE",
+    ] {
+        runtime_env.remove(var);
+    }
     runtime_env.insert(
         "KIMI_CODE_HOME".to_string(),
         ws.to_string_lossy().into_owned(),
@@ -1429,6 +1500,123 @@ mod tests {
         assert!(!env.contains_key("KIMI_MODEL_BASE_URL"));
         assert!(!env.contains_key("KIMI_MODEL_API_KEY"));
         assert!(!env.contains_key("KIMI_MODEL_NAME"));
+    }
+
+    /// Regression: kimi synthesizes its env model with a 262144-token window
+    /// and no output cap, then sends `max_completion_tokens == window` — which
+    /// providers with a smaller model limit (e.g. ARK's 128K GLM models) reject
+    /// with a 400 kimi-acp never surfaces. The launch projection must bound the
+    /// request from the selection's own metadata instead.
+    #[test]
+    fn kimi_env_model_projects_size_metadata() {
+        let mut s = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::OpenAiCompletions,
+        );
+        s.model.context_window = Some(131_072);
+        s.model.max_tokens = Some(32_768);
+        let mut env = BTreeMap::new();
+        apply_launch_adapter(
+            AgentType::KimiCode,
+            &s,
+            &mut env,
+            Path::new("/tmp/unused"),
+            1,
+        )
+        .expect("adapter ok");
+        assert_eq!(env["KIMI_MODEL_MAX_CONTEXT_SIZE"], "131072");
+        assert_eq!(env["KIMI_MODEL_MAX_OUTPUT_SIZE"], "32768");
+    }
+
+    /// Without metadata the projection must still replace kimi's 256K env-model
+    /// default with the largest value every OpenAI-compatible endpoint accepts.
+    #[test]
+    fn kimi_env_model_bounds_context_window_without_metadata() {
+        let s = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::OpenAiCompletions,
+        );
+        let mut env = BTreeMap::new();
+        apply_launch_adapter(
+            AgentType::KimiCode,
+            &s,
+            &mut env,
+            Path::new("/tmp/unused"),
+            1,
+        )
+        .expect("adapter ok");
+        assert_eq!(env["KIMI_MODEL_MAX_CONTEXT_SIZE"], "131072");
+        // No max_tokens metadata → no output cap; kimi derives it from the window.
+        assert!(!env.contains_key("KIMI_MODEL_MAX_OUTPUT_SIZE"));
+    }
+
+    /// Non-positive metadata values mean "unset" and must fall back cleanly.
+    #[test]
+    fn kimi_env_model_ignores_non_positive_metadata() {
+        let mut s = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::OpenAiCompletions,
+        );
+        s.model.context_window = Some(0);
+        s.model.max_tokens = Some(-5);
+        let mut env = BTreeMap::new();
+        apply_launch_adapter(
+            AgentType::KimiCode,
+            &s,
+            &mut env,
+            Path::new("/tmp/unused"),
+            1,
+        )
+        .expect("adapter ok");
+        assert_eq!(env["KIMI_MODEL_MAX_CONTEXT_SIZE"], "131072");
+        assert!(!env.contains_key("KIMI_MODEL_MAX_OUTPUT_SIZE"));
+    }
+
+    /// The workspace config path gets the same treatment: metadata wins,
+    /// otherwise the bounded default — and `max_output_size` is written only
+    /// when the model declares one.
+    #[test]
+    fn kimi_workspace_uses_model_size_metadata() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut s = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::AnthropicMessages,
+        );
+        s.model.context_window = Some(1_000_000);
+        s.model.max_tokens = Some(128_000);
+        let mut env = BTreeMap::new();
+        write_kimi_workspace(
+            &tmp.path().join("kimi"),
+            &s,
+            ModelProviderApiType::AnthropicMessages,
+            &mut env,
+        )
+        .expect("workspace ok");
+        let raw = fs::read_to_string(tmp.path().join("kimi").join("config.toml")).unwrap();
+        assert!(raw.contains("max_context_size = 1000000"), "{raw}");
+        assert!(raw.contains("max_output_size = 128000"), "{raw}");
+
+        // And the no-metadata shape: window only.
+        let s = sel(
+            "prov.example",
+            "model-1",
+            ModelProviderApiType::AnthropicMessages,
+        );
+        let mut env = BTreeMap::new();
+        write_kimi_workspace(
+            &tmp.path().join("kimi-bare"),
+            &s,
+            ModelProviderApiType::AnthropicMessages,
+            &mut env,
+        )
+        .expect("workspace ok");
+        let raw = fs::read_to_string(tmp.path().join("kimi-bare").join("config.toml")).unwrap();
+        assert!(raw.contains("max_context_size = 131072"), "{raw}");
+        assert!(!raw.contains("max_output_size"), "{raw}");
     }
 
     #[test]

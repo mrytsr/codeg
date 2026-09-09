@@ -3076,6 +3076,7 @@ export type SettingsSection =
   | "mcp"
   | "skills"
   | "experts"
+  | "model-providers"
   | "science"
   | "office-tools"
   | "version-control"

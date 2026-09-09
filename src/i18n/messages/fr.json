@@ -5867,7 +5867,7 @@
     "vision": "vision",
     "reasoning": "reasoning",
     "openPicker": "Model provider",
-    "resetNative": "Back to native config",
+    "configureProviders": "Configure model providers",
     "saveFailed": "Failed to save model selection"
   }
 }
