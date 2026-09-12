@@ -2,7 +2,7 @@
   "name": "codeg",
   "private": true,
   "version": "0.30.7",
-  "packageManager": "pnpm@11.9.0",
+  "packageManager": "pnpm@12.4.1",
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
