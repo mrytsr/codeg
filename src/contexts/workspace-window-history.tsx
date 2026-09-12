@@ -69,6 +69,12 @@ function stateKeyOf(state: unknown): string | null {
  * Manual closes call history.back() themselves; the traversals those cause
  * are swallowed via a counter rather than a boolean so rapid consecutive
  * closes cannot leak a synthetic popstate into the user path.
+ *
+ * A reload parks the browser on an entry pushed before it while this stack
+ * restarts empty, so without a correction the first back press after a
+ * reload would close nothing and the second would leave the workspace. On
+ * mount the provider therefore steps back once when history.state still
+ * carries a window key, realigning the browser pointer with the empty stack.
  */
 export function WorkspaceWindowHistoryProvider({
   children,
@@ -78,6 +84,7 @@ export function WorkspaceWindowHistoryProvider({
   const entriesRef = useRef<Entry[]>([])
   const byKeyRef = useRef(new Map<string, Entry>())
   const ignoreNextPopCountRef = useRef(0)
+  const realignedRef = useRef(false)
 
   const open = useCallback((entry: Entry) => {
     const existing = byKeyRef.current.get(entry.key)
@@ -169,6 +176,20 @@ export function WorkspaceWindowHistoryProvider({
     }
     window.addEventListener("popstate", onPopState)
     return () => window.removeEventListener("popstate", onPopState)
+  }, [])
+
+  // Boot realignment (see the doc comment above): after a reload the browser
+  // sits on a pushed entry whose owning window the reload wiped from this
+  // stack. Children's effects ran first, so any restored window has already
+  // pushed its own entry on top; stepping back once moves the pointer onto
+  // the base entry (or, after repeated reloads, onto an older stale entry
+  // the popstate handler skips as a phantom). Runs once per document —
+  // never again after a window push of our own could sit on the pointer.
+  useEffect(() => {
+    if (realignedRef.current) return
+    realignedRef.current = true
+    if (stateKeyOf(window.history.state) === null) return
+    window.history.back()
   }, [])
 
   const value = useMemo(() => ({ open, close, attach }), [attach, close, open])
