@@ -499,15 +499,6 @@ fn build_uv_version_check(current: Option<&str>, required: &str) -> CheckItem {
     }
 }
 
-/// The registry `dir_entry` for a binary agent (None for single-file agents
-/// and non-binary distributions).
-fn binary_dir_entry(agent_type: AgentType) -> Option<registry::BinaryDirEntry> {
-    match registry::get_agent_meta(agent_type).distribution {
-        AgentDistribution::Binary { dir_entry, .. } => dir_entry,
-        _ => None,
-    }
-}
-
 async fn check_binary_environment(
     agent_type: AgentType,
     version: &str,
@@ -564,12 +555,20 @@ async fn check_binary_environment(
                     fixes: vec![],
                 }
             }
-            // Dir-tree agents (Cursor): a user-installed CLI on PATH /
-            // ~/.local/bin is launchable as-is — the connect path falls back
-            // to it — so report ready instead of a misleading warn.
+            // A user-installed CLI is launchable as-is, so report ready
+            // instead of a misleading warn.
+            //
+            // This used to be gated on `binary_dir_entry(..).is_some()`, i.e.
+            // dir-tree agents only (Cursor). That made preflight STRICTER than
+            // the thing it predicts: `build_agent` falls back to a system
+            // binary for every Binary agent, dir-tree or not, so a working
+            // `opencode` on PATH connected fine while this check called it not
+            // installed. `dir_entry` describes the shape of the archive codeg
+            // downloads; it says nothing about whether a system binary can be
+            // launched.
             Ok(None)
-                if binary_dir_entry(agent_type).is_some()
-                    && crate::commands::acp::resolve_system_agent_binary(cmd).is_some() =>
+                if crate::commands::acp::resolve_system_agent_binary_for(agent_type, cmd)
+                    .is_some() =>
             {
                 CheckItem {
                     check_id: "binary_cached".into(),
@@ -606,10 +605,15 @@ async fn check_binary_environment(
         use crate::acp::opencode_plugins::{self, spec_has_floating_version, PluginStatus};
         match opencode_plugins::check_opencode_plugins(None) {
             Ok(summary) => {
+                // Anything opencode will not load counts, which includes a
+                // package sitting in the legacy flat layout: present on disk,
+                // invisible to the pinned opencode, and re-downloaded on every
+                // start. Reporting that as installed is how the original bug
+                // stayed hidden.
                 let missing: Vec<_> = summary
                     .plugins
                     .iter()
-                    .filter(|p| p.status == PluginStatus::Missing)
+                    .filter(|p| p.status != PluginStatus::Installed)
                     .collect();
 
                 if summary.plugins.is_empty() {
@@ -630,12 +634,23 @@ async fn check_binary_environment(
                     });
                 } else {
                     let names: Vec<&str> = missing.iter().map(|p| p.name.as_str()).collect();
+                    let stale = missing
+                        .iter()
+                        .filter(|p| p.status == PluginStatus::NeedsMigration)
+                        .count();
+                    let detail = if stale > 0 {
+                        format!(
+                            " ({stale} installed in the old cache layout OpenCode no longer reads)"
+                        )
+                    } else {
+                        String::new()
+                    };
                     checks.push(CheckItem {
                         check_id: "opencode_plugins".into(),
                         label: "OpenCode plugins".into(),
                         status: CheckStatus::Fail,
                         message: format!(
-                            "{} plugin(s) not installed: {}",
+                            "{} plugin(s) not installed: {}{detail}",
                             missing.len(),
                             names.join(", ")
                         ),

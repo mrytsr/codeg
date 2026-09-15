@@ -968,7 +968,21 @@
         "action": "Se déconnecter",
         "done": "Déconnecté. Reconnectez-vous pour choisir un autre compte.",
         "failed": "Impossible de se déconnecter"
-      }
+      },
+      "tempReclaimTitle": "Espace temporaire résiduel",
+      "tempReclaimHint": "Les anciennes versions de codeg ne pouvaient pas nettoyer le répertoire temporaire que cet agent décompresse à chaque lancement. Ceci analyse le dossier temporaire du système à la recherche de ces résidus. Ce dossier est partagé avec d'autres applications : rien n'est supprimé avant votre confirmation, et tout élément encore utilisé est ignoré.",
+      "tempReclaimScan": "Analyser",
+      "tempReclaimDelete": "Supprimer les résidus",
+      "tempReclaimNone": "Rien à récupérer.",
+      "tempReclaimFound": "{count} élément(s) résiduel(s), {size} récupérable(s).",
+      "tempReclaimSkipped": "{count} ignoré(s) (encore utilisé(s) ou trop récent(s)).",
+      "tempReclaimed": "{size} récupéré(s) sur {count} élément(s).",
+      "tempReclaimSelectAll": "Tout sélectionner",
+      "tempReclaimAgeHours": "{hours} h",
+      "tempReclaimConfirmTitle": "Supprimer {count} élément(s) ?",
+      "tempReclaimConfirmBody": "Cette action supprime définitivement {size}. Le dossier temporaire du système est partagé avec d'autres applications : vérifiez chaque chemin avant de confirmer. Les éléments encore utilisés sont ignorés.",
+      "tempReclaimConfirmAction": "Supprimer",
+      "tempReclaimCancel": "Annuler"
     },
     "deepseek": {
       "configManagement": "Configuration de DeepSeek Harness",
@@ -1459,6 +1473,7 @@
       "noPlugins": "Aucun plugin déclaré dans opencode.json",
       "status": {
         "installed": "Installé",
+        "needs_migration": "Migration requise",
         "missing": "Non installé"
       },
       "installAll": "Installer tous les manquants",
@@ -1621,6 +1636,27 @@
   "SettingsPages": {
     "agentsLoading": "Chargement des paramètres des agents...",
     "skillPacksLoading": "Chargement des packs de compétences…"
+  },
+  "CloseBehaviorSettings": {
+    "title": "Comportement du bouton Fermer",
+    "description": "Choisissez ce que fait le bouton Fermer de la fenêtre principale.",
+    "trayUnavailable": "Ce système ne dispose pas de zone de notification utilisable : le bouton Fermer quitte toujours codeg.",
+    "behaviorAsk": "Demander à chaque fois",
+    "behaviorMinimize": "Réduire dans la zone de notification",
+    "behaviorExit": "Quitter codeg",
+    "saveFailed": "Échec de l'enregistrement du comportement de fermeture : {message}"
+  },
+  "CloseRequestDialog": {
+    "askTitle": "Fermer codeg ?",
+    "askDescription": "codeg peut continuer à s'exécuter dans la zone de notification pour garder les agents et les terminaux actifs, ou quitter complètement.",
+    "confirmExitTitle": "Quitter codeg ?",
+    "confirmExitDescription": "La fermeture de la fenêtre est configurée pour quitter codeg.",
+    "runningTerminals": "{count, plural, one {# terminal est encore actif et sera fermé en quittant.} other {# terminaux sont encore actifs et seront fermés en quittant.}}",
+    "remember": "Mémoriser mon choix",
+    "cancel": "Annuler",
+    "minimize": "Réduire dans la zone de notification",
+    "exit": "Quitter codeg",
+    "actionFailed": "Échec de l'action : {message}"
   },
   "GeneralSettings": {
     "loading": "Chargement...",

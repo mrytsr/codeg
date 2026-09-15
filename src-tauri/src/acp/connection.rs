@@ -155,11 +155,16 @@ pub fn set_force_command_color(enabled: bool) {
     FORCE_COMMAND_COLOR.store(enabled, Ordering::Relaxed);
 }
 
+/// `scratch` is the per-launch temp directory from
+/// [`crate::acp::scratch_dir`], or `None` when isolation is off or the
+/// directory could not be created (then the child inherits the ambient temp
+/// dir, exactly as it did before).
 fn merge_agent_env(
     env: &[(&'static str, &'static str)],
     runtime_env: &BTreeMap<String, String>,
+    scratch: Option<&Path>,
 ) -> Vec<(String, String)> {
-    merge_agent_env_with_color(force_command_color_enabled(), env, runtime_env)
+    merge_agent_env_with_color(force_command_color_enabled(), env, runtime_env, scratch)
 }
 
 /// [`merge_agent_env`] with the color decision handed in.
@@ -171,6 +176,7 @@ fn merge_agent_env_with_color(
     force_color: bool,
     env: &[(&'static str, &'static str)],
     runtime_env: &BTreeMap<String, String>,
+    scratch: Option<&Path>,
 ) -> Vec<(String, String)> {
     // Env var order is not semantically meaningful; use map overwrite semantics
     // to keep precedence while avoiding repeated O(n) scans.
@@ -198,6 +204,18 @@ fn merge_agent_env_with_color(
     // even when codeg installed the binary outside the user's shell PATH — the
     // Windows self-managed dir, or `~/.local/bin` under a GUI launch.
     prepend_officecli_path(&mut merged);
+
+    // LAST, after `runtime_env`, and that ordering is the whole fix rather than
+    // a style choice. A self-extracting agent binary resolves its unpack
+    // location from `TMP` before `TEMP` (Windows `GetTempPathW`), so leaving a
+    // per-agent `env_json` `TMP` in place would send a 1.17 GB extraction
+    // wherever that points while codeg cheerfully deleted an empty scratch
+    // directory and reported the leak fixed. Users who want the churn on
+    // another volume set `CODEG_ACP_TMP_ROOT`; users who want the old
+    // pass-through wholesale set `CODEG_ACP_TMP_ISOLATION=0`.
+    if let Some(dir) = scratch {
+        crate::acp::scratch_dir::apply_to_env(&mut merged, dir);
+    }
 
     merged.into_iter().collect()
 }
@@ -716,7 +734,13 @@ pub fn sync_antigravity_settings_for_env(
 /// Deliberately does NOT run [`sync_antigravity_settings_file`]: this returns a
 /// value and that writes a file, and the sign-in path wants the report rather
 /// than a silently dropped one. Callers run the sync themselves.
-pub fn antigravity_launch_env(runtime_env: &BTreeMap<String, String>) -> Vec<(String, String)> {
+///
+/// `scratch` is `None` for the settings panel, which builds this env to INSPECT
+/// it and spawns nothing; the sign-in/sign-out path passes its own directory.
+pub fn antigravity_launch_env(
+    runtime_env: &BTreeMap<String, String>,
+    scratch: Option<&Path>,
+) -> Vec<(String, String)> {
     let registry_env: &[(&'static str, &'static str)] =
         match registry::get_agent_meta(AgentType::Antigravity).distribution {
             AgentDistribution::Binary { env, .. } => env,
@@ -725,7 +749,7 @@ pub fn antigravity_launch_env(runtime_env: &BTreeMap<String, String>) -> Vec<(St
             // `runtime_env` carries everything the panel owns.
             _ => &[],
         };
-    let mut merged = merge_agent_env(registry_env, runtime_env);
+    let mut merged = merge_agent_env(registry_env, runtime_env, scratch);
     apply_antigravity_env_policy(&mut merged, runtime_env);
     merged
 }
@@ -1045,6 +1069,41 @@ fn prepend_dir_to_path_env(
         .next_back()
         .unwrap_or_else(|| if windows { "Path" } else { "PATH" }.to_string());
     env.insert(key, new_path);
+}
+
+/// Prepend an agent's own installer directories (see
+/// [`registry::binary_system_dirs`]) to a merged env's PATH.
+///
+/// Operates on the merged `Vec` rather than inside [`merge_agent_env`] because
+/// it is the one PATH contributor that depends on WHICH agent is launching,
+/// and `merge_agent_env` is deliberately agent-agnostic (it is also called from
+/// the settings panel, with no agent process in hand).
+fn prepend_agent_install_dirs_path(env: &mut Vec<(String, String)>, agent_type: AgentType) {
+    let dirs = registry::binary_system_dirs(agent_type);
+    if dirs.is_empty() {
+        return;
+    }
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    let fallback = std::env::var("PATH").unwrap_or_default();
+    let mut map: BTreeMap<String, String> = std::mem::take(env).into_iter().collect();
+    // Reverse, because each pass prepends: walking `[a, b]` forwards would
+    // leave `b` ahead of `a` and quietly invert the registry's declared
+    // precedence the first time an agent lists two directories.
+    for dir in dirs.iter().rev() {
+        let joined = home.join(dir);
+        if !joined.is_dir() {
+            continue;
+        }
+        prepend_dir_to_path_env(
+            &mut map,
+            &joined.to_string_lossy(),
+            &fallback,
+            cfg!(windows),
+        );
+    }
+    *env = map.into_iter().collect();
 }
 
 /// Prepend codeg's known OfficeCLI install dir to `env`'s PATH when officecli is
@@ -1677,6 +1736,7 @@ async fn build_agent(
     runtime_env: &BTreeMap<String, String>,
     cwd: &Path,
     stderr_tail: &Arc<StderrTail>,
+    scratch: Option<&Path>,
 ) -> Result<AcpAgent, AcpError> {
     // A conversation can outlive the custom-agent definition it was started
     // with (the user deleted it in settings). `get_agent_meta` cannot report
@@ -1727,7 +1787,7 @@ async fn build_agent(
                     return Err(AcpError::PiProjectTrustRequired(message));
                 }
             }
-            let mut merged_env = merge_agent_env(env, runtime_env);
+            let mut merged_env = merge_agent_env(env, runtime_env, scratch);
             // Resolve the config-derived preset HERE (like Grok's
             // `grok_launch_permission_mode` below) so the policy helper stays a
             // pure function over the env list.
@@ -1874,7 +1934,8 @@ async fn build_agent(
                     path
                 }
                 None => {
-                    let system = crate::commands::acp::resolve_system_agent_binary(cmd)
+                    let system =
+                        crate::commands::acp::resolve_system_agent_binary_for(agent_type, cmd)
                         .ok_or_else(|| {
                             AcpError::SdkNotInstalled(format!(
                                 "{} is not installed. Please install it in Agent Settings.",
@@ -1926,7 +1987,13 @@ async fn build_agent(
             if !cmd_args.is_empty() {
                 server = server.args(cmd_args);
             }
-            let mut merged_env = merge_agent_env(env, runtime_env);
+            let mut merged_env = merge_agent_env(env, runtime_env, scratch);
+            // codeg launches the binary by absolute path, so this is not about
+            // finding it — it is about the agent finding ITSELF. An agent that
+            // re-execs its own CLI for a subtask looks it up on PATH, and a
+            // desktop launch never inherits the shell rc line the vendor's
+            // installer appended.
+            prepend_agent_install_dirs_path(&mut merged_env, agent_type);
             if agent_type == AgentType::Cursor {
                 apply_cursor_env_policy(&mut merged_env, runtime_env);
             } else if agent_type == AgentType::Grok {
@@ -1997,7 +2064,7 @@ async fn build_agent(
             system_cmd,
             ..
         } => {
-            let merged_env = merge_agent_env(env, runtime_env);
+            let merged_env = merge_agent_env(env, runtime_env, scratch);
             let mut parts: Vec<String> = Vec::new();
             for (k, v) in &merged_env {
                 parts.push(format!("{k}={v}"));
@@ -2163,8 +2230,33 @@ pub async fn spawn_agent_connection(
     // turn is diagnosed as silently empty. Created here so both the spawn side
     // and the conversation loop share the same buffer.
     let stderr_tail = Arc::new(StderrTail::new());
-    let agent = build_agent(agent_type, &runtime_env, &launch_cwd, &stderr_tail)
-        .await?
+    // Per-launch temp directory, created BEFORE the spawn because it has to
+    // exist by the time the child looks: a self-extracting agent binary creates
+    // only its own leaf under whatever `TMP` names, so pointing at a directory
+    // that is not there yet is a failed launch rather than a graceful fallback.
+    // `None` (isolation off, or the directory could not be created) means the
+    // child inherits the ambient temp dir exactly as it did before.
+    let scratch = crate::acp::scratch_dir::create();
+    let agent = match build_agent(
+        agent_type,
+        &runtime_env,
+        &launch_cwd,
+        &stderr_tail,
+        scratch.as_ref().map(|s| s.path()),
+    )
+    .await
+    {
+        Ok(agent) => agent,
+        Err(e) => {
+            // No process was spawned, so nothing will ever fire `on_exit` for
+            // it. Hand the directory back here or it waits for a sweep.
+            if let Some(scratch) = scratch {
+                scratch.release();
+            }
+            return Err(e);
+        }
+    };
+    let agent = agent
         .on_spawn({
             let child_pid = Arc::clone(&child_pid);
             move |pid| child_pid.store(pid, std::sync::atomic::Ordering::SeqCst)
@@ -2175,9 +2267,30 @@ pub async fn spawn_agent_connection(
         // connection that merely ended keeps its pid published, because the
         // vendored `ChildGuard` signals the tree without waiting and the agent
         // may still be running.
+        //
+        // That "only on a real reap" is also why the scratch directory is
+        // released HERE and not from `ConnectionCleanupGuard`: the guard drops
+        // when the driver thread unwinds, which can be well before the agent is
+        // actually gone. Even so a reaped parent does not prove its descendants
+        // let go of the extracted files, so `release` retries on a ladder rather
+        // than deleting once and hoping.
+        //
+        // If this callback is instead DROPPED without ever firing — a
+        // connection that never reported a reap — `LaunchScratch`'s own `Drop`
+        // performs the same cleanup and logs that it had to. Nothing here is
+        // the last line of defence.
         .on_exit({
             let child_pid = Arc::clone(&child_pid);
-            move || child_pid.store(0, std::sync::atomic::Ordering::SeqCst)
+            // `on_exit` is `Fn`, so the one-shot move needs interior mutability.
+            let scratch = std::sync::Mutex::new(scratch);
+            move || {
+                child_pid.store(0, std::sync::atomic::Ordering::SeqCst);
+                if let Ok(mut held) = scratch.lock() {
+                    if let Some(scratch) = held.take() {
+                        scratch.release();
+                    }
+                }
+            }
         });
 
     // Path policy for the ACP `fs/*` channel. Built HERE rather than inside
@@ -21327,9 +21440,68 @@ mod tests {
     /// overwrites an inherited value rather than filling in a missing one, so
     /// leaking it into the default path would change what every un-opted-in
     /// launch reports about its terminal.
+    /// The precedence that IS the temp-leak fix.
+    ///
+    /// A self-extracting agent resolves its unpack root from `TMP` before
+    /// `TEMP` (Windows `GetTempPathW`). If a per-agent `env_json` `TMP` were
+    /// allowed to win — which it would under the ordinary `runtime_env`-last
+    /// rule every other variable follows — the extraction would land wherever
+    /// that points while codeg deleted an empty scratch directory and reported
+    /// the leak fixed. The whole fix is this one ordering, so it gets a test.
+    #[test]
+    fn scratch_dir_outranks_a_per_agent_temp_override() {
+        let mut runtime_env = BTreeMap::new();
+        for key in crate::acp::scratch_dir::TEMP_ENV_KEYS {
+            runtime_env.insert(key.to_string(), "/somewhere/the/user/picked".to_string());
+        }
+        let scratch = Path::new("/scratch/codeg-acp/123-deadbeef");
+
+        let merged = merge_agent_env_with_color(false, &[], &runtime_env, Some(scratch));
+
+        for key in crate::acp::scratch_dir::TEMP_ENV_KEYS {
+            assert_eq!(
+                merged_value(&merged, key),
+                Some("/scratch/codeg-acp/123-deadbeef"),
+                "{key} must point at the scratch dir, not the per-agent override"
+            );
+        }
+    }
+
+    /// All three names, every time. Setting only `TMPDIR` would leave `TMP`
+    /// inherited from codeg's own environment, and `GetTempPathW` reads `TMP`
+    /// first.
+    #[test]
+    fn scratch_dir_sets_every_temp_variable_the_child_might_read() {
+        let merged = merge_agent_env_with_color(
+            false,
+            &[],
+            &BTreeMap::new(),
+            Some(Path::new("/scratch/x")),
+        );
+        for key in crate::acp::scratch_dir::TEMP_ENV_KEYS {
+            assert_eq!(merged_value(&merged, key), Some("/scratch/x"), "{key}");
+        }
+    }
+
+    /// No scratch dir (isolation off, or the directory could not be created)
+    /// must leave the environment exactly as it was — the child then inherits
+    /// the ambient temp dir, which is the pre-fix behaviour and a working
+    /// launch.
+    #[test]
+    fn without_a_scratch_dir_the_temp_variables_are_untouched() {
+        let mut runtime_env = BTreeMap::new();
+        runtime_env.insert("TMP".to_string(), "/user/choice".to_string());
+
+        let merged = merge_agent_env_with_color(false, &[], &runtime_env, None);
+
+        assert_eq!(merged_value(&merged, "TMP"), Some("/user/choice"));
+        assert_eq!(merged_value(&merged, "TEMP"), None);
+        assert_eq!(merged_value(&merged, "TMPDIR"), None);
+    }
+
     #[test]
     fn merge_agent_env_omits_the_color_env_by_default() {
-        let merged = merge_agent_env_with_color(false, &[], &BTreeMap::new());
+        let merged = merge_agent_env_with_color(false, &[], &BTreeMap::new(), None);
         for key in ["CLICOLOR", "CLICOLOR_FORCE", "FORCE_COLOR", "TERM"] {
             assert_eq!(merged_value(&merged, key), None, "{key} must not be set");
         }
@@ -21346,7 +21518,7 @@ mod tests {
     /// this setting exists to fix.
     #[test]
     fn merge_agent_env_injects_the_whole_color_env_when_opted_in() {
-        let merged = merge_agent_env_with_color(true, &[], &BTreeMap::new());
+        let merged = merge_agent_env_with_color(true, &[], &BTreeMap::new(), None);
         assert_eq!(merged_value(&merged, "CLICOLOR"), Some("1"));
         assert_eq!(merged_value(&merged, "CLICOLOR_FORCE"), Some("1"));
         assert_eq!(merged_value(&merged, "FORCE_COLOR"), Some("1"));
@@ -21370,7 +21542,7 @@ mod tests {
             ("FORCE_COLOR".to_string(), "0".to_string()),
             ("TERM".to_string(), "dumb".to_string()),
         ]);
-        let merged = merge_agent_env_with_color(true, &[], &runtime_env);
+        let merged = merge_agent_env_with_color(true, &[], &runtime_env, None);
         assert_eq!(merged_value(&merged, "CLICOLOR"), Some(""));
         assert_eq!(merged_value(&merged, "CLICOLOR_FORCE"), Some(""));
         assert_eq!(merged_value(&merged, "FORCE_COLOR"), Some("0"));
@@ -21383,7 +21555,7 @@ mod tests {
     fn merge_agent_env_without_color_keeps_other_layers() {
         let runtime_env = BTreeMap::from([("FROM_ROW".to_string(), "row".to_string())]);
         let merged =
-            merge_agent_env_with_color(false, &[("FROM_REGISTRY", "registry")], &runtime_env);
+            merge_agent_env_with_color(false, &[("FROM_REGISTRY", "registry")], &runtime_env, None);
         assert_eq!(merged_value(&merged, "FROM_REGISTRY"), Some("registry"));
         assert_eq!(merged_value(&merged, "FROM_ROW"), Some("row"));
     }

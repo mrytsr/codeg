@@ -357,6 +357,25 @@ pub fn acp_adapter_relation(agent_type: AgentType) -> Option<AcpAdapterRelation>
     }
 }
 
+/// Home-relative directories a vendor's OWN installer drops the agent binary
+/// into, for agents codeg can also manage itself.
+///
+/// Distinct from [`AcpAdapterRelation::extra_dirs`], which describes a vendor
+/// CLI codeg never launches; these are launchable binaries, just not where a
+/// GUI-inherited PATH can see them. OpenCode's official install script uses
+/// `INSTALL_DIR=$HOME/.opencode/bin` and appends it to the user's shell rc — a
+/// file a desktop app launched from Finder or the Dock never reads, which is
+/// exactly how a working install reads as missing.
+///
+/// Probed after PATH and `~/.local/bin`, so a codeg-managed copy and anything
+/// genuinely on PATH still win.
+pub fn binary_system_dirs(agent_type: AgentType) -> &'static [&'static str] {
+    match agent_type {
+        AgentType::OpenCode => &[".opencode/bin"],
+        _ => &[],
+    }
+}
+
 /// Docs anchor explaining the adapter/vendor-CLI split. The zh mirror carries
 /// the same explicit `{#acp-adapters}` anchor.
 const ACP_ADAPTER_DOCS_URL: &str = "https://docs.codeg.app/guide/supported-agents#acp-adapters";

@@ -119,8 +119,10 @@ export function OpencodePluginsModal({
     [onOpenChange, onCompleted]
   )
 
+  // `needs_migration` counts as actionable: the package exists on disk, but in
+  // the layout opencode stopped reading, so it still has to be installed.
   const missingCount =
-    summary?.plugins.filter((p) => p.status === "missing").length ?? 0
+    summary?.plugins.filter((p) => p.status !== "installed").length ?? 0
   const floatingCount =
     summary?.plugins.filter((p) => p.declared_spec.endsWith("@latest"))
       .length ?? 0
@@ -164,7 +166,9 @@ export function OpencodePluginsModal({
                         variant={
                           plugin.status === "installed"
                             ? "secondary"
-                            : "destructive"
+                            : plugin.status === "needs_migration"
+                              ? "outline"
+                              : "destructive"
                         }
                         className="text-3xs px-1.5 py-0"
                       >
@@ -178,7 +182,7 @@ export function OpencodePluginsModal({
                     </div>
                   </div>
                   <div className="shrink-0 ml-2">
-                    {plugin.status === "missing" ? (
+                    {plugin.status !== "installed" ? (
                       <Button
                         size="xs"
                         variant="outline"

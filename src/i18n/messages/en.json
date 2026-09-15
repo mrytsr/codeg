@@ -968,7 +968,21 @@
         "action": "Sign out",
         "done": "Signed out. Sign in again to pick a different account.",
         "failed": "Could not sign out"
-      }
+      },
+      "tempReclaimTitle": "Leftover temp space",
+      "tempReclaimHint": "Older versions of codeg could not clean up the temporary directory this agent unpacks on every launch. This scans the system temp folder for those leftovers. That folder is shared with other applications, so nothing is deleted until you confirm, and anything still in use is skipped.",
+      "tempReclaimScan": "Scan",
+      "tempReclaimDelete": "Delete leftovers",
+      "tempReclaimNone": "Nothing to reclaim.",
+      "tempReclaimFound": "{count} leftover item(s), {size} reclaimable.",
+      "tempReclaimSkipped": "{count} skipped (still in use or too recent).",
+      "tempReclaimed": "Reclaimed {size} from {count} item(s).",
+      "tempReclaimSelectAll": "Select all",
+      "tempReclaimAgeHours": "{hours}h",
+      "tempReclaimConfirmTitle": "Delete {count} item(s)?",
+      "tempReclaimConfirmBody": "This permanently deletes {size}. The system temp folder is shared with other applications, so check each path before confirming — anything still in use is skipped.",
+      "tempReclaimConfirmAction": "Delete",
+      "tempReclaimCancel": "Cancel"
     },
     "deepseek": {
       "configManagement": "DeepSeek Harness Configuration",
@@ -1459,6 +1473,7 @@
       "noPlugins": "No plugins declared.",
       "status": {
         "installed": "Installed",
+        "needs_migration": "Needs migration",
         "missing": "Missing"
       },
       "installAll": "Install All Missing",
@@ -1621,6 +1636,27 @@
   "SettingsPages": {
     "agentsLoading": "Loading agent settings...",
     "skillPacksLoading": "Loading skill packs…"
+  },
+  "CloseBehaviorSettings": {
+    "title": "Close Button Behavior",
+    "description": "Choose what the main window's close button does.",
+    "trayUnavailable": "This system has no usable tray, so the close button always exits codeg.",
+    "behaviorAsk": "Ask every time",
+    "behaviorMinimize": "Minimize to tray",
+    "behaviorExit": "Exit codeg",
+    "saveFailed": "Failed to save close behavior: {message}"
+  },
+  "CloseRequestDialog": {
+    "askTitle": "Close codeg?",
+    "askDescription": "codeg can keep running in the tray so agents and terminals stay alive, or exit completely.",
+    "confirmExitTitle": "Exit codeg?",
+    "confirmExitDescription": "Closing the window is set to exit codeg.",
+    "runningTerminals": "{count, plural, one {# terminal is still running and will be terminated on exit.} other {# terminals are still running and will be terminated on exit.}}",
+    "remember": "Remember my choice",
+    "cancel": "Cancel",
+    "minimize": "Minimize to tray",
+    "exit": "Exit codeg",
+    "actionFailed": "Action failed: {message}"
   },
   "GeneralSettings": {
     "loading": "Loading...",

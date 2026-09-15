@@ -968,7 +968,21 @@
         "action": "登出",
         "done": "已登出。重新登入即可選擇其他帳號。",
         "failed": "登出失敗"
-      }
+      },
+      "tempReclaimTitle": "殘留暫存空間",
+      "tempReclaimHint": "舊版本 codeg 無法清理此代理每次啟動時解壓的暫存目錄。此操作會掃描系統暫存資料夾中的這些殘留。該資料夾與其他應用程式共用，因此在你確認之前不會刪除任何內容，仍在使用中的項目也會被跳過。",
+      "tempReclaimScan": "掃描",
+      "tempReclaimDelete": "刪除殘留",
+      "tempReclaimNone": "沒有可回收的內容。",
+      "tempReclaimFound": "發現 {count} 項殘留，可回收 {size}。",
+      "tempReclaimSkipped": "已跳過 {count} 項（仍在使用或過新）。",
+      "tempReclaimed": "已從 {count} 項中回收 {size}。",
+      "tempReclaimSelectAll": "全選",
+      "tempReclaimAgeHours": "{hours} 小時",
+      "tempReclaimConfirmTitle": "刪除選取的 {count} 項？",
+      "tempReclaimConfirmBody": "將永久刪除 {size}。系統暫存目錄與其他應用共用，確認前請先核對每條路徑；仍在使用中的項目會被略過。",
+      "tempReclaimConfirmAction": "刪除",
+      "tempReclaimCancel": "取消"
     },
     "deepseek": {
       "configManagement": "DeepSeek Harness 設定",
@@ -1459,6 +1473,7 @@
       "noPlugins": "opencode.json 中未宣告任何外掛",
       "status": {
         "installed": "已安裝",
+        "needs_migration": "需要遷移",
         "missing": "未安裝"
       },
       "installAll": "安裝全部缺失外掛",
@@ -1621,6 +1636,27 @@
   "SettingsPages": {
     "agentsLoading": "載入 Agent 設定中...",
     "skillPacksLoading": "正在載入技能包…"
+  },
+  "CloseBehaviorSettings": {
+    "title": "關閉按鈕行為",
+    "description": "選擇點擊主視窗關閉按鈕時的行為。",
+    "trayUnavailable": "目前系統沒有可用的系統匣，關閉按鈕將一律結束 codeg。",
+    "behaviorAsk": "每次詢問",
+    "behaviorMinimize": "最小化到系統匣",
+    "behaviorExit": "結束 codeg",
+    "saveFailed": "儲存關閉行為失敗：{message}"
+  },
+  "CloseRequestDialog": {
+    "askTitle": "要關閉 codeg 嗎？",
+    "askDescription": "codeg 可以最小化到系統匣繼續執行，讓智能體與終端機保持運作；也可以完全結束。",
+    "confirmExitTitle": "要結束 codeg 嗎？",
+    "confirmExitDescription": "目前設定為：關閉視窗即結束 codeg。",
+    "runningTerminals": "還有 {count} 個終端機正在執行，結束後會全部中止。",
+    "remember": "記住我的選擇",
+    "cancel": "取消",
+    "minimize": "最小化到系統匣",
+    "exit": "結束 codeg",
+    "actionFailed": "操作失敗：{message}"
   },
   "GeneralSettings": {
     "loading": "載入中...",

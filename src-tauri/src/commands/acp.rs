@@ -273,6 +273,30 @@ pub(crate) fn resolve_system_agent_binary(cmd: &str) -> Option<PathBuf> {
     cand.is_file().then_some(cand)
 }
 
+/// [`resolve_system_agent_binary`] plus the agent's own installer directories
+/// (see [`registry::binary_system_dirs`]).
+///
+/// The agent-aware form exists because a vendor installer can target a
+/// directory that is neither on PATH nor `~/.local/bin` — OpenCode's is
+/// `~/.opencode/bin` — and appending it to the shell rc does not help a desktop
+/// app launched from Finder or the Dock. Ordered last, so a codeg-managed copy
+/// and anything genuinely on PATH still win.
+pub(crate) fn resolve_system_agent_binary_for(agent_type: AgentType, cmd: &str) -> Option<PathBuf> {
+    if let Some(path) = resolve_system_agent_binary(cmd) {
+        return Some(path);
+    }
+    let exe = if cfg!(windows) {
+        format!("{cmd}.exe")
+    } else {
+        cmd.to_string()
+    };
+    let home = home_dir_or_default();
+    registry::binary_system_dirs(agent_type).iter().find_map(|dir| {
+        let cand = home.join(dir).join(&exe);
+        cand.is_file().then_some(cand)
+    })
+}
+
 /// Resolve the VENDOR CLI wrapped by an ACP adapter agent (`claude`, `codex`
 /// — see [`registry::acp_adapter_relation`]). codeg never launches this: it is
 /// probed purely so preflight/diagnostics can say "we found your own CLI, but
@@ -601,7 +625,7 @@ pub(crate) async fn verify_agent_installed(agent_type: AgentType) -> Result<(), 
             // fallback `build_agent` launches with.
             let launchable = binary_cache::find_best_cached_binary_for_agent(agent_type, cmd)?
                 .is_some()
-                || resolve_system_agent_binary(cmd).is_some();
+                || resolve_system_agent_binary_for(agent_type, cmd).is_some();
             if !launchable {
                 // INVARIANT: see note above — "is not installed" is a
                 // stable substring the frontend matches against.
@@ -719,7 +743,7 @@ async fn detect_local_version(agent_type: AgentType) -> Option<String> {
             if dir_entry.is_some() {
                 return system_dir_agent_version(cmd).await;
             }
-            let bin = resolve_system_agent_binary(cmd)?;
+            let bin = resolve_system_agent_binary_for(agent_type, cmd)?;
             system_probed_version(agent_type, &bin, None).await
         }
         registry::AgentDistribution::Uvx {
@@ -1092,7 +1116,7 @@ async fn collect_agent_diag(
             } else {
                 match binary_cache::find_best_cached_binary_for_agent(agent_type, cmd) {
                     Ok(Some((path, _version))) => Some(path),
-                    Ok(None) => resolve_system_agent_binary(cmd),
+                    Ok(None) => resolve_system_agent_binary_for(agent_type, cmd),
                     Err(_) => None,
                 }
                 .map(|p| p.to_string_lossy().to_string())
@@ -11003,7 +11027,7 @@ pub(crate) async fn acp_get_agent_status_core(
             if detected.is_none() {
                 if dir_entry.is_some() {
                     detected = system_dir_agent_version(cmd).await;
-                } else if let Some(bin) = resolve_system_agent_binary(cmd) {
+                } else if let Some(bin) = resolve_system_agent_binary_for(agent_type, cmd) {
                     detected = system_probed_version(agent_type, &bin, None).await;
                 }
             }
@@ -11100,7 +11124,7 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
                 if detected.is_none() {
                     if dir_entry.is_some() {
                         detected = system_dir_agent_version(cmd).await;
-                    } else if let Some(bin) = resolve_system_agent_binary(cmd) {
+                    } else if let Some(bin) = resolve_system_agent_binary_for(agent_type, cmd) {
                         detected = system_probed_version(agent_type, &bin, None).await;
                     }
                 }
@@ -11307,6 +11331,28 @@ pub async fn acp_clear_binary_cache(agent_type: AgentType) -> Result<(), AcpErro
         binary_cache::clear_agent_cache(agent_type)?;
     }
     Ok(())
+}
+
+/// Scan the system temp directory for artifacts leaked by agent launches from
+/// BEFORE per-launch temp isolation shipped. Read-only.
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_scan_leaked_temp(
+) -> Result<crate::acp::temp_reclaim::LeakedTempScan, AcpError> {
+    tokio::task::spawn_blocking(crate::acp::temp_reclaim::scan)
+        .await
+        .map_err(|e| AcpError::protocol(e.to_string()))
+}
+
+/// Delete the given leaked artifacts. Every path is re-validated immediately
+/// before deletion — see `temp_reclaim::reclaim`, which does not trust this
+/// list.
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_reclaim_leaked_temp(
+    paths: Vec<String>,
+) -> Result<crate::acp::temp_reclaim::LeakedTempReclaim, AcpError> {
+    tokio::task::spawn_blocking(move || crate::acp::temp_reclaim::reclaim(paths))
+        .await
+        .map_err(|e| AcpError::protocol(e.to_string()))
 }
 
 #[allow(clippy::too_many_arguments)]

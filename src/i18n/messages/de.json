@@ -968,7 +968,21 @@
         "action": "Abmelden",
         "done": "Abgemeldet. Melde dich erneut an, um ein anderes Konto zu wählen.",
         "failed": "Abmelden fehlgeschlagen"
-      }
+      },
+      "tempReclaimTitle": "Übrig gebliebener temporärer Speicher",
+      "tempReclaimHint": "Ältere codeg-Versionen konnten das temporäre Verzeichnis nicht aufräumen, das dieser Agent bei jedem Start entpackt. Hiermit wird der temporäre Systemordner nach diesen Überresten durchsucht. Dieser Ordner wird mit anderen Anwendungen geteilt, daher wird nichts gelöscht, bevor du bestätigst, und alles noch Verwendete wird übersprungen.",
+      "tempReclaimScan": "Suchen",
+      "tempReclaimDelete": "Überreste löschen",
+      "tempReclaimNone": "Nichts zurückzugewinnen.",
+      "tempReclaimFound": "{count} Überrest(e), {size} freigebbar.",
+      "tempReclaimSkipped": "{count} übersprungen (noch in Verwendung oder zu neu).",
+      "tempReclaimed": "{size} aus {count} Element(en) zurückgewonnen.",
+      "tempReclaimSelectAll": "Alle auswählen",
+      "tempReclaimAgeHours": "{hours} Std.",
+      "tempReclaimConfirmTitle": "{count} Element(e) löschen?",
+      "tempReclaimConfirmBody": "Damit werden {size} dauerhaft gelöscht. Der temporäre Systemordner wird von anderen Anwendungen mitbenutzt – prüfe daher jeden Pfad vor dem Bestätigen. Noch verwendete Einträge werden übersprungen.",
+      "tempReclaimConfirmAction": "Löschen",
+      "tempReclaimCancel": "Abbrechen"
     },
     "deepseek": {
       "configManagement": "DeepSeek-Harness-Konfiguration",
@@ -1459,6 +1473,7 @@
       "noPlugins": "Keine Plugins in opencode.json deklariert",
       "status": {
         "installed": "Installiert",
+        "needs_migration": "Migration erforderlich",
         "missing": "Nicht installiert"
       },
       "installAll": "Alle fehlenden installieren",
@@ -1621,6 +1636,27 @@
   "SettingsPages": {
     "agentsLoading": "Agent-Einstellungen werden geladen...",
     "skillPacksLoading": "Skill-Pakete werden geladen…"
+  },
+  "CloseBehaviorSettings": {
+    "title": "Verhalten der Schließen-Schaltfläche",
+    "description": "Lege fest, was die Schließen-Schaltfläche des Hauptfensters bewirkt.",
+    "trayUnavailable": "Dieses System bietet keinen nutzbaren Infobereich, daher beendet die Schließen-Schaltfläche codeg immer.",
+    "behaviorAsk": "Jedes Mal fragen",
+    "behaviorMinimize": "In den Infobereich minimieren",
+    "behaviorExit": "codeg beenden",
+    "saveFailed": "Schließverhalten konnte nicht gespeichert werden: {message}"
+  },
+  "CloseRequestDialog": {
+    "askTitle": "codeg schließen?",
+    "askDescription": "codeg kann im Infobereich weiterlaufen, damit Agenten und Terminals aktiv bleiben – oder vollständig beendet werden.",
+    "confirmExitTitle": "codeg beenden?",
+    "confirmExitDescription": "Das Schließen des Fensters ist so eingestellt, dass codeg beendet wird.",
+    "runningTerminals": "{count, plural, one {# Terminal läuft noch und wird beim Beenden geschlossen.} other {# Terminals laufen noch und werden beim Beenden geschlossen.}}",
+    "remember": "Meine Auswahl merken",
+    "cancel": "Abbrechen",
+    "minimize": "In den Infobereich minimieren",
+    "exit": "codeg beenden",
+    "actionFailed": "Aktion fehlgeschlagen: {message}"
   },
   "GeneralSettings": {
     "loading": "Wird geladen...",

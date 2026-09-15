@@ -968,7 +968,21 @@
         "action": "تسجيل الخروج",
         "done": "تم تسجيل الخروج. سجّل الدخول مرة أخرى لاختيار حساب آخر.",
         "failed": "تعذّر تسجيل الخروج"
-      }
+      },
+      "tempReclaimTitle": "مساحة مؤقتة متبقية",
+      "tempReclaimHint": "لم تكن الإصدارات القديمة من codeg قادرة على تنظيف الدليل المؤقت الذي يفكه هذا الوكيل عند كل تشغيل. يفحص هذا الإجراء مجلد النظام المؤقت بحثًا عن تلك البقايا. هذا المجلد مشترك مع تطبيقات أخرى، لذا لا يُحذف أي شيء قبل تأكيدك، ويتم تخطي أي عنصر لا يزال قيد الاستخدام.",
+      "tempReclaimScan": "فحص",
+      "tempReclaimDelete": "حذف البقايا",
+      "tempReclaimNone": "لا يوجد ما يمكن استرجاعه.",
+      "tempReclaimFound": "{count} عنصرًا متبقيًا، يمكن استرجاع {size}.",
+      "tempReclaimSkipped": "تم تخطي {count} (لا يزال قيد الاستخدام أو حديث جدًا).",
+      "tempReclaimed": "تم استرجاع {size} من {count} عنصرًا.",
+      "tempReclaimSelectAll": "تحديد الكل",
+      "tempReclaimAgeHours": "{hours} ساعة",
+      "tempReclaimConfirmTitle": "حذف {count} عنصر؟",
+      "tempReclaimConfirmBody": "سيؤدي هذا إلى حذف {size} نهائيًا. مجلد النظام المؤقت مشترك مع تطبيقات أخرى، لذا تحقّق من كل مسار قبل التأكيد؛ وسيتم تخطّي أي عنصر قيد الاستخدام.",
+      "tempReclaimConfirmAction": "حذف",
+      "tempReclaimCancel": "إلغاء"
     },
     "deepseek": {
       "configManagement": "إعدادات DeepSeek Harness",
@@ -1459,6 +1473,7 @@
       "noPlugins": "لا توجد إضافات معلنة في opencode.json",
       "status": {
         "installed": "مثبّت",
+        "needs_migration": "يتطلب الترحيل",
         "missing": "غير مثبّت"
       },
       "installAll": "تثبيت جميع الإضافات المفقودة",
@@ -1621,6 +1636,27 @@
   "SettingsPages": {
     "agentsLoading": "جارٍ تحميل إعدادات الوكلاء...",
     "skillPacksLoading": "جارٍ تحميل حزم المهارات…"
+  },
+  "CloseBehaviorSettings": {
+    "title": "سلوك زر الإغلاق",
+    "description": "اختر ما يفعله زر إغلاق النافذة الرئيسية.",
+    "trayUnavailable": "لا تتوفر منطقة إشعارات في هذا النظام، لذا يؤدي زر الإغلاق دائمًا إلى إنهاء codeg.",
+    "behaviorAsk": "السؤال في كل مرة",
+    "behaviorMinimize": "التصغير إلى منطقة الإشعارات",
+    "behaviorExit": "إنهاء codeg",
+    "saveFailed": "تعذر حفظ سلوك الإغلاق: {message}"
+  },
+  "CloseRequestDialog": {
+    "askTitle": "إغلاق codeg؟",
+    "askDescription": "يمكن أن يستمر codeg في العمل ضمن منطقة الإشعارات لإبقاء الوكلاء والطرفيات نشطة، أو أن يُنهى تمامًا.",
+    "confirmExitTitle": "إنهاء codeg؟",
+    "confirmExitDescription": "الإعداد الحالي يجعل إغلاق النافذة ينهي codeg.",
+    "runningTerminals": "لا تزال {count} من الطرفيات قيد التشغيل وسيتم إنهاؤها عند الخروج.",
+    "remember": "تذكّر اختياري",
+    "cancel": "إلغاء",
+    "minimize": "التصغير إلى منطقة الإشعارات",
+    "exit": "إنهاء codeg",
+    "actionFailed": "فشل تنفيذ الإجراء: {message}"
   },
   "GeneralSettings": {
     "loading": "جارٍ التحميل...",

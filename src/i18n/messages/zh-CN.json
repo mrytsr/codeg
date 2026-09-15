@@ -968,7 +968,21 @@
         "action": "退出登录",
         "done": "已退出登录。重新登录即可选择其他账号。",
         "failed": "退出登录失败"
-      }
+      },
+      "tempReclaimTitle": "残留临时空间",
+      "tempReclaimHint": "旧版本 codeg 无法清理该代理每次启动时解压的临时目录。此操作会扫描系统临时文件夹中的这些残留。该文件夹与其他应用共用，因此在你确认之前不会删除任何内容，仍在使用中的项目也会被跳过。",
+      "tempReclaimScan": "扫描",
+      "tempReclaimDelete": "删除残留",
+      "tempReclaimNone": "没有可回收的内容。",
+      "tempReclaimFound": "发现 {count} 项残留，可回收 {size}。",
+      "tempReclaimSkipped": "已跳过 {count} 项（仍在使用或过新）。",
+      "tempReclaimed": "已从 {count} 项中回收 {size}。",
+      "tempReclaimSelectAll": "全选",
+      "tempReclaimAgeHours": "{hours} 小时",
+      "tempReclaimConfirmTitle": "删除选中的 {count} 项？",
+      "tempReclaimConfirmBody": "将永久删除 {size}。系统临时目录与其他应用共用，确认前请先核对每条路径；仍在使用中的项会被跳过。",
+      "tempReclaimConfirmAction": "删除",
+      "tempReclaimCancel": "取消"
     },
     "deepseek": {
       "configManagement": "DeepSeek Harness 配置",
@@ -1459,6 +1473,7 @@
       "noPlugins": "opencode.json 中未声明任何插件",
       "status": {
         "installed": "已安装",
+        "needs_migration": "需要迁移",
         "missing": "未安装"
       },
       "installAll": "安装全部缺失插件",
@@ -1621,6 +1636,27 @@
   "SettingsPages": {
     "agentsLoading": "加载 Agent 设置中...",
     "skillPacksLoading": "正在加载技能包…"
+  },
+  "CloseBehaviorSettings": {
+    "title": "关闭按钮行为",
+    "description": "选择点击主窗口关闭按钮时的行为。",
+    "trayUnavailable": "当前系统没有可用的托盘，关闭按钮将始终退出 codeg。",
+    "behaviorAsk": "每次询问",
+    "behaviorMinimize": "最小化到托盘",
+    "behaviorExit": "退出 codeg",
+    "saveFailed": "保存关闭行为失败：{message}"
+  },
+  "CloseRequestDialog": {
+    "askTitle": "要关闭 codeg 吗？",
+    "askDescription": "codeg 可以最小化到托盘继续运行，智能体和终端保持活动；也可以完全退出。",
+    "confirmExitTitle": "要退出 codeg 吗？",
+    "confirmExitDescription": "当前设置为：关闭窗口即退出 codeg。",
+    "runningTerminals": "还有 {count} 个终端正在运行，退出后会被全部结束。",
+    "remember": "记住我的选择",
+    "cancel": "取消",
+    "minimize": "最小化到托盘",
+    "exit": "退出 codeg",
+    "actionFailed": "操作失败：{message}"
   },
   "GeneralSettings": {
     "loading": "加载中...",

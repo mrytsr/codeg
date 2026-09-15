@@ -968,7 +968,21 @@
         "action": "Cerrar sesión",
         "done": "Sesión cerrada. Vuelve a iniciar sesión para elegir otra cuenta.",
         "failed": "No se pudo cerrar la sesión"
-      }
+      },
+      "tempReclaimTitle": "Espacio temporal sobrante",
+      "tempReclaimHint": "Las versiones anteriores de codeg no podían limpiar el directorio temporal que este agente descomprime en cada inicio. Esto analiza la carpeta temporal del sistema en busca de esos restos. Esa carpeta se comparte con otras aplicaciones, por lo que no se elimina nada hasta que confirmes, y se omite todo lo que siga en uso.",
+      "tempReclaimScan": "Analizar",
+      "tempReclaimDelete": "Eliminar restos",
+      "tempReclaimNone": "No hay nada que recuperar.",
+      "tempReclaimFound": "{count} elemento(s) sobrante(s), {size} recuperable(s).",
+      "tempReclaimSkipped": "{count} omitido(s) (en uso o demasiado reciente).",
+      "tempReclaimed": "Se recuperaron {size} de {count} elemento(s).",
+      "tempReclaimSelectAll": "Seleccionar todo",
+      "tempReclaimAgeHours": "{hours} h",
+      "tempReclaimConfirmTitle": "¿Eliminar {count} elemento(s)?",
+      "tempReclaimConfirmBody": "Esto elimina permanentemente {size}. La carpeta temporal del sistema se comparte con otras aplicaciones, así que revisa cada ruta antes de confirmar; lo que siga en uso se omite.",
+      "tempReclaimConfirmAction": "Eliminar",
+      "tempReclaimCancel": "Cancelar"
     },
     "deepseek": {
       "configManagement": "Configuración de DeepSeek Harness",
@@ -1459,6 +1473,7 @@
       "noPlugins": "No hay plugins declarados en opencode.json",
       "status": {
         "installed": "Instalado",
+        "needs_migration": "Requiere migración",
         "missing": "No instalado"
       },
       "installAll": "Instalar todos los faltantes",
@@ -1621,6 +1636,27 @@
   "SettingsPages": {
     "agentsLoading": "Cargando configuración de agentes...",
     "skillPacksLoading": "Cargando paquetes de habilidades…"
+  },
+  "CloseBehaviorSettings": {
+    "title": "Comportamiento del botón de cerrar",
+    "description": "Elige qué hace el botón de cerrar de la ventana principal.",
+    "trayUnavailable": "Este sistema no tiene una bandeja utilizable, por lo que el botón de cerrar siempre sale de codeg.",
+    "behaviorAsk": "Preguntar cada vez",
+    "behaviorMinimize": "Minimizar a la bandeja",
+    "behaviorExit": "Salir de codeg",
+    "saveFailed": "No se pudo guardar el comportamiento de cierre: {message}"
+  },
+  "CloseRequestDialog": {
+    "askTitle": "¿Cerrar codeg?",
+    "askDescription": "codeg puede seguir ejecutándose en la bandeja para mantener activos los agentes y las terminales, o salir por completo.",
+    "confirmExitTitle": "¿Salir de codeg?",
+    "confirmExitDescription": "Cerrar la ventana está configurado para salir de codeg.",
+    "runningTerminals": "{count, plural, one {# terminal sigue en ejecución y se cerrará al salir.} other {# terminales siguen en ejecución y se cerrarán al salir.}}",
+    "remember": "Recordar mi elección",
+    "cancel": "Cancelar",
+    "minimize": "Minimizar a la bandeja",
+    "exit": "Salir de codeg",
+    "actionFailed": "La acción falló: {message}"
   },
   "GeneralSettings": {
     "loading": "Cargando...",

@@ -968,7 +968,21 @@
         "action": "サインアウト",
         "done": "サインアウトしました。サインインし直すと別のアカウントを選べます。",
         "failed": "サインアウトできませんでした"
-      }
+      },
+      "tempReclaimTitle": "残存した一時領域",
+      "tempReclaimHint": "以前のバージョンの codeg は、このエージェントが起動のたびに展開する一時ディレクトリを削除できませんでした。システムの一時フォルダーからその残存物を検索します。このフォルダーは他のアプリケーションと共有されているため、確認するまで何も削除されず、使用中の項目はスキップされます。",
+      "tempReclaimScan": "スキャン",
+      "tempReclaimDelete": "残存物を削除",
+      "tempReclaimNone": "回収できるものはありません。",
+      "tempReclaimFound": "残存物 {count} 件、{size} を回収できます。",
+      "tempReclaimSkipped": "{count} 件をスキップしました（使用中または新しすぎます）。",
+      "tempReclaimed": "{count} 件から {size} を回収しました。",
+      "tempReclaimSelectAll": "すべて選択",
+      "tempReclaimAgeHours": "{hours} 時間",
+      "tempReclaimConfirmTitle": "選択した {count} 件を削除しますか？",
+      "tempReclaimConfirmBody": "{size} を完全に削除します。システムの一時フォルダーは他のアプリと共有されるため、確認する前に各パスをご確認ください。使用中のものはスキップされます。",
+      "tempReclaimConfirmAction": "削除",
+      "tempReclaimCancel": "キャンセル"
     },
     "deepseek": {
       "configManagement": "DeepSeek Harness の設定",
@@ -1459,6 +1473,7 @@
       "noPlugins": "opencode.json にプラグインが宣言されていません",
       "status": {
         "installed": "インストール済み",
+        "needs_migration": "移行が必要",
         "missing": "未インストール"
       },
       "installAll": "不足プラグインをすべてインストール",
@@ -1621,6 +1636,27 @@
   "SettingsPages": {
     "agentsLoading": "エージェント設定を読み込み中...",
     "skillPacksLoading": "スキルパックを読み込み中…"
+  },
+  "CloseBehaviorSettings": {
+    "title": "閉じるボタンの動作",
+    "description": "メインウィンドウの閉じるボタンを押したときの動作を選択します。",
+    "trayUnavailable": "このシステムでは通知領域を利用できないため、閉じるボタンは常に codeg を終了します。",
+    "behaviorAsk": "毎回確認する",
+    "behaviorMinimize": "通知領域に最小化",
+    "behaviorExit": "codeg を終了",
+    "saveFailed": "閉じる動作の保存に失敗しました: {message}"
+  },
+  "CloseRequestDialog": {
+    "askTitle": "codeg を閉じますか？",
+    "askDescription": "通知領域に常駐してエージェントとターミナルを動かし続けることも、完全に終了することもできます。",
+    "confirmExitTitle": "codeg を終了しますか？",
+    "confirmExitDescription": "現在の設定では、ウィンドウを閉じると codeg が終了します。",
+    "runningTerminals": "{count} 個のターミナルが実行中です。終了するとすべて停止します。",
+    "remember": "この選択を記憶する",
+    "cancel": "キャンセル",
+    "minimize": "通知領域に最小化",
+    "exit": "codeg を終了",
+    "actionFailed": "操作に失敗しました: {message}"
   },
   "GeneralSettings": {
     "loading": "読み込み中...",

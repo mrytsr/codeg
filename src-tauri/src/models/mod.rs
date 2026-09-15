@@ -47,7 +47,10 @@ pub use system::{
     SystemProxySettings, SystemTerminalSettings, TerminalShellOption,
 };
 #[cfg(feature = "tauri-runtime")]
-pub use system::{SystemAutostartSettings, SystemRenderingSettings};
+pub use system::{
+    CloseWindowBehavior, SystemAutostartSettings, SystemCloseBehaviorSettings,
+    SystemCloseBehaviorSettingsView, SystemRenderingSettings,
+};
 pub use token_usage::{
     TokenUsageBreakdownItem, TokenUsageBucket, TokenUsageConversationItem, TokenUsageFacets,
     TokenUsageFilter, TokenUsageFolderFacet, TokenUsageHeatCell, TokenUsagePoint, TokenUsageReport,
