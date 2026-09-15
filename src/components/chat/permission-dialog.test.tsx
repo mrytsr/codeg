@@ -31,6 +31,49 @@ const baseOptions = [
 ]
 
 describe("PermissionDialog", () => {
+  // `deepseek-acp` hardcodes its approval buttons in Simplified Chinese and has
+  // no locale switch, so the dialog re-labels them from the option ids.
+  it("localises an agent's hardcoded approval labels, keeping the ids it answers with", () => {
+    const onRespond = vi.fn()
+    const permission: PendingPermission = {
+      request_id: "req-ds",
+      tool_call: { title: "ls", kind: "execute" },
+      options: [
+        { option_id: "allow-once", name: "允许本次", kind: "allow_once" },
+        { option_id: "reject-once", name: "拒绝", kind: "reject_once" },
+      ],
+    }
+    renderWithIntl(
+      <PermissionDialog
+        permission={permission}
+        onRespond={onRespond}
+        agentType="deepseek"
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }))
+    expect(screen.getByRole("button", { name: "Reject" })).toBeInTheDocument()
+    expect(screen.queryByText("允许本次")).not.toBeInTheDocument()
+    expect(onRespond).toHaveBeenCalledWith("req-ds", "allow-once")
+  })
+
+  it("leaves another agent's option labels verbatim", () => {
+    const permission: PendingPermission = {
+      request_id: "req-cx",
+      tool_call: { title: "ls", kind: "execute" },
+      options: [
+        { option_id: "allow-once", name: "允许本次", kind: "allow_once" },
+      ],
+    }
+    renderWithIntl(
+      <PermissionDialog
+        permission={permission}
+        onRespond={() => {}}
+        agentType="codex"
+      />
+    )
+    expect(screen.getByRole("button", { name: "允许本次" })).toBeInTheDocument()
+  })
+
   it("returns nothing when permission is null", () => {
     const { container } = renderWithIntl(
       <PermissionDialog permission={null} onRespond={() => {}} />

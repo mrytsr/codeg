@@ -1591,6 +1591,33 @@
     "customAgentNotLaunchable": "Este agente no puede iniciarse aquí: {reason}",
     "providerSourceActiveHint": "Este agente usa el catálogo compartido de proveedores de modelos. La configuración nativa de modelos está oculta."
   },
+  "AgentVocabulary": {
+    "deepseekModeDefault": "Normal",
+    "deepseekModeDefaultDescription": "Lee y edita archivos y ejecuta comandos directamente para completar la tarea",
+    "deepseekModePlan": "Plan",
+    "deepseekModePlanDescription": "Investiga primero y propone un plan completo para que lo confirmes antes de actuar. Orienta al modelo; el límite real lo sigue marcando el acceso a archivos.",
+    "deepseekOptionModel": "Modelo",
+    "deepseekOptionReasoning": "Esfuerzo de razonamiento",
+    "deepseekOptionReasoningDescription": "Cuanto más alto, más lento y más tokens consume, pero es más estable en problemas difíciles",
+    "deepseekOptionSandbox": "Acceso a archivos",
+    "deepseekOptionSandboxDescription": "Los comandos y las herramientas de archivos comparten este único límite",
+    "deepseekReasoningOff": "Desactivado",
+    "deepseekReasoningOffDescription": "Responde directamente sin razonar; lo más rápido",
+    "deepseekReasoningLow": "Bajo",
+    "deepseekReasoningLowDescription": "Razona brevemente; más estable que desactivado, más rápido que alto",
+    "deepseekReasoningHigh": "Alto",
+    "deepseekReasoningHighDescription": "Razona antes de responder; el valor por defecto para programar a diario",
+    "deepseekReasoningMax": "Máximo",
+    "deepseekReasoningMaxDescription": "Razona durante más tiempo; más estable en problemas difíciles, pero más lento y con más tokens",
+    "deepseekSandboxReadOnly": "Solo lectura",
+    "deepseekSandboxReadOnlyDescription": "Se ejecuta con una política de solo lectura; cambia el acceso cuando haga falta escribir. En algunas plataformas la aplicación es parcial.",
+    "deepseekSandboxWorkspaceWrite": "Escritura en el espacio de trabajo",
+    "deepseekSandboxWorkspaceWriteDescription": "Las escrituras deben quedarse dentro del espacio de trabajo de la sesión y de los directorios temporales del sistema; una llamada fuera de ellos pide autorización puntual. En algunas plataformas la aplicación es parcial.",
+    "deepseekSandboxFullAccess": "Acceso total (sin sandbox)",
+    "deepseekSandboxFullAccessDescription": "No aplica ninguna restricción de archivos. Elígelo solo si entiendes las consecuencias.",
+    "deepseekPermissionAllowOnce": "Permitir una vez",
+    "deepseekPermissionRejectOnce": "Rechazar"
+  },
   "SettingsPages": {
     "agentsLoading": "Cargando configuración de agentes...",
     "skillPacksLoading": "Cargando paquetes de habilidades…"

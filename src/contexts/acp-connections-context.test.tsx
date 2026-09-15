@@ -2392,6 +2392,8 @@ describe("AcpConnectionsProvider Grok cross-agent-type model switch", () => {
       option_name: "Model",
       requested: "Composer 2.5",
       actual: "Grok 4.5",
+      requested_value: "composer-2.5",
+      actual_value: "grok-4.5",
     })
     emitAcpEvent(handlers, {
       seq: 3,

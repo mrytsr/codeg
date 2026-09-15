@@ -1591,6 +1591,33 @@
     "customAgentNotLaunchable": "該智慧體在此環境無法啟動：{reason}",
     "providerSourceActiveHint": "此代理使用共用模型供應商目錄，原生模型設定已隱藏。"
   },
+  "AgentVocabulary": {
+    "deepseekModeDefault": "常規",
+    "deepseekModeDefaultDescription": "直接讀寫檔案、執行命令完成任務",
+    "deepseekModePlan": "計畫",
+    "deepseekModePlanDescription": "先調查再提出完整方案，經你確認後才動手；這只是對模型的引導，實際邊界仍由「檔案權限」決定。",
+    "deepseekOptionModel": "模型",
+    "deepseekOptionReasoning": "推理檔位",
+    "deepseekOptionReasoningDescription": "越高越慢越耗 token，難題更穩",
+    "deepseekOptionSandbox": "檔案權限",
+    "deepseekOptionSandboxDescription": "命令與檔案工具共用這一條邊界",
+    "deepseekReasoningOff": "關閉",
+    "deepseekReasoningOffDescription": "不做推理，直接作答；最快",
+    "deepseekReasoningLow": "低",
+    "deepseekReasoningLowDescription": "略作推理；比關閉穩，比高檔快",
+    "deepseekReasoningHigh": "高",
+    "deepseekReasoningHighDescription": "推理後作答；日常編碼的預設檔",
+    "deepseekReasoningMax": "最高",
+    "deepseekReasoningMaxDescription": "推理更久；難題更穩，但較慢且更耗 token",
+    "deepseekSandboxReadOnly": "唯讀",
+    "deepseekSandboxReadOnlyDescription": "依唯讀策略執行；需要寫入時切換權限。部分平台上只是部分強制。",
+    "deepseekSandboxWorkspaceWrite": "可寫工作區",
+    "deepseekSandboxWorkspaceWriteDescription": "寫入意在限制於工作階段工作區與系統暫存目錄；越界的呼叫會請求單次授權。部分平台上只是部分強制。",
+    "deepseekSandboxFullAccess": "完全開放（無沙箱）",
+    "deepseekSandboxFullAccessDescription": "不施加任何檔案限制。僅在你清楚後果時選擇。",
+    "deepseekPermissionAllowOnce": "允許本次",
+    "deepseekPermissionRejectOnce": "拒絕"
+  },
   "SettingsPages": {
     "agentsLoading": "載入 Agent 設定中...",
     "skillPacksLoading": "正在載入技能包…"

@@ -1591,6 +1591,33 @@
     "customAgentNotLaunchable": "이 환경에서는 실행할 수 없습니다: {reason}",
     "providerSourceActiveHint": "이 에이전트는 공유 모델 공급자 카탈로그를 사용합니다. 네이티브 모델 설정은 숨겨집니다."
   },
+  "AgentVocabulary": {
+    "deepseekModeDefault": "일반",
+    "deepseekModeDefaultDescription": "파일을 직접 읽고 쓰며 명령을 실행해 작업을 끝냅니다",
+    "deepseekModePlan": "계획",
+    "deepseekModePlanDescription": "먼저 조사한 뒤 전체 계획을 제시하고 확인을 받은 다음에 실행합니다. 모델에 대한 안내일 뿐이며 실제 경계는 파일 접근 설정이 정합니다.",
+    "deepseekOptionModel": "모델",
+    "deepseekOptionReasoning": "추론 강도",
+    "deepseekOptionReasoningDescription": "높을수록 느리고 토큰을 더 쓰지만 어려운 문제에서 안정적입니다",
+    "deepseekOptionSandbox": "파일 접근",
+    "deepseekOptionSandboxDescription": "명령과 파일 도구가 이 경계를 함께 사용합니다",
+    "deepseekReasoningOff": "끄기",
+    "deepseekReasoningOffDescription": "추론 없이 바로 답합니다. 가장 빠릅니다",
+    "deepseekReasoningLow": "낮음",
+    "deepseekReasoningLowDescription": "짧게 추론합니다. 끄기보다 안정적이고 높음보다 빠릅니다",
+    "deepseekReasoningHigh": "높음",
+    "deepseekReasoningHighDescription": "추론한 뒤 답합니다. 일상적인 코딩의 기본값입니다",
+    "deepseekReasoningMax": "최고",
+    "deepseekReasoningMaxDescription": "더 오래 추론합니다. 어려운 문제에 강하지만 느리고 토큰을 더 씁니다",
+    "deepseekSandboxReadOnly": "읽기 전용",
+    "deepseekSandboxReadOnlyDescription": "읽기 전용 정책으로 실행합니다. 쓰기가 필요하면 권한을 바꾸세요. 일부 플랫폼에서는 부분적으로만 적용됩니다.",
+    "deepseekSandboxWorkspaceWrite": "워크스페이스 쓰기",
+    "deepseekSandboxWorkspaceWriteDescription": "쓰기는 세션 워크스페이스와 시스템 임시 디렉터리 안에 머무는 것을 목표로 합니다. 범위를 벗어난 호출은 일회성 승인을 요청합니다. 일부 플랫폼에서는 부분적으로만 적용됩니다.",
+    "deepseekSandboxFullAccess": "전체 접근(샌드박스 없음)",
+    "deepseekSandboxFullAccessDescription": "파일 제한을 전혀 적용하지 않습니다. 결과를 이해할 때만 선택하세요.",
+    "deepseekPermissionAllowOnce": "이번만 허용",
+    "deepseekPermissionRejectOnce": "거부"
+  },
   "SettingsPages": {
     "agentsLoading": "에이전트 설정을 불러오는 중...",
     "skillPacksLoading": "스킬 팩 로딩 중…"

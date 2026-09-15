@@ -1591,6 +1591,33 @@
     "customAgentNotLaunchable": "この環境では起動できません: {reason}",
     "providerSourceActiveHint": "このエージェントは共有モデルプロバイダーカタログを使用します。ネイティブのモデル設定は非表示です。"
   },
+  "AgentVocabulary": {
+    "deepseekModeDefault": "通常",
+    "deepseekModeDefaultDescription": "ファイルの読み書きとコマンド実行を直接おこなってタスクを完了します",
+    "deepseekModePlan": "プラン",
+    "deepseekModePlanDescription": "まず調査し、完全な計画を提示して確認を得てから着手します。これはモデルへの誘導であり、実際の境界は「ファイルアクセス」で決まります。",
+    "deepseekOptionModel": "モデル",
+    "deepseekOptionReasoning": "推論の強度",
+    "deepseekOptionReasoningDescription": "高いほど遅くトークンを消費しますが、難しい問題では安定します",
+    "deepseekOptionSandbox": "ファイルアクセス",
+    "deepseekOptionSandboxDescription": "コマンドとファイルツールはこの境界を共有します",
+    "deepseekReasoningOff": "オフ",
+    "deepseekReasoningOffDescription": "推論せずに直接回答します。最速です",
+    "deepseekReasoningLow": "低",
+    "deepseekReasoningLowDescription": "少しだけ推論します。オフより安定し、高より高速です",
+    "deepseekReasoningHigh": "高",
+    "deepseekReasoningHighDescription": "推論してから回答します。日常のコーディング向けの既定値です",
+    "deepseekReasoningMax": "最高",
+    "deepseekReasoningMaxDescription": "より長く推論します。難問には強いものの、遅くトークンも多く消費します",
+    "deepseekSandboxReadOnly": "読み取り専用",
+    "deepseekSandboxReadOnlyDescription": "読み取り専用ポリシーで実行します。書き込みが必要なときは権限を切り替えてください。プラットフォームによっては部分的な強制にとどまります。",
+    "deepseekSandboxWorkspaceWrite": "ワークスペース書き込み",
+    "deepseekSandboxWorkspaceWriteDescription": "書き込みはセッションのワークスペースとシステムの一時ディレクトリ内に収める想定です。範囲外の呼び出しは都度の承認を求めます。プラットフォームによっては部分的な強制にとどまります。",
+    "deepseekSandboxFullAccess": "フルアクセス（サンドボックスなし）",
+    "deepseekSandboxFullAccessDescription": "ファイルの制限を一切適用しません。結果を理解している場合にのみ選んでください。",
+    "deepseekPermissionAllowOnce": "今回のみ許可",
+    "deepseekPermissionRejectOnce": "拒否"
+  },
   "SettingsPages": {
     "agentsLoading": "エージェント設定を読み込み中...",
     "skillPacksLoading": "スキルパックを読み込み中…"

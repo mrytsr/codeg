@@ -1591,6 +1591,33 @@
     "customAgentNotLaunchable": "This agent cannot launch here: {reason}",
     "providerSourceActiveHint": "This agent uses the shared Model Provider catalog. Native model settings are hidden."
   },
+  "AgentVocabulary": {
+    "deepseekModeDefault": "Normal",
+    "deepseekModeDefaultDescription": "Reads and edits files and runs commands directly to get the job done",
+    "deepseekModePlan": "Plan",
+    "deepseekModePlanDescription": "Investigates first and proposes a full plan for you to confirm before touching anything. This steers the model — the real boundary is still whatever File access allows.",
+    "deepseekOptionModel": "Model",
+    "deepseekOptionReasoning": "Reasoning effort",
+    "deepseekOptionReasoningDescription": "Higher is slower and costs more tokens, but steadier on hard problems",
+    "deepseekOptionSandbox": "File access",
+    "deepseekOptionSandboxDescription": "Commands and file tools share this one boundary",
+    "deepseekReasoningOff": "Off",
+    "deepseekReasoningOffDescription": "Answers directly with no reasoning; fastest",
+    "deepseekReasoningLow": "Low",
+    "deepseekReasoningLowDescription": "Reasons briefly; steadier than off, faster than high",
+    "deepseekReasoningHigh": "High",
+    "deepseekReasoningHighDescription": "Reasons before answering; the everyday coding default",
+    "deepseekReasoningMax": "Max",
+    "deepseekReasoningMaxDescription": "Reasons longer; steadier on hard problems, but slower and costs more tokens",
+    "deepseekSandboxReadOnly": "Read-only",
+    "deepseekSandboxReadOnlyDescription": "Runs under a read-only policy; switch access when a write is needed. Enforcement can be partial on some platforms.",
+    "deepseekSandboxWorkspaceWrite": "Workspace write",
+    "deepseekSandboxWorkspaceWriteDescription": "Writes are meant to stay inside the session workspace and the system temp directories; a call outside them asks for one-time approval. Enforcement can be partial on some platforms.",
+    "deepseekSandboxFullAccess": "Full access (no sandbox)",
+    "deepseekSandboxFullAccessDescription": "Applies no file restrictions at all. Choose it only when you understand the consequences.",
+    "deepseekPermissionAllowOnce": "Allow once",
+    "deepseekPermissionRejectOnce": "Reject"
+  },
   "SettingsPages": {
     "agentsLoading": "Loading agent settings...",
     "skillPacksLoading": "Loading skill packs…"

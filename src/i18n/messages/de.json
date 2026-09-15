@@ -1591,6 +1591,33 @@
     "customAgentNotLaunchable": "Dieser Agent kann hier nicht gestartet werden: {reason}",
     "providerSourceActiveHint": "Dieser Agent verwendet den gemeinsamen Modellanbieter-Katalog. Native Modelleinstellungen sind ausgeblendet."
   },
+  "AgentVocabulary": {
+    "deepseekModeDefault": "Normal",
+    "deepseekModeDefaultDescription": "Liest und bearbeitet Dateien und führt Befehle direkt aus, um die Aufgabe zu erledigen",
+    "deepseekModePlan": "Plan",
+    "deepseekModePlanDescription": "Untersucht zuerst und legt einen vollständigen Plan zur Bestätigung vor, bevor etwas geändert wird. Das lenkt nur das Modell — die tatsächliche Grenze bestimmt weiterhin der Dateizugriff.",
+    "deepseekOptionModel": "Modell",
+    "deepseekOptionReasoning": "Denkaufwand",
+    "deepseekOptionReasoningDescription": "Höher ist langsamer und kostet mehr Tokens, ist bei schweren Problemen aber stabiler",
+    "deepseekOptionSandbox": "Dateizugriff",
+    "deepseekOptionSandboxDescription": "Befehle und Dateiwerkzeuge teilen sich diese eine Grenze",
+    "deepseekReasoningOff": "Aus",
+    "deepseekReasoningOffDescription": "Antwortet direkt ohne Nachdenken; am schnellsten",
+    "deepseekReasoningLow": "Niedrig",
+    "deepseekReasoningLowDescription": "Denkt kurz nach; stabiler als aus, schneller als hoch",
+    "deepseekReasoningHigh": "Hoch",
+    "deepseekReasoningHighDescription": "Denkt vor der Antwort nach; die Voreinstellung für den Alltag",
+    "deepseekReasoningMax": "Maximal",
+    "deepseekReasoningMaxDescription": "Denkt länger nach; stabiler bei schweren Problemen, aber langsamer und teurer",
+    "deepseekSandboxReadOnly": "Nur lesen",
+    "deepseekSandboxReadOnlyDescription": "Läuft mit einer Nur-Lese-Richtlinie; wechsle den Zugriff, wenn geschrieben werden muss. Auf manchen Plattformen wird das nur teilweise durchgesetzt.",
+    "deepseekSandboxWorkspaceWrite": "Workspace-Schreibzugriff",
+    "deepseekSandboxWorkspaceWriteDescription": "Schreibvorgänge sollen im Workspace der Sitzung und in den temporären Systemverzeichnissen bleiben; ein Aufruf außerhalb davon fragt einmalig nach. Auf manchen Plattformen wird das nur teilweise durchgesetzt.",
+    "deepseekSandboxFullAccess": "Vollzugriff (keine Sandbox)",
+    "deepseekSandboxFullAccessDescription": "Wendet überhaupt keine Dateibeschränkungen an. Wähle das nur, wenn du die Folgen kennst.",
+    "deepseekPermissionAllowOnce": "Einmal erlauben",
+    "deepseekPermissionRejectOnce": "Ablehnen"
+  },
   "SettingsPages": {
     "agentsLoading": "Agent-Einstellungen werden geladen...",
     "skillPacksLoading": "Skill-Pakete werden geladen…"

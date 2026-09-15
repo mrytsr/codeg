@@ -441,6 +441,17 @@ pub enum AcpEvent {
         /// (resolved against the option's own value list), not raw ids.
         requested: String,
         actual: String,
+        /// The same two, as the RAW value ids.
+        ///
+        /// Carried beside the labels because a client that localises an agent's
+        /// hardcoded vocabulary (see `lib/agent-label-vocabulary.ts`) keys on
+        /// the id, and the labels above have already been resolved away from
+        /// it. It cannot recover them by matching the label back against the
+        /// live option list either: this event is emitted BEFORE the
+        /// `SessionConfigOptions` carrying the value the agent adopted, so that
+        /// list is still the pre-update one.
+        requested_value: String,
+        actual_value: String,
     },
     /// Initial selector payloads (modes/config options) have been emitted
     SelectorsReady,

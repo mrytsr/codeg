@@ -1591,6 +1591,33 @@
     "customAgentNotLaunchable": "لا يمكن تشغيل هذا الوكيل هنا: {reason}",
     "providerSourceActiveHint": "يستخدم هذا الوكيل كتالوج مزودي النماذج المشترك، وإعدادات النموذج الأصلية مخفية."
   },
+  "AgentVocabulary": {
+    "deepseekModeDefault": "عادي",
+    "deepseekModeDefaultDescription": "يقرأ الملفات ويعدّلها وينفّذ الأوامر مباشرة لإنجاز المهمة",
+    "deepseekModePlan": "خطة",
+    "deepseekModePlanDescription": "يبحث أولاً ثم يقدّم خطة كاملة لتؤكّدها قبل أي تعديل. هذا توجيه للنموذج فقط؛ الحدّ الفعلي يبقى وفق الوصول إلى الملفات.",
+    "deepseekOptionModel": "النموذج",
+    "deepseekOptionReasoning": "مستوى الاستدلال",
+    "deepseekOptionReasoningDescription": "كلما ارتفع كان أبطأ وأكثر استهلاكاً للرموز، لكنه أثبت في المسائل الصعبة",
+    "deepseekOptionSandbox": "الوصول إلى الملفات",
+    "deepseekOptionSandboxDescription": "تتشارك الأوامر وأدوات الملفات هذا الحدّ نفسه",
+    "deepseekReasoningOff": "إيقاف",
+    "deepseekReasoningOffDescription": "يجيب مباشرة دون استدلال؛ الأسرع",
+    "deepseekReasoningLow": "منخفض",
+    "deepseekReasoningLowDescription": "يستدل قليلاً؛ أثبت من الإيقاف وأسرع من المرتفع",
+    "deepseekReasoningHigh": "مرتفع",
+    "deepseekReasoningHighDescription": "يستدل ثم يجيب؛ الخيار الافتراضي للبرمجة اليومية",
+    "deepseekReasoningMax": "الأقصى",
+    "deepseekReasoningMaxDescription": "يستدل لفترة أطول؛ أثبت في المسائل الصعبة لكنه أبطأ وأكثر استهلاكاً للرموز",
+    "deepseekSandboxReadOnly": "قراءة فقط",
+    "deepseekSandboxReadOnlyDescription": "ينفّذ وفق سياسة القراءة فقط؛ بدّل الصلاحية عند الحاجة إلى الكتابة. التطبيق جزئي على بعض المنصات.",
+    "deepseekSandboxWorkspaceWrite": "الكتابة في مساحة العمل",
+    "deepseekSandboxWorkspaceWriteDescription": "يُفترض أن تبقى عمليات الكتابة داخل مساحة عمل الجلسة والمجلدات المؤقتة للنظام؛ وأي استدعاء خارجها يطلب إذناً لمرة واحدة. التطبيق جزئي على بعض المنصات.",
+    "deepseekSandboxFullAccess": "وصول كامل (بدون عزل)",
+    "deepseekSandboxFullAccessDescription": "لا يطبّق أي قيود على الملفات. اخترْه فقط إذا كنت تدرك العواقب.",
+    "deepseekPermissionAllowOnce": "السماح مرة واحدة",
+    "deepseekPermissionRejectOnce": "رفض"
+  },
   "SettingsPages": {
     "agentsLoading": "جارٍ تحميل إعدادات الوكلاء...",
     "skillPacksLoading": "جارٍ تحميل حزم المهارات…"

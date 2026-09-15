@@ -89,6 +89,10 @@ import {
 import { contentBlocksFromUserMessage } from "@/lib/user-message-blocks"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
+  localizeConfigOptionLabel,
+  localizeConfigValueLabel,
+} from "@/lib/agent-label-vocabulary"
+import {
   CONNECTION_IDLE_TIMEOUT_MS,
   CONNECTION_KEEPALIVE_INTERVAL_MS,
   IDLE_SWEEP_INTERVAL_MS,
@@ -3021,6 +3025,9 @@ function isAlertedError(error: unknown): error is AlertedError {
 
 export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   const t = useTranslations("Folder.chat.acpConnections")
+  // Separate namespace: the agent-supplied vocabulary this provider has to
+  // re-label lives under its own catalogue (see `lib/agent-label-vocabulary`).
+  const vocabularyT = useTranslations("AgentVocabulary")
   const tChat = useTranslations("Folder.chat")
   const { pushAlert } = useAlertContext()
   const { activeFolder: folder } = useActiveFolder()
@@ -3652,18 +3659,44 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   const reportConfigOptionVerdict = useCallback(
     (
       agentType: AgentType | undefined,
-      rejection: { option_name: string; requested: string; actual: string }
+      rejection: {
+        config_id: string
+        option_name: string
+        requested: string
+        actual: string
+        requested_value?: string
+        actual_value?: string
+      }
     ) => {
+      // The composer's dropdown is localised, so this notice has to name the
+      // same things the user was looking at — otherwise an English selector
+      // produces a Chinese "your pick was adjusted" toast. The event carries
+      // the raw ids beside the labels precisely so this lookup is possible;
+      // the labels remain the fallback for any id we do not own.
+      const option = localizeConfigOptionLabel(
+        agentType,
+        rejection.config_id,
+        rejection.option_name,
+        vocabularyT
+      )
+      const value = (id: string | undefined, fallback: string) =>
+        localizeConfigValueLabel(
+          agentType,
+          rejection.config_id,
+          id,
+          fallback,
+          vocabularyT
+        )
       toast.warning(
         t("configOptionAdjusted", {
           agent: agentType ? getAgentLabel(agentType) : "",
-          option: rejection.option_name,
-          requested: rejection.requested,
-          actual: rejection.actual,
+          option,
+          requested: value(rejection.requested_value, rejection.requested),
+          actual: value(rejection.actual_value, rejection.actual),
         })
       )
     },
-    [t]
+    [t, vocabularyT]
   )
 
   const handleMappedEvent = useCallback(
