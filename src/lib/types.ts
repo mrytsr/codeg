@@ -1462,6 +1462,13 @@ export interface SessionConfigOptionInfo {
   description?: string | null
   category?: string | null
   kind: SessionConfigKindInfo
+  /** The value the AGENT recommends (JetBrains AIR `recommendedValue`; codex-acp
+   *  1.11.0+ names its default model and the current model's default reasoning
+   *  effort, claude-agent-acp 0.76.0+ the same pair for model and effort).
+   *  A hint only — `current_value` still says what is selected, and a
+   *  recommendation matching no option simply marks nothing. Absent for agents
+   *  that publish none, and on payloads predating the field. */
+  recommended_value?: string | null
 }
 
 export interface AgentOptionsSnapshot {

@@ -1465,7 +1465,11 @@
       "ready": "O adaptador {adapterCmd} está instalado — é ele que o Codeg inicia. Ele traz o próprio runtime, então a {nativeLabel} não é necessária; se instalá-la depois, as duas coexistem e compartilham {configDir}."
     },
     "cline": {
-      "configDescription": "Configure o provedor de API e as credenciais do Cline. As configurações são salvas em ~/.cline/data/."
+      "configDescription": "Configure o provedor de API e as credenciais do Cline. As configurações são salvas em ~/.cline/data/.",
+      "signInGroup": "Entrar com o Cline",
+      "byoGroup": "Use seu próprio provedor",
+      "externalGroup": "Configurado fora do codeg",
+      "signInHint": "O Cline guarda esta credencial por conta própria. Execute o comando abaixo em um terminal para entrar: ele mostra um código e abre uma página do navegador para confirmá-lo."
     },
     "opencodePlugins": {
       "title": "Plugins do OpenCode",
@@ -3058,6 +3062,7 @@
         "searchModel": "Buscar modelos...",
         "searchModelAria": "Buscar modelos",
         "modelListLabel": "Modelos",
+        "recommendedBadge": "Recomendado",
         "noModels": "Nenhum modelo encontrado",
         "cancel": "Cancelar",
         "send": "Enviar",
@@ -3328,6 +3333,7 @@
       "messageList": {
         "attachedResources": "Recursos anexados",
         "loading": "Carregando...",
+        "loadBackgroundActivity": "Carregar atividade em segundo plano",
         "loadEarlier": "Carregar mensagens anteriores",
         "loadingEarlier": "Carregando mensagens anteriores…",
         "error": "Erro: {message}",

@@ -2194,6 +2194,11 @@ pub async fn spawn_agent_connection(
     // installer. The receiver is returned to `spawn_agent`, which holds the
     // per-session dedup lock until this rx fires (or times out / aborts).
     let session_started_rx = initial_state.install_session_started_signal();
+    // Record what this launch's environment freezes before the state is shared:
+    // the emit path and the preference replay both read it, and both run after
+    // this point.
+    initial_state.env_pinned_config_option_ids =
+        env_pinned_config_option_ids(agent_type, &runtime_env);
 
     let session_state = Arc::new(RwLock::new(initial_state));
 
@@ -2977,7 +2982,38 @@ fn map_session_config_select_group(
     }
 }
 
+/// The `recommendedValue` an agent attached to ONE config option, out of its
+/// `_meta.jetbrains.air` envelope.
+///
+/// Envelope validation mirrors [`air_session_failure`] (integer `version >= 1`,
+/// the same check the adapters run on codeg's own advertisement), so a
+/// future-incompatible envelope yields `None` rather than a half-understood
+/// hint. The payload must be a non-blank string: codex-acp only ever writes a
+/// model id or a reasoning-effort id there, and anything else is not something
+/// a select's values could match.
+///
+/// Deliberately NOT validated against the option's own value list. The frontend
+/// marks the recommendation by equality, so a stale or unknown value marks
+/// nothing — re-deriving the membership rule here would only duplicate the
+/// adapter's own filter and could reject a shape (e.g. a grouped select) it
+/// grows later.
+fn air_recommended_value(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<String> {
+    let air = meta?.get("jetbrains")?.get("air")?;
+    let version = air.get("version").and_then(serde_json::Value::as_i64)?;
+    if version < 1 {
+        return None;
+    }
+    let value = air
+        .get("recommendedValue")
+        .and_then(serde_json::Value::as_str)?
+        .trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
 fn map_session_config_option(option: &SessionConfigOption) -> Option<SessionConfigOptionInfo> {
+    let recommended_value = air_recommended_value(option.meta.as_ref());
     match &option.kind {
         SessionConfigKind::Select(select) => {
             let (flat_options, groups) = match &select.options {
@@ -3013,8 +3049,12 @@ fn map_session_config_option(option: &SessionConfigOption) -> Option<SessionConf
                     options: flat_options,
                     groups,
                 }),
+                recommended_value,
             })
         }
+        // A toggle has no value list to recommend INTO — its two states are
+        // already spelled out by `current_value` — so the hint is dropped here
+        // rather than carried to a frontend with nowhere to put it.
         SessionConfigKind::Boolean(toggle) => Some(SessionConfigOptionInfo {
             id: option.id.to_string(),
             name: option.name.clone(),
@@ -3023,6 +3063,7 @@ fn map_session_config_option(option: &SessionConfigOption) -> Option<SessionConf
             kind: SessionConfigKindInfo::Boolean(SessionConfigBooleanInfo {
                 current_value: toggle.current_value,
             }),
+            recommended_value: None,
         }),
         _ => None,
     }
@@ -3083,16 +3124,70 @@ fn map_session_config_options(
         .collect()
 }
 
+/// Config-option ids a launch carrying `runtime_env` has pinned, so the agent
+/// will reject any attempt to change them (see
+/// [`SessionState::env_pinned_config_option_ids`]).
+///
+/// Only cline has one today: its `provider` selector is hard-refused whenever
+/// `CLINE_PROVIDER` is exported, which codeg does for every bring-your-own
+/// provider. The check is on the variable codeg actually ships, not on the
+/// configured provider id, because the pin is what the agent tests.
+fn env_pinned_config_option_ids(
+    agent_type: AgentType,
+    runtime_env: &BTreeMap<String, String>,
+) -> Vec<String> {
+    if agent_type != AgentType::Cline {
+        return Vec::new();
+    }
+    // Emptiness is judged the way the agent judges it. cline's guard is a bare
+    // `if (process.env.CLINE_PROVIDER)`, so only the empty string is falsy —
+    // whitespace is a pin, and `buildConfig`'s `?? ` would go on to use it
+    // verbatim as the provider id. Trimming first would leave the selector on
+    // screen for a session that refuses every choice in it.
+    let pinned = runtime_env
+        .get("CLINE_PROVIDER")
+        .is_some_and(|value| !value.is_empty());
+    if pinned {
+        vec![CLINE_PROVIDER_CONFIG_OPTION_ID.to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
+/// Cline's provider selector id — the one `CLINE_PROVIDER` freezes.
+const CLINE_PROVIDER_CONFIG_OPTION_ID: &str = "provider";
+
+/// The advertised options minus the ones this launch pinned through the
+/// environment. Applied on the way out so all three producers of a
+/// `SessionConfigOptions` event share one rule.
+fn visible_config_options(
+    pinned: &[String],
+    config_options: Vec<SessionConfigOption>,
+) -> Vec<SessionConfigOption> {
+    if pinned.is_empty() {
+        return config_options;
+    }
+    config_options
+        .into_iter()
+        .filter(|option| !pinned.iter().any(|id| *id == option.id.to_string()))
+        .collect()
+}
+
 async fn emit_session_config_options_values(
     state: &Arc<RwLock<SessionState>>,
     emitter: &EventEmitter,
     config_options: Vec<SessionConfigOption>,
 ) {
+    // Drop what this launch froze BEFORE mapping, so every producer of this
+    // event — establishment, the answer to a set, and the agent's own
+    // `config_option_update` push — is filtered by one rule.
+    let pinned = state.read().await.env_pinned_config_option_ids.clone();
+    let visible = visible_config_options(&pinned, config_options);
     emit_with_state(
         state,
         emitter,
         AcpEvent::SessionConfigOptions {
-            config_options: map_session_config_options(&config_options),
+            config_options: map_session_config_options(&visible),
         },
     )
     .await;
@@ -3294,6 +3389,9 @@ fn build_grok_effort_option(
             options,
             groups: Vec::new(),
         }),
+        // Grok's per-model default IS `current_value` here, so a recommendation
+        // would only repeat the checkmark.
+        recommended_value: None,
     })
 }
 
@@ -3390,6 +3488,8 @@ fn synthesize_grok_config_options(
                 options: model_opts,
                 groups: Vec::new(),
             }),
+            // `x.ai/sessionConfig` names no default beyond `selected`.
+            recommended_value: None,
         });
     }
     // Effort selector. With per-model `specs` (parsed from the response's
@@ -3417,6 +3517,7 @@ fn synthesize_grok_config_options(
                 options: effort_opts,
                 groups: Vec::new(),
             }),
+            recommended_value: None,
         });
     }
     if result.is_empty() {
@@ -4214,13 +4315,49 @@ fn build_client_capabilities(
     // ships". Revisit when the draft lands and the announcement carries enough
     // to rebuild the capsule — a parent tool-use id, or the child tool calls
     // arriving with one codeg has seen.
+    //
+    // "recommendedValue" is the last AIR capability, and codeg takes it from
+    // BOTH speakers — claude-agent-acp 0.76.0 and codex-acp 1.11.0 each
+    // implement it, so the "advertise nothing an agent hasn't built" rule is
+    // satisfied on both sides. With it, `session/new`'s `model` and
+    // `effort`/`reasoning_effort` options each gain
+    // `_meta.jetbrains.air = {version: 1, recommendedValue: <value id>}`, read
+    // by [`air_recommended_value`] and rendered as a "recommended" marker
+    // beside the matching row.
+    //
+    // It is inert without the advertisement (live runs against both adapters
+    // over stdio, the capability withheld and then sent: WITHOUT it every
+    // option's `_meta` is `null`, byte-identical to the prior pin; WITH it both
+    // options carry the block) and purely additive with it — `currentValue` is
+    // untouched, so nothing about what is SELECTED changes.
+    //
+    // The two adapters are worth it for different reasons, and both hold:
+    //
+    // * codex marks the model it calls `isDefault` and the CURRENT model's
+    //   `defaultReasoningEffort`, so the effort recommendation re-derives on a
+    //   model switch. That matters most where codeg's own persisted per-agent
+    //   preference pins an option: a user who once pinned
+    //   `reasoning_effort: max` otherwise has no signal that the model they
+    //   just switched to defaults somewhere else.
+    // * claude additionally DROPS the ambiguous `default` row from both
+    //   selectors, and codeg wants that row gone more than it wants the
+    //   marker: `current_model_id_from_opts` reads the model selector's
+    //   `current_value`, and that string is what `record_turn_end` stamps on
+    //   every journaled turn — on the `default` row it is the literal
+    //   `"default"`, a model id no consumer can resolve.
+    //
+    // See the claude entry in `registry.rs` (k) for the live capture of both
+    // shapes, the effort trade that drop accepts, and why the stale-`"default"`
+    // preference is healed on the frontend rather than here; and the codex
+    // entry (a) for the 1.11.0 wire trace.
     if matches!(agent_type, AgentType::ClaudeCode | AgentType::Codex) {
+        let capabilities = ["sessionFailure", "asyncTasks", "recommendedValue"];
         meta.insert(
             "jetbrains".to_string(),
             serde_json::json!({
                 "air": {
                     "version": 1,
-                    "capabilities": ["sessionFailure", "asyncTasks"],
+                    "capabilities": capabilities,
                 }
             }),
         );
@@ -7125,6 +7262,58 @@ fn config_option_already_holds(option: &SessionConfigOption, value: &str) -> boo
     }
 }
 
+/// Whether the option's OWN advertisement proves `value` is not selectable, so
+/// replaying a saved preference for it at connect is a guaranteed error.
+///
+/// This exists because a saved preference outlives the value it names.
+/// claude-agent-acp 0.76.0 is the case that forced it: once codeg advertises
+/// the AIR `recommendedValue` capability, the adapter REMOVES the `default` row
+/// from the model and effort selectors, and a user who had picked it keeps
+/// re-sending `"default"` on every connect forever — the option they would have
+/// to re-pick to overwrite it no longer exists. Nothing tells the user, so the
+/// preference cannot heal itself.
+///
+/// Decided from the agent's own answer, never from an agent id or a pinned
+/// version. That distinction is load-bearing: the registry pin only governs
+/// what codeg INSTALLS, while `resolve_npx_command` launches whatever
+/// `claude-agent-acp` is on PATH — so "this is the built-in Claude Code agent"
+/// says nothing about which release is actually running, and pruning on that
+/// assumption would silently discard a still-valid pick on an older adapter.
+///
+/// Deliberately narrow, in three ways:
+///
+/// * Only a `select`. A boolean takes both values by construction.
+/// * Only a NON-EMPTY value list. Some agents announce an empty
+///   `SessionConfigOptions` first and push the real one later (see
+///   `AcpManager::probe_agent_options`), and an option kind this build cannot
+///   decode also flattens to nothing — neither proves anything.
+/// * Only an option the agent ADVERTISED. An id that never appeared is left to
+///   the agent, exactly as before: codex answers `set_config_option` for ids it
+///   does not advertise (see the call site in
+///   [`apply_preferred_session_options`]).
+fn config_option_rejects_value(option: &SessionConfigOption, value: &str) -> bool {
+    let SessionConfigKind::Select(select) = &option.kind else {
+        return false;
+    };
+    // Grouped and ungrouped are one flat namespace here, the same way
+    // `config_option_rejection` reads them.
+    let mut advertised = match &select.options {
+        SessionConfigSelectOptions::Ungrouped(options) => {
+            options.iter().map(|o| o.value.to_string()).collect::<Vec<_>>()
+        }
+        SessionConfigSelectOptions::Grouped(groups) => groups
+            .iter()
+            .flat_map(|group| group.options.iter().map(|o| o.value.to_string()))
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    if advertised.is_empty() {
+        return false;
+    }
+    advertised.sort_unstable();
+    advertised.binary_search(&value.to_string()).is_err()
+}
+
 /// Whether an advertised option IS the agent's model selector. ACP reserves no
 /// id for it, so match either signal — the `category` every agent that has a
 /// model publishes it under (see [`current_model_id_from_opts`]) or the
@@ -7281,11 +7470,42 @@ async fn apply_preferred_session_options(
 
     let session_id = session.session_id().clone();
     let mut options = initial_config_options;
+    // Ids this launch must not replay a saved preference for. Two rules:
+    //
+    //   * what this launch's environment froze — a set can only fail, and it is
+    //     reachable, because the composer saves the pick BEFORE the set is
+    //     awaited, so anyone who clicked cline's provider dropdown while it was
+    //     still offered has one stored;
+    //   * cline's `provider` unconditionally, because the settings panel owns
+    //     it (it writes providers.json and decides the launch env). Pinning
+    //     alone is not enough: the preference saved during a BYO launch is
+    //     merely SKIPPED there, and would then be replayed on the next sign-in
+    //     launch — which is not pinned — switching the user's billing account
+    //     away from the one the panel shows. Switching accounts mid-session is
+    //     still allowed; it just does not outlive the session.
+    let (pinned, agent_type) = {
+        let guard = state.read().await;
+        (
+            guard.env_pinned_config_option_ids.clone(),
+            guard.agent_type,
+        )
+    };
+    let never_replayed = |config_id: &str| {
+        pinned.iter().any(|id| id == config_id)
+            || (agent_type == AgentType::Cline && config_id == CLINE_PROVIDER_CONFIG_OPTION_ID)
+    };
     // Model first — see `order_preferred_config_values`. Ordered once against
     // the INITIAL list: every later list is the same agent's answer to a set,
     // so the model selector cannot move between ids mid-replay.
     let ordered = order_preferred_config_values(&options, preferred_config_values);
     for (config_id, value_id) in ordered {
+        if never_replayed(config_id) {
+            tracing::info!(
+                "[ACP] skipping preferred config '{config_id}'='{value_id}' on connect: \
+                 codeg owns this option rather than the composer"
+            );
+            continue;
+        }
         // Skip the round-trip when the agent's current value already matches.
         // Note: codex-acp advertises "mode" as a config option (so the match
         // check below normally fires), but we still do NOT skip when a
@@ -7298,6 +7518,18 @@ async fn apply_preferred_session_options(
         let already_matches =
             advertised.is_some_and(|o| config_option_already_holds(o, value_id.as_str()));
         if already_matches {
+            continue;
+        }
+        // …and skip a value the option's own advertisement rules out. Sending
+        // it can only fail, and a saved preference for a value an agent
+        // retired would otherwise fail on EVERY connect for good — see
+        // `config_option_rejects_value` for why this is decided here, off the
+        // agent's answer, rather than from the agent id or the registry pin.
+        if advertised.is_some_and(|o| config_option_rejects_value(o, value_id.as_str())) {
+            tracing::info!(
+                "[ACP] skipping preferred config '{config_id}'='{value_id}' on connect: \
+                 the agent no longer offers that value"
+            );
             continue;
         }
         // Encode against what the agent advertised for this id. An id the agent
@@ -15142,6 +15374,16 @@ mod tests {
             // agent's background work is still alive, and the only one that can
             // stop it.
             //
+            // "recommendedValue" IS wanted too, and from BOTH
+            // (claude-agent-acp 0.76.0, codex-acp 1.11.0): it names each
+            // selector's recommended row, and on claude it additionally
+            // retires the ambiguous `default` row so the value codeg journals
+            // per turn is a real model id. Advertising a capability an agent
+            // has NOT implemented is how a future meaning gets claimed by
+            // accident — this one is safe only because both adapters now ship
+            // it, so it goes back to being per-agent the moment either pin
+            // moves backwards.
+            //
             // The other two stay out. "agentFileChangeReport"
             // (claude-agent-acp 0.69.0 / codex-acp 1.4.0) buys an extra model
             // round-trip per turn for a clamped, self-reported subset of what
@@ -15151,8 +15393,11 @@ mod tests {
             // rendering around, replacing it with an announcement that carries
             // no parent tool-use id to rebuild it from. See the reasoning at
             // the advertisement site before relaxing this.
-            let expected: Vec<serde_json::Value> =
-                vec!["sessionFailure".into(), "asyncTasks".into()];
+            let expected: Vec<serde_json::Value> = vec![
+                "sessionFailure".into(),
+                "asyncTasks".into(),
+                "recommendedValue".into(),
+            ];
             assert_eq!(
                 capabilities, &expected,
                 "{agent:?} advertises an unexpected AIR capability set"
@@ -18635,6 +18880,7 @@ mod tests {
                 options: Vec::new(),
                 groups: Vec::new(),
             }),
+            recommended_value: None,
         };
 
         // The model comes from the `model` selector, not from whichever
@@ -18678,6 +18924,7 @@ mod tests {
                     options: Vec::new(),
                     groups: Vec::new(),
                 }),
+                recommended_value: None,
             },
             SessionConfigOptionInfo {
                 id: "auto_approve".to_string(),
@@ -18687,6 +18934,7 @@ mod tests {
                 kind: SessionConfigKindInfo::Boolean(SessionConfigBooleanInfo {
                     current_value: true,
                 }),
+                recommended_value: None,
             },
         ];
 
@@ -18721,6 +18969,97 @@ mod tests {
         }
 
         assert!(current_config_option_values(&[]).is_empty());
+    }
+
+    /// codex-acp 1.11.0's `recommendedValue` has to survive the trip from the
+    /// wire to `SessionConfigOptionInfo`, and a malformed envelope has to be
+    /// dropped rather than half-read. The JSON below is the SHAPE captured off a
+    /// live 1.11.0 `session/new` with the capability advertised — verbatim
+    /// `_meta`, one option trimmed to two values.
+    #[test]
+    fn a_select_carries_the_agents_recommended_value_only_from_a_valid_air_envelope() {
+        let option = |meta: Option<serde_json::Value>| -> SessionConfigOption {
+            let mut raw = serde_json::json!({
+                "id": "model",
+                "name": "Model",
+                "category": "model",
+                "type": "select",
+                "currentValue": "gpt-5.5",
+                "options": [
+                    {"value": "gpt-6-astra", "name": "6 Astra"},
+                    {"value": "gpt-5.5", "name": "5.5"},
+                ],
+            });
+            if let Some(meta) = meta {
+                raw["_meta"] = meta;
+            }
+            serde_json::from_value(raw).expect("config option fixture")
+        };
+        let recommended = |meta: Option<serde_json::Value>| -> Option<String> {
+            map_session_config_option(&option(meta))
+                .expect("a select always maps")
+                .recommended_value
+        };
+
+        // The real envelope. Note it names a value OTHER than `currentValue` —
+        // that is the whole point: "recommended" and "selected" are different
+        // claims, and the hint must not be collapsed into the selection.
+        assert_eq!(
+            recommended(Some(serde_json::json!({
+                "jetbrains": {"air": {"version": 1, "recommendedValue": "gpt-6-astra"}}
+            }))),
+            Some("gpt-6-astra".to_string())
+        );
+
+        // Everything malformed reads as "no recommendation", never as a
+        // half-understood one.
+        for bad in [
+            // No `_meta` at all — every agent but codex 1.11.0+, and codex
+            // itself without the advertisement.
+            None,
+            // Version missing / below the floor / not an integer: the same
+            // gate `air_session_failure` applies, mirroring what the adapters
+            // run on codeg's own advertisement.
+            Some(serde_json::json!({
+                "jetbrains": {"air": {"recommendedValue": "gpt-6-astra"}}
+            })),
+            Some(serde_json::json!({
+                "jetbrains": {"air": {"version": 0, "recommendedValue": "gpt-6-astra"}}
+            })),
+            Some(serde_json::json!({
+                "jetbrains": {"air": {"version": "1", "recommendedValue": "gpt-6-astra"}}
+            })),
+            // Right key, wrong envelope (no `air` wrapper).
+            Some(serde_json::json!({
+                "jetbrains": {"recommendedValue": "gpt-6-astra"}
+            })),
+            // Non-string and blank payloads: nothing a select's values match.
+            Some(serde_json::json!({
+                "jetbrains": {"air": {"version": 1, "recommendedValue": ["gpt-6-astra"]}}
+            })),
+            Some(serde_json::json!({
+                "jetbrains": {"air": {"version": 1, "recommendedValue": "   "}}
+            })),
+        ] {
+            assert_eq!(recommended(bad.clone()), None, "unexpected read from {bad:?}");
+        }
+
+        // A toggle has no value list to recommend into, so the hint is dropped
+        // even when the envelope is valid.
+        let toggle: SessionConfigOption = serde_json::from_value(serde_json::json!({
+            "id": "auto_approve",
+            "name": "Auto-approve",
+            "type": "boolean",
+            "currentValue": true,
+            "_meta": {"jetbrains": {"air": {"version": 1, "recommendedValue": "true"}}},
+        }))
+        .expect("boolean option fixture");
+        assert_eq!(
+            map_session_config_option(&toggle)
+                .expect("a boolean always maps")
+                .recommended_value,
+            None
+        );
     }
 
     #[test]
@@ -19105,6 +19444,7 @@ mod tests {
                 ],
                 groups: vec![],
             }),
+            recommended_value: None,
         }]
     }
 
@@ -19172,6 +19512,7 @@ mod tests {
             kind: SessionConfigKindInfo::Boolean(SessionConfigBooleanInfo {
                 current_value: false,
             }),
+            recommended_value: None,
         }];
         assert!(config_option_rejection(&toggle, "auto_approve", "true").is_none());
     }
@@ -19208,6 +19549,97 @@ mod tests {
             }
             other => panic!("expected ConfigOptionRejected, got {other:?}"),
         }
+    }
+
+    /// The claude model selector, as a live adapter advertises it with and
+    /// without codeg's AIR `recommendedValue` opt-in: 0.76.0+ removes the
+    /// `default` row for a client that asks, every older build keeps it.
+    fn claude_model_option(offers_default: bool) -> SessionConfigOption {
+        let mut options = vec![serde_json::json!({"value": "opus[1m]", "name": "Opus 5"})];
+        if offers_default {
+            options.insert(
+                0,
+                serde_json::json!({"value": "default", "name": "Default (recommended)"}),
+            );
+        }
+        serde_json::from_value(serde_json::json!({
+            "id": "model",
+            "name": "Model",
+            "type": "select",
+            "currentValue": "opus[1m]",
+            "options": options,
+        }))
+        .expect("parses")
+    }
+
+    #[test]
+    fn config_option_rejects_a_value_the_select_no_longer_offers() {
+        // The `default` pick a user saved before codeg advertised
+        // `recommendedValue`. Replaying it can only error, and it would do so
+        // on every connect for good: the row that would let the user overwrite
+        // the preference is exactly the one that went away.
+        let retired = claude_model_option(false);
+        assert!(config_option_rejects_value(&retired, "default"));
+        assert!(!config_option_rejects_value(&retired, "opus[1m]"));
+    }
+
+    #[test]
+    fn config_option_keeps_a_value_an_older_adapter_still_offers() {
+        // The registry pin only governs what codeg INSTALLS —
+        // `resolve_npx_command` launches whatever `claude-agent-acp` is on
+        // PATH. So the same built-in agent id may be speaking to a pre-0.76
+        // adapter, where `default` is still a real row and dropping the
+        // preference would silently change the user's model.
+        assert!(!config_option_rejects_value(
+            &claude_model_option(true),
+            "default"
+        ));
+    }
+
+    #[test]
+    fn config_option_rejects_nothing_without_a_value_list_to_judge_by() {
+        // An agent that announces an empty `SessionConfigOptions` first and
+        // pushes the real one later (see `AcpManager::probe_agent_options`)
+        // has proven nothing, and a boolean takes both values by construction.
+        // Both must fall through to "send it and let the agent decide".
+        let empty: SessionConfigOption = serde_json::from_value(serde_json::json!({
+            "id": "model",
+            "name": "Model",
+            "type": "select",
+            "currentValue": "",
+            "options": [],
+        }))
+        .expect("parses");
+        assert!(!config_option_rejects_value(&empty, "opus[1m]"));
+
+        let toggle: SessionConfigOption = serde_json::from_value(serde_json::json!({
+            "id": "auto_approve",
+            "name": "Auto-approve tools",
+            "type": "boolean",
+            "currentValue": false,
+        }))
+        .expect("parses");
+        assert!(!config_option_rejects_value(&toggle, "true"));
+    }
+
+    #[test]
+    fn config_option_rejects_value_reads_a_grouped_select() {
+        // Groups are one flat value namespace, the same way
+        // `config_option_rejection` reads them.
+        let grouped: SessionConfigOption = serde_json::from_value(serde_json::json!({
+            "id": "model",
+            "name": "Model",
+            "type": "select",
+            "currentValue": "openai/gpt-5",
+            "options": [{
+                "group": "openai",
+                "name": "OpenAI",
+                "options": [{"value": "openai/gpt-5", "name": "GPT-5"}]
+            }],
+        }))
+        .expect("parses");
+        assert!(!config_option_rejects_value(&grouped, "openai/gpt-5"));
+        assert!(config_option_rejects_value(&grouped, "openai/gpt-5-mini"));
     }
 
     #[test]
@@ -19405,6 +19837,7 @@ mod tests {
                 ],
                 groups: Vec::new(),
             }),
+            recommended_value: None,
         }]
     }
 
@@ -22160,6 +22593,82 @@ mod tests {
             AgentType::OpenCode,
             bg.as_object()
         ));
+    }
+
+    #[test]
+    fn a_pinned_cline_provider_is_read_off_the_variable_that_pins_it() {
+        let env = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+
+        // The BYO case: codeg exports the provider, so cline refuses every
+        // choice the selector offers.
+        assert_eq!(
+            env_pinned_config_option_ids(
+                AgentType::Cline,
+                &env(&[("CLINE_PROVIDER", "openai-compatible")])
+            ),
+            vec!["provider".to_string()]
+        );
+        // Sign-in: nothing is exported, the selector works, keep it.
+        assert!(
+            env_pinned_config_option_ids(AgentType::Cline, &env(&[("CLINE_MODEL", "gpt-4o")]))
+                .is_empty()
+        );
+        // Emptiness follows the agent's own test, a bare `if (env.CLINE_PROVIDER)`:
+        // the empty string is falsy and leaves the selector usable…
+        assert!(
+            env_pinned_config_option_ids(AgentType::Cline, &env(&[("CLINE_PROVIDER", "")]))
+                .is_empty()
+        );
+        // …but whitespace is TRUTHY in JS, so cline refuses every choice and
+        // `buildConfig` uses "  " verbatim as the provider id. Trimming here
+        // would leave a dead dropdown on screen.
+        assert_eq!(
+            env_pinned_config_option_ids(AgentType::Cline, &env(&[("CLINE_PROVIDER", "  ")])),
+            vec!["provider".to_string()]
+        );
+        // No other agent freezes a selector this way.
+        assert!(env_pinned_config_option_ids(
+            AgentType::Codex,
+            &env(&[("CLINE_PROVIDER", "openai-compatible")])
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn a_pinned_option_is_withheld_from_the_composer() {
+        let options = || {
+            vec![
+                SessionConfigOption::boolean(
+                    SessionConfigId::new("auto_approve"),
+                    "Auto-approve tools",
+                    false,
+                ),
+                SessionConfigOption::boolean(SessionConfigId::new("provider"), "Provider", false),
+            ]
+        };
+        let ids = |opts: Vec<SessionConfigOption>| -> Vec<String> {
+            opts.iter().map(|o| o.id.to_string()).collect()
+        };
+
+        assert_eq!(
+            ids(visible_config_options(
+                &["provider".to_string()],
+                options()
+            )),
+            vec!["auto_approve".to_string()],
+            "a dropdown whose every choice errors must not reach the composer"
+        );
+        // Nothing pinned → the agent's list travels untouched, which is every
+        // agent but cline-with-a-BYO-provider.
+        assert_eq!(
+            ids(visible_config_options(&[], options())),
+            vec!["auto_approve".to_string(), "provider".to_string()]
+        );
     }
 
     struct TestConversationDepthLookup;

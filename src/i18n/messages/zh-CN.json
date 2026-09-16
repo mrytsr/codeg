@@ -1465,7 +1465,11 @@
       "ready": "适配器 {adapterCmd} 已安装 —— Codeg 启动的就是它。它自带运行时，所以不需要另外安装 {nativeLabel}；即便以后你装了，两者也能共存并共用 {configDir}。"
     },
     "cline": {
-      "configDescription": "配置 Cline API 提供商和凭证。设置将保存到 ~/.cline/data/。"
+      "configDescription": "配置 Cline API 提供商和凭证。设置将保存到 ~/.cline/data/。",
+      "signInGroup": "使用 Cline 账号登录",
+      "byoGroup": "自带供应商",
+      "externalGroup": "在 codeg 之外配置的",
+      "signInHint": "这类凭据由 cline 自己保管。在终端运行下面的命令登录——它会打印一个验证码，并打开浏览器页面让你确认。"
     },
     "opencodePlugins": {
       "title": "OpenCode 插件",
@@ -3060,6 +3064,7 @@
         "searchModel": "搜索模型...",
         "searchModelAria": "搜索模型",
         "modelListLabel": "模型",
+        "recommendedBadge": "推荐",
         "noModels": "未找到模型",
         "cancel": "取消",
         "send": "发送",
@@ -3328,6 +3333,7 @@
       "messageList": {
         "attachedResources": "附加资源",
         "loading": "加载中...",
+        "loadBackgroundActivity": "加载后台活动",
         "loadEarlier": "加载更早的消息",
         "loadingEarlier": "正在加载更早的消息…",
         "error": "错误：{message}",

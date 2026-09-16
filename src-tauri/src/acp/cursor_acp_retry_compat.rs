@@ -30,7 +30,15 @@ const CURSOR_AGENT_ID: &str = "cursor";
 
 /// Cursor agent-cli versions whose bundle was inspected and found to omit
 /// `enableAgentRetries` from the ACP `agentClient.run` options.
-const AFFECTED_VERSIONS: &[&str] = &["2026.09.02-c22c1a3"];
+///
+/// `2026.09.10-fd3934a` re-inspected: still affected, and the splice below
+/// still applies verbatim. Its ACP chunk (`dist-package/7214.index.js`) has
+/// zero `enableAgentRetries` occurrences, [`VULNERABLE_RUN_OPTIONS`] matches it
+/// exactly once — so `S`/`P` are unchanged — and the run request one statement
+/// above the call is still `I = new u.ConversationAction({action: {case:
+/// "userMessageAction", …}})`, which is what makes `I.action.case` in
+/// [`PATCHED_RUN_OPTIONS`] both in scope and correct.
+const AFFECTED_VERSIONS: &[&str] = &["2026.09.02-c22c1a3", "2026.09.10-fd3934a"];
 
 /// Cursor agent-cli versions whose bundle was inspected and found to already
 /// pass `enableAgentRetries` on the ACP path (upstream fixed it, or the code

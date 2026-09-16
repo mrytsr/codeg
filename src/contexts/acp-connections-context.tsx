@@ -63,6 +63,7 @@ import type {
   QuestionAnswer,
   PendingPlanApprovalState,
   PlanApprovalAnswer,
+  SessionConfigKindInfo,
   SessionConfigOptionInfo,
   SessionFailureRecord,
   SessionModeStateInfo,
@@ -1129,7 +1130,12 @@ function sameConfigOptions(
       left.id !== right.id ||
       left.name !== right.name ||
       left.description !== right.description ||
-      left.category !== right.category
+      left.category !== right.category ||
+      // Rendered (the "recommended" badge), so it has to be compared or a
+      // push that changes ONLY the recommendation is swallowed and the badge
+      // goes stale. codex publishes `reasoning_effort`'s recommendation as the
+      // CURRENT model's default, so it moves on its own schedule.
+      (left.recommended_value ?? null) !== (right.recommended_value ?? null)
     ) {
       return false
     }
@@ -1138,38 +1144,48 @@ function sameConfigOptions(
     const rightKind = right.kind
     if (leftKind.type !== rightKind.type) return false
 
-    if (leftKind.type === "select") {
+    // Every kind must compare its own `current_value`. Falling through as
+    // "equal" is how the agent's authoritative answer to a boolean toggle got
+    // swallowed (#709) — so an unrecognized kind reports *unequal* instead: a
+    // redundant re-render on a cold path is the cheap failure, a dropped state
+    // update is the expensive one.
+    if (leftKind.type === "boolean") {
       if (leftKind.current_value !== rightKind.current_value) return false
-      if (leftKind.options.length !== rightKind.options.length) return false
-      if (leftKind.groups.length !== rightKind.groups.length) return false
+      continue
+    }
 
-      for (let j = 0; j < leftKind.options.length; j += 1) {
-        const lo = leftKind.options[j]
-        const ro = rightKind.options[j]
+    if (leftKind.type !== "select") return false
+
+    if (leftKind.current_value !== rightKind.current_value) return false
+    if (leftKind.options.length !== rightKind.options.length) return false
+    if (leftKind.groups.length !== rightKind.groups.length) return false
+
+    for (let j = 0; j < leftKind.options.length; j += 1) {
+      const lo = leftKind.options[j]
+      const ro = rightKind.options[j]
+      if (
+        lo.value !== ro.value ||
+        lo.name !== ro.name ||
+        lo.description !== ro.description
+      ) {
+        return false
+      }
+    }
+
+    for (let j = 0; j < leftKind.groups.length; j += 1) {
+      const lg = leftKind.groups[j]
+      const rg = rightKind.groups[j]
+      if (lg.group !== rg.group || lg.name !== rg.name) return false
+      if (lg.options.length !== rg.options.length) return false
+      for (let k = 0; k < lg.options.length; k += 1) {
+        const lgo = lg.options[k]
+        const rgo = rg.options[k]
         if (
-          lo.value !== ro.value ||
-          lo.name !== ro.name ||
-          lo.description !== ro.description
+          lgo.value !== rgo.value ||
+          lgo.name !== rgo.name ||
+          lgo.description !== rgo.description
         ) {
           return false
-        }
-      }
-
-      for (let j = 0; j < leftKind.groups.length; j += 1) {
-        const lg = leftKind.groups[j]
-        const rg = rightKind.groups[j]
-        if (lg.group !== rg.group || lg.name !== rg.name) return false
-        if (lg.options.length !== rg.options.length) return false
-        for (let k = 0; k < lg.options.length; k += 1) {
-          const lgo = lg.options[k]
-          const rgo = rg.options[k]
-          if (
-            lgo.value !== rgo.value ||
-            lgo.name !== rgo.name ||
-            lgo.description !== rgo.description
-          ) {
-            return false
-          }
         }
       }
     }
@@ -1194,6 +1210,35 @@ function sameCommands(
     }
   }
   return true
+}
+
+/**
+ * The kind an optimistic `setConfigOption` lands on, or `null` when the pick
+ * changes nothing — or cannot be interpreted here, in which case the agent's
+ * own answer is left to settle it.
+ *
+ * Config values are opaque strings the whole way down (this store, the Tauri
+ * command, the web handler, the preference store); only the backend's wire
+ * encoder knows an option's kind decides the payload, turning `"true"` into a
+ * real JSON boolean. This is the mirror of that decode, and it is deliberately
+ * strict about the two values a toggle emits: guessing "off" for anything else
+ * would be a silent lie about whether the agent may run tools unasked.
+ */
+function nextConfigOptionKind(
+  kind: SessionConfigKindInfo,
+  valueId: string
+): SessionConfigKindInfo | null {
+  if (kind.type === "select") {
+    if (kind.current_value === valueId) return null
+    return { ...kind, current_value: valueId }
+  }
+  if (kind.type === "boolean") {
+    if (valueId !== "true" && valueId !== "false") return null
+    const nextValue = valueId === "true"
+    if (kind.current_value === nextValue) return null
+    return { ...kind, current_value: nextValue }
+  }
+  return null
 }
 
 function dedupeCommandsByName(
@@ -2467,17 +2512,10 @@ function connectionsReducer(
       const idx = options.findIndex((o) => o.id === action.configId)
       if (idx === -1) return state
       const opt = options[idx]
-      if (
-        opt.kind.type !== "select" ||
-        opt.kind.current_value === action.valueId
-      ) {
-        return state
-      }
+      const kind = nextConfigOptionKind(opt.kind, action.valueId)
+      if (!kind) return state
       const updated = [...options]
-      updated[idx] = {
-        ...opt,
-        kind: { ...opt.kind, current_value: action.valueId },
-      }
+      updated[idx] = { ...opt, kind }
       const next = new Map(state)
       next.set(action.contextKey, { ...conn, configOptions: updated })
       return next

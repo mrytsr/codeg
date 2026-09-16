@@ -1465,7 +1465,11 @@
       "ready": "轉接器 {adapterCmd} 已安裝 —— Codeg 啟動的就是它。它自帶執行環境，所以不需要另外安裝 {nativeLabel}；即使日後你安裝了，兩者也能並存並共用 {configDir}。"
     },
     "cline": {
-      "configDescription": "配置 Cline API 提供商和憑證。設定將儲存到 ~/.cline/data/。"
+      "configDescription": "配置 Cline API 提供商和憑證。設定將儲存到 ~/.cline/data/。",
+      "signInGroup": "使用 Cline 帳號登入",
+      "byoGroup": "自帶供應商",
+      "externalGroup": "在 codeg 之外設定的",
+      "signInHint": "這類憑證由 cline 自己保管。在終端機執行下面的指令登入——它會印出一組驗證碼，並開啟瀏覽器頁面讓你確認。"
     },
     "opencodePlugins": {
       "title": "OpenCode 外掛",
@@ -3058,6 +3062,7 @@
         "searchModel": "搜尋模型...",
         "searchModelAria": "搜尋模型",
         "modelListLabel": "模型",
+        "recommendedBadge": "推薦",
         "noModels": "找不到模型",
         "cancel": "取消",
         "send": "傳送",
@@ -3328,6 +3333,7 @@
       "messageList": {
         "attachedResources": "附加資源",
         "loading": "載入中...",
+        "loadBackgroundActivity": "載入背景活動",
         "loadEarlier": "載入更早的訊息",
         "loadingEarlier": "正在載入更早的訊息…",
         "error": "錯誤：{message}",

@@ -6412,12 +6412,12 @@ mod tests {
     use super::extract_context_window_used_tokens_from_token_count_info;
     use super::extract_response_item_user_image_blocks;
     use super::extract_turn_usage_from_codex_usage;
-    use super::codex_parent_thread_id;
     use super::completed_mcp_call;
     use super::serialize_preview;
     use super::truncate_str;
     use super::BudgetedSink;
-    use super::MCP_RESULT_FALLBACK_CAP;    use super::should_skip_duplicate_user_message;
+    use super::MCP_RESULT_FALLBACK_CAP;
+    use super::should_skip_duplicate_user_message;
     use super::strip_blocked_resource_mentions;
     use super::AgentParser;
     use super::CodexParser;
@@ -6425,7 +6425,16 @@ mod tests {
     use super::CODEX_PLAN_APPROVED_OUTPUT;
     use super::CODEX_SCRIPT_TOOL_NAME;
     use super::CODEX_SUBAGENT_LAUNCH_KEY;
+    use super::CODEX_SUBAGENT_STATE_KEY;
     use super::COLLAB_OP_KEY;
+    use super::is_encrypted_envelope;
+    use super::merge_codex_context_window_stats;
+    use super::merge_codex_total_usage_stats;
+    use super::native_team_wait_input;
+    use super::parse_codex_subagent_stats;
+    use super::redact_encrypted_args;
+    use super::resolve_codex_home_dir_from;
+    use super::trim_subagent_replay_prefix;
     use crate::models::{
         ContentBlock, MessageRole, MessageTurn, SessionStats, TurnRole, TurnUsage, UnifiedMessage,
     };

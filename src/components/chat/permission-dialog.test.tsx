@@ -74,6 +74,50 @@ describe("PermissionDialog", () => {
     expect(screen.getByRole("button", { name: "允许本次" })).toBeInTheDocument()
   })
 
+  // `bg-primary` is what the `default` Button variant contributes and the
+  // `outline` one does not, so it reads as "this is the emphasised button".
+  const isEmphasised = (name: string) =>
+    screen.getByRole("button", { name }).className.includes("bg-primary")
+
+  it("emphasises the approval on an ordinary ask", () => {
+    const permission: PendingPermission = {
+      request_id: "req-plain",
+      tool_call: { title: "ls", kind: "execute" },
+      options: baseOptions,
+    }
+    renderWithIntl(
+      <PermissionDialog permission={permission} onRespond={() => {}} />
+    )
+    expect(isEmphasised("Allow once")).toBe(true)
+    expect(isEmphasised("Reject")).toBe(false)
+  })
+
+  it("emphasises the decline when claude marks the ask defaultToNo", () => {
+    // claude-agent-acp ≥0.77.0: "must not be approvable by a stray keystroke".
+    // codeg pre-selects nothing and binds no key, so the only thing left to
+    // give the decline is the accent colour the approve normally holds.
+    const permission: PendingPermission = {
+      request_id: "req-danger",
+      tool_call: {
+        title: "rm -rf build",
+        kind: "execute",
+        _meta: {
+          permission: {
+            version: 1,
+            title: "Run command?",
+            defaultToNo: true,
+          },
+        },
+      },
+      options: baseOptions,
+    }
+    renderWithIntl(
+      <PermissionDialog permission={permission} onRespond={() => {}} />
+    )
+    expect(isEmphasised("Reject")).toBe(true)
+    expect(isEmphasised("Allow once")).toBe(false)
+  })
+
   it("returns nothing when permission is null", () => {
     const { container } = renderWithIntl(
       <PermissionDialog permission={null} onRespond={() => {}} />

@@ -1465,7 +1465,11 @@
       "ready": "المحوّل {adapterCmd} مثبّت — وهو ما يشغّله Codeg. يأتي ببيئة تشغيل خاصة به، لذا لا حاجة إلى {nativeLabel}؛ وإن ثبّتها لاحقاً فالاثنان يتعايشان ويتشاركان {configDir}."
     },
     "cline": {
-      "configDescription": "تكوين مزود واجهة برمجة التطبيقات وبيانات اعتماد Cline. يتم حفظ الإعدادات في ~/.cline/data/."
+      "configDescription": "تكوين مزود واجهة برمجة التطبيقات وبيانات اعتماد Cline. يتم حفظ الإعدادات في ~/.cline/data/.",
+      "signInGroup": "تسجيل الدخول باستخدام Cline",
+      "byoGroup": "استخدم مزوّدك الخاص",
+      "externalGroup": "مُهيّأ خارج codeg",
+      "signInHint": "يحتفظ Cline بهذه البيانات بنفسه. شغّل الأمر أدناه في الطرفية لتسجيل الدخول — سيعرض رمزًا ويفتح صفحة في المتصفح لتأكيده."
     },
     "opencodePlugins": {
       "title": "إضافات OpenCode",
@@ -3058,6 +3062,7 @@
         "searchModel": "البحث عن النماذج...",
         "searchModelAria": "البحث عن النماذج",
         "modelListLabel": "النماذج",
+        "recommendedBadge": "موصى به",
         "noModels": "لم يتم العثور على نماذج",
         "cancel": "إلغاء",
         "send": "إرسال",
@@ -3328,6 +3333,7 @@
       "messageList": {
         "attachedResources": "الموارد المرفقة",
         "loading": "جارٍ التحميل...",
+        "loadBackgroundActivity": "تحميل نشاط الخلفية",
         "loadEarlier": "تحميل الرسائل السابقة",
         "loadingEarlier": "جارٍ تحميل الرسائل السابقة…",
         "error": "خطأ: {message}",

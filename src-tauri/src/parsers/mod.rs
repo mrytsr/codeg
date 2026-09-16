@@ -94,11 +94,21 @@ pub fn external_transcript_sources() -> Vec<ExternalSource> {
             include_top: Some(&["tmp", "history", "projects.json"]),
         },
         ExternalSource {
+            // cline 3.x keeps transcripts in `sessions/` and indexes them in
+            // the live SQLite store `db/sessions.db`; `state/` + `tasks/` are
+            // the pre-3.x layout, still read by the parser. Everything else
+            // under the same base dir is credentials and machine state —
+            // `secrets.json`, `settings/`, `cache/`, `locks/` — so the
+            // allowlist is what keeps a backup from carrying API keys.
+            //
+            // `sqlite: true` because of `db/`: archiving a live store as plain
+            // files would pack its main file next to a `-wal` written at
+            // another moment, which is a corrupt store on restore.
             agent: "cline",
             root: cline::cline_data_dir(),
             is_file: false,
-            sqlite: false,
-            include_top: None,
+            sqlite: true,
+            include_top: Some(&["sessions", "db", "state", "tasks"]),
         },
         ExternalSource {
             agent: "opencode",

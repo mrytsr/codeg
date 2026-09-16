@@ -101,7 +101,7 @@ fn is_path_spec(spec: &str) -> bool {
 
 /// The spec opencode uses as its package-directory KEY.
 ///
-/// Mirrors `resolvePluginTarget` in opencode 1.18.30: a bare package name
+/// Mirrors `resolvePluginTarget` in opencode 1.18.31: a bare package name
 /// becomes `<name>@latest`, anything already carrying a version or tag is used
 /// verbatim. Getting this wrong does not fail loudly — it just points codeg at
 /// a directory opencode will never look in.
@@ -113,7 +113,7 @@ pub(crate) fn effective_spec(declared_spec: &str, name: &str) -> String {
     }
 }
 
-/// Mirrors `Npm.sanitize` in opencode 1.18.30: on Windows the characters that
+/// Mirrors `Npm.sanitize` in opencode 1.18.31: on Windows the characters that
 /// cannot appear in a path become `_`. A deliberate no-op everywhere else —
 /// the directory name has to match opencode's byte for byte, and opencode
 /// gates this on `process.platform === "win32"`.
@@ -133,7 +133,7 @@ pub(crate) fn sanitize_spec(spec: &str) -> String {
 }
 
 /// `<cache>/packages/<sanitize(effective_spec)>` — the per-package install root
-/// opencode 1.18.30 uses (`Npm.add`'s `directory()`).
+/// opencode 1.18.31 uses (`Npm.add`'s `directory()`).
 pub(crate) fn plugin_package_dir(cache_dir: &Path, effective_spec: &str) -> PathBuf {
     cache_dir
         .join("packages")

@@ -1465,7 +1465,11 @@
       "ready": "El adaptador {adapterCmd} está instalado: es lo que Codeg ejecuta. Incluye su propio runtime, así que la {nativeLabel} no es necesaria; si la instalas después, ambas conviven y comparten {configDir}."
     },
     "cline": {
-      "configDescription": "Configure el proveedor de API y las credenciales de Cline. La configuración se guarda en ~/.cline/data/."
+      "configDescription": "Configure el proveedor de API y las credenciales de Cline. La configuración se guarda en ~/.cline/data/.",
+      "signInGroup": "Iniciar sesión con Cline",
+      "byoGroup": "Usa tu propio proveedor",
+      "externalGroup": "Configurado fuera de codeg",
+      "signInHint": "Cline guarda esta credencial por sí mismo. Ejecuta el comando de abajo en una terminal para iniciar sesión: muestra un código y abre una página del navegador para confirmarlo."
     },
     "opencodePlugins": {
       "title": "Plugins de OpenCode",
@@ -3058,6 +3062,7 @@
         "searchModel": "Buscar modelos...",
         "searchModelAria": "Buscar modelos",
         "modelListLabel": "Modelos",
+        "recommendedBadge": "Recomendado",
         "noModels": "No se encontraron modelos",
         "cancel": "Cancelar",
         "send": "Enviar",
@@ -3328,6 +3333,7 @@
       "messageList": {
         "attachedResources": "Recursos adjuntos",
         "loading": "Cargando...",
+        "loadBackgroundActivity": "Cargar actividad en segundo plano",
         "loadEarlier": "Cargar mensajes anteriores",
         "loadingEarlier": "Cargando mensajes anteriores…",
         "error": "Error del chat: {message}",

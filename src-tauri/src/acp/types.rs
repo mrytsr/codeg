@@ -931,6 +931,17 @@ pub struct SessionConfigOptionInfo {
     pub description: Option<String>,
     pub category: Option<String>,
     pub kind: SessionConfigKindInfo,
+    /// The value the AGENT recommends for this option, when it named one —
+    /// JetBrains AIR's `recommendedValue` (codex-acp 1.11.0+, gated on codeg
+    /// advertising the capability; see `build_client_capabilities`). It is a
+    /// hint, never an instruction: `current_value` still decides what is
+    /// selected, and a recommendation that matches nothing in the option list
+    /// simply marks nothing.
+    ///
+    /// `#[serde(default)]` so snapshots written before this field existed still
+    /// deserialize.
+    #[serde(default)]
+    pub recommended_value: Option<String>,
 }
 
 /// What Grok says about ONE of its models, parsed from a session response's

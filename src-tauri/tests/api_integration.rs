@@ -427,7 +427,6 @@ async fn get_folder_conversation_accepts_turn_window_params() {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-D
 // codeg-mcp service status
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -501,7 +500,6 @@ async fn deepseek_model_catalog_is_readable_and_shaped_for_the_panel() {
         .await;
     assert_eq!(resp.status_code(), 200);
     let body: Value = resp.json();
-D
     // camelCase on the wire, and every field the panel branches on is present
     // — a missing document is reported in-band, never as an error status.
     assert!(body["path"].is_string(), "got {body}");

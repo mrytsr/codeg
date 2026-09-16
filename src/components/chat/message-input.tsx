@@ -1699,6 +1699,7 @@ export function MessageInput({
           currentValue: kind.current_value,
           currentLabel: current?.name ?? kind.current_value,
           groups,
+          recommendedValue: option.recommended_value,
           onSelect: (value) => onConfigOptionChange?.(option.id, value),
           ...(searchable && {
             search: {
@@ -2119,6 +2120,7 @@ export function MessageInput({
                             <SessionSelectorsPanel
                               settings={collapsedSettings}
                               settingsLabel={t("agentSettings")}
+                              recommendedLabel={t("recommendedBadge")}
                               onAfterSelect={() =>
                                 setCollapsedSelectorsOpen(false)
                               }

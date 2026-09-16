@@ -1465,7 +1465,11 @@
       "ready": "Adapter {adapterCmd} is installed — that is what Codeg launches. It ships its own runtime, so the {nativeLabel} is not required; install it later and the two coexist, sharing {configDir}."
     },
     "cline": {
-      "configDescription": "Configure Cline API provider and credentials. Settings are saved to ~/.cline/data/."
+      "configDescription": "Configure Cline API provider and credentials. Settings are saved to ~/.cline/data/.",
+      "signInGroup": "Sign in with Cline",
+      "byoGroup": "Bring your own provider",
+      "externalGroup": "Configured outside codeg",
+      "signInHint": "Cline holds this credential itself. Run the command below in a terminal to sign in — it prints a code and opens a browser page to confirm it."
     },
     "opencodePlugins": {
       "title": "OpenCode Plugins",
@@ -3060,6 +3064,7 @@
         "searchModel": "Search models...",
         "searchModelAria": "Search models",
         "modelListLabel": "Models",
+        "recommendedBadge": "Recommended",
         "noModels": "No models found",
         "cancel": "Cancel",
         "send": "Send",
@@ -3328,6 +3333,7 @@
       "messageList": {
         "attachedResources": "Attached resources",
         "loading": "Loading...",
+        "loadBackgroundActivity": "Load background activity",
         "loadEarlier": "Load earlier messages",
         "loadingEarlier": "Loading earlier messages…",
         "error": "Error: {message}",
