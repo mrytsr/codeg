@@ -1587,6 +1587,9 @@
     "customAgentSaved": "Saved {name}",
     "customAgentVersionProbeLabel": "Version probe command (optional)",
     "customAgentVersionProbeHint": "Command that prints the locally installed version. Left empty, codeg runs the agent command with --version.",
+    "customAgentModelEnvLabel": "Model Provider env names",
+    "customAgentModelEnvHint": "Optional JSON naming the env vars this agent reads for a shared Model Provider (base URL, API key, model). Agents codeg has a verified contract for (qwen-code, glm-acp-agent) need nothing here; declaring names for any other agent is what turns its Model Source option on.",
+    "customAgentModelEnvInvalid": "Invalid JSON — expected an object with optional \"baseUrl\", \"apiKey\" and \"model\" string keys.",
     "customAgentRemove": "Remove agent",
     "customAgentRemoveHint": "Deletes the agent definition. Existing conversations keep their history; the agent just can no longer be launched.",
     "customAgentIconLabel": "Icon (optional)",
@@ -5973,7 +5976,8 @@
     "removeTerminalCard": "Remove terminal card",
     "terminalNoDirectory": "This card has no working directory",
     "confirmDeleteTerminals": "{count} running terminal(s) will be closed and their processes stopped.",
-    "confirmDeleteNotesAndTerminals": "{notes} note(s) you wrote will be permanently deleted, and {terminals} running terminal(s) will be stopped."  },
+    "confirmDeleteNotesAndTerminals": "{notes} note(s) you wrote will be permanently deleted, and {terminals} running terminal(s) will be stopped."
+  },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",
     "noProviders": "No providers",

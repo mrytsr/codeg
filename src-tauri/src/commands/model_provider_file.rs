@@ -77,7 +77,33 @@ pub fn model_provider_api_types(agent_type: &AgentType) -> Vec<ModelProviderApiT
         ],
         AgentType::CodeBuddy | AgentType::DeepSeek => vec![ModelProviderApiType::OpenAiCompletions],
         AgentType::Antigravity => vec![ModelProviderApiType::GoogleGenerativeAi],
+        // Custom agents are resolved per-definition by
+        // [`model_provider_api_types_for_agent`], which consults the stored
+        // declaration and codeg's verified contracts
+        // (see `custom_registry::known_model_provider_contract`).
         _ => Vec::new(),
+    }
+}
+
+/// [`model_provider_api_types`] with the DB-aware custom-agent case.
+///
+/// A custom agent advertises the shared Model Provider source only when codeg
+/// can actually project it: the definition declares the env-var names
+/// (`model_env`) or the agent is a verified standard-convention reader. Every
+/// API family the projection can express is advertised — the provider choice
+/// plus the declaration decide the wire format.
+pub fn model_provider_api_types_for_agent(agent_type: &AgentType) -> Vec<ModelProviderApiType> {
+    match agent_type {
+        AgentType::Custom(registry_id) => {
+            // The stored declaration can be read straight from the hydrated
+            // registry cache; the DB row is the same data.
+            let declared = crate::acp::custom_registry::model_env_of(registry_id);
+            crate::acp::custom_registry::model_provider_api_types(
+                registry_id,
+                declared.as_ref(),
+            )
+        }
+        other => model_provider_api_types(other),
     }
 }
 
@@ -859,7 +885,112 @@ mod tests {
     fn capability_table_matches_source_card_agents() {
         assert!(model_provider_api_types(&AgentType::OpenCode).len() == 4);
         assert!(model_provider_api_types(&AgentType::Cursor).is_empty());
-        assert!(model_provider_api_types(&AgentType::Custom("x")).is_empty());
+    }
+
+    /// Custom agents carry no static capability: whether codeg may project a
+    /// provider selection into one is per-definition
+    /// ([`model_provider_api_types_for_agent`]).
+    #[test]
+    fn custom_agents_have_no_static_capability() {
+        assert!(model_provider_api_types(&AgentType::Custom("qwen-code")).is_empty());
+    }
+
+    /// The DB-aware variant is what the resolver and the conversation save
+    /// path consult: a verified standard-convention agent gets every
+    /// projectable family, an unverified one gets none (so the settings card
+    /// is not offered and the selection is never applied).
+    #[tokio::test]
+    async fn per_agent_capability_gates_custom_agents_on_their_declaration() {
+        use crate::acp::custom_registry::{
+            CustomAgentDef, CustomAgentSpec, CustomDistributionKind, ModelEnvDeclaration, NpxSpec,
+        };
+
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let def = |id: &str, model_env: Option<ModelEnvDeclaration>| CustomAgentDef {
+            registry_id: id.to_string(),
+            name: id.to_string(),
+            description: String::new(),
+            version: "1.0.0".into(),
+            distribution_kind: CustomDistributionKind::Npx,
+            spec: CustomAgentSpec {
+                npx: Some(NpxSpec {
+                    package: "some-agent@1.0.0".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            icon_url: None,
+            skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
+            supports_mcp: true,
+            model_env,
+        };
+        for (id, model_env) in [("qwen-code", None), ("kilo", None), ("glm-acp-agent", None)] {
+            crate::db::service::custom_agent_service::upsert(&db.conn, &def(id, model_env))
+                .await
+                .unwrap();
+        }
+        // The capability reads the hydrated registry cache, same as the launch
+        // path — a save must refresh it before the next list/connect.
+        crate::db::service::custom_agent_service::hydrate_registry(&db.conn)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            model_provider_api_types_for_agent(&AgentType::Custom("qwen-code")),
+            vec![
+                ModelProviderApiType::OpenAiCompletions,
+                ModelProviderApiType::OpenAiResponses,
+                ModelProviderApiType::AnthropicMessages,
+            ],
+            "verified contract: Qwen speaks all three OpenAI-compatible/Anthropic families"
+        );
+        assert_eq!(
+            model_provider_api_types_for_agent(&AgentType::Custom("glm-acp-agent")),
+            vec![ModelProviderApiType::OpenAiCompletions],
+            "verified contract: GLM Agent is Chat Completions only"
+        );
+        // A user declaration widens a known agent back to permissive: we know
+        // the names it reads, but the wire format is the user's statement.
+        crate::db::service::custom_agent_service::upsert(
+            &db.conn,
+            &def(
+                "qwen-code",
+                Some(ModelEnvDeclaration {
+                    base_url: Some("MY_BASE_URL".into()),
+                    api_key: Some("MY_API_KEY".into()),
+                    model: Some("MY_MODEL".into()),
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+        crate::db::service::custom_agent_service::hydrate_registry(&db.conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            model_provider_api_types_for_agent(&AgentType::Custom("qwen-code"))
+                .len(),
+            3,
+            "declared env names are permissive"
+        );
+        assert!(
+            model_provider_api_types_for_agent(&AgentType::Custom("kilo"))
+                .is_empty(),
+            "config-file-only agents get no option"
+        );
+        assert!(
+            model_provider_api_types_for_agent(&AgentType::Custom("never-registered"))
+                .is_empty(),
+            "unknown ids get no option"
+        );
+        assert_eq!(
+            model_provider_api_types_for_agent(&AgentType::Codex),
+            vec![ModelProviderApiType::OpenAiResponses],
+            "built-ins keep their static table"
+        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import type { AgentType } from "./types"
+import { isCustomAgentType } from "./types"
 import type {
   ModelProviderApiType,
   ModelProviderRecord,
@@ -54,11 +55,36 @@ export const MODEL_PROVIDER_SOURCE_CARD_AGENT_TYPES: AgentType[] = [
 ]
 
 /** Stable ids are intentionally shown in the settings UI: provider and model
- * display names are not configurable, and API families are technical ids. */
+ * display names are not configurable, and API families are technical ids.
+ *
+ * `customApiTypes` is the backend verdict for a custom agent
+ * (`AcpAgentInfo.model_provider_api_types`): the families its CLI can actually
+ * speak. Empty means codeg cannot project into it at all — an agent that keeps
+ * provider config in its own files, or reads only part of the env contract. */
 export function getModelProviderApiTypes(
-  agentType: AgentType
+  agentType: AgentType,
+  customApiTypes: readonly ModelProviderApiType[] = []
 ): ModelProviderApiType[] {
+  if (isCustomAgentType(agentType)) {
+    return [...customApiTypes]
+  }
   return AGENT_MODEL_PROVIDER_API_TYPES[agentType] ?? []
+}
+
+/** Whether the settings panel offers the shared Model Provider source card.
+ * Custom agents only get one when codeg can actually project into them — an
+ * agent that keeps provider config in its own files would otherwise show a
+ * selection that silently never applies. */
+export function supportsModelProviderSourceCard(
+  agentType: AgentType,
+  customApiTypes: readonly ModelProviderApiType[] = []
+): boolean {
+  return (
+    MODEL_PROVIDER_SOURCE_CARD_AGENT_TYPES.includes(
+      agentType as (typeof MODEL_PROVIDER_SOURCE_CARD_AGENT_TYPES)[number]
+    ) ||
+    (isCustomAgentType(agentType) && customApiTypes.length > 0)
+  )
 }
 
 export type CompatibleModelProvider = Pick<
@@ -67,12 +93,16 @@ export type CompatibleModelProvider = Pick<
 >
 
 /** Count only providers a source can actually offer: enabled, a matching API
- * family, and at least one model id. */
+ * family, and at least one model id. `customApiTypes` follows
+ * [`getModelProviderApiTypes`]. */
 export function countCompatibleModelProviders(
   providers: readonly CompatibleModelProvider[],
-  agentType: AgentType
+  agentType: AgentType,
+  customApiTypes: readonly ModelProviderApiType[] = []
 ): number {
-  const supported = new Set(getModelProviderApiTypes(agentType))
+  const supported = new Set(
+    getModelProviderApiTypes(agentType, customApiTypes)
+  )
   return providers.filter(
     (provider) =>
       provider.enabled &&

@@ -1587,6 +1587,9 @@
     "customAgentSaved": "{name} 저장됨",
     "customAgentVersionProbeLabel": "버전 조회 명령(선택)",
     "customAgentVersionProbeHint": "로컬에 설치된 버전을 출력하는 명령입니다. 비워 두면 에이전트 명령에 --version을 붙여 실행합니다.",
+    "customAgentModelEnvLabel": "모델 공급자 환경 변수 이름",
+    "customAgentModelEnvHint": "이 에이전트가 공유 모델 공급자 구성(베이스 URL, API 키, 모델)을 읽는 환경 변수 이름을 선언하는 선택적 JSON입니다. codeg가 검증한 계약이 있는 에이전트(qwen-code, glm-acp-agent)는 채울 필요가 없습니다. 다른 에이전트는 선언해야 모델 소스 옵션이 나타납니다.",
+    "customAgentModelEnvInvalid": "잘못된 JSON입니다 — 선택적 \"baseUrl\", \"apiKey\", \"model\" 문자열 키를 가진 객체여야 합니다.",
     "customAgentRemove": "에이전트 제거",
     "customAgentRemoveHint": "에이전트 정의를 삭제합니다. 기존 대화 기록은 유지되며 에이전트를 더 이상 실행할 수 없게 될 뿐입니다.",
     "customAgentIconLabel": "아이콘(선택)",
@@ -5973,7 +5976,8 @@
     "removeTerminalCard": "터미널 카드 제거",
     "terminalNoDirectory": "이 카드에는 작업 디렉터리가 없습니다",
     "confirmDeleteTerminals": "실행 중인 터미널 {count}개가 닫히고 해당 프로세스도 종료됩니다.",
-    "confirmDeleteNotesAndTerminals": "직접 작성한 메모 {notes}개가 영구 삭제되고, 실행 중인 터미널 {terminals}개도 종료됩니다."  },
+    "confirmDeleteNotesAndTerminals": "직접 작성한 메모 {notes}개가 영구 삭제되고, 실행 중인 터미널 {terminals}개도 종료됩니다."
+  },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",
     "noProviders": "No providers",

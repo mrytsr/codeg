@@ -52,6 +52,7 @@ import {
 import { AgentIcon } from "@/components/agent-icon"
 import { cn, copyTextFromMenu } from "@/lib/utils"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { imageFilesFromClipboardApi } from "@/lib/clipboard-images"
 import { toErrorMessage } from "@/lib/app-error"
 import { isNoActiveTurnRejection } from "@/lib/turn-busy"
@@ -358,6 +359,7 @@ export function MessageInput({
   onInjectConsumed,
 }: MessageInputProps) {
   const t = useTranslations("Folder.chat.messageInput")
+  const isMobile = useIsMobile()
   const tQueue = useTranslations("Folder.chat.messageQueue")
   // Kept as a separate binding from `t` so its call sites — exclusively
   // upload / attachment toasts — read as a single coherent group when
@@ -603,13 +605,15 @@ export function MessageInput({
   // editor a tick after mount (mirrors the hydration effect's gate). Ordered
   // after that hydration effect so this rAF runs after its setContent, landing
   // the caret at the end of a restored draft rather than before it.
+  // Skipped on mobile: auto-focus pops the soft keyboard every time a session
+  // is opened, which is intrusive on touch devices.
   useEffect(() => {
-    if (isActive && composerReady && !isPrompting) {
+    if (isActive && !isMobile && composerReady && !isPrompting) {
       requestAnimationFrame(() => {
         editorRef.current?.focus()
       })
     }
-  }, [isActive, composerReady, isPrompting])
+  }, [isActive, isMobile, composerReady, isPrompting])
 
   // Re-hydrate when the user (re)edits a *different* queue item after the
   // initial mount hydration above. Keyed on the item id (not display text) so

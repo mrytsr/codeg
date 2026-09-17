@@ -51,6 +51,7 @@ function makeAgent(overrides: Partial<AcpAgentInfo>): AcpAgentInfo {
     distribution_type: "uvx",
     is_acp_adapter: false,
     model_source: "native",
+model_provider_api_types: [],
     custom_source: null,
     enabled: true,
     sort_order: 0,

@@ -1587,6 +1587,9 @@
     "customAgentSaved": "已儲存 {name}",
     "customAgentVersionProbeLabel": "版本查詢命令（可選）",
     "customAgentVersionProbeHint": "查詢本機安裝版本的命令；留空時預設執行智慧體命令加 --version。",
+    "customAgentModelEnvLabel": "模型供應商環境變數名稱",
+    "customAgentModelEnvHint": "可選 JSON，宣告該智慧體讀取共享模型供應商設定所用的環境變數名稱（Base URL、API Key、模型）。codeg 已內建驗證過的智慧體（qwen-code、glm-acp-agent）無需填寫；其他智慧體宣告後才會出現「模型來源」選項。",
+    "customAgentModelEnvInvalid": "JSON 無效——應為包含可選 \"baseUrl\"、\"apiKey\"、\"model\" 字串鍵的物件。",
     "customAgentRemove": "移除智慧體",
     "customAgentRemoveHint": "刪除該智慧體定義。既有工作階段的歷史會保留，只是該智慧體無法再啟動。",
     "customAgentIconLabel": "圖示（選填）",
@@ -5973,7 +5976,8 @@
     "removeTerminalCard": "移除終端機卡片",
     "terminalNoDirectory": "這張卡片沒有工作目錄",
     "confirmDeleteTerminals": "{count} 個執行中的終端機會被關閉，其中的處理程序也會一併結束。",
-    "confirmDeleteNotesAndTerminals": "你寫下的 {notes} 則便條將被永久刪除，另有 {terminals} 個執行中的終端機會被結束。"  },
+    "confirmDeleteNotesAndTerminals": "你寫下的 {notes} 則便條將被永久刪除，另有 {terminals} 個執行中的終端機會被結束。"
+  },
   "ModelProviderPicker": {
     "placeholder": "供應商 · 模型",
     "noProviders": "暫無供應商",

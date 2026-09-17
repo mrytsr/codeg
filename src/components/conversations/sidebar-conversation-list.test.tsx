@@ -76,6 +76,9 @@ const stableTask = vi.hoisted(() => ({
 const stableTerminal = vi.hoisted(() => ({
   createTerminalInDirectory: () => {},
 }))
+const stableSidebar = vi.hoisted(() => ({
+  toggle: () => {},
+}))
 
 vi.mock("@/components/agent-icon", () => ({
   AgentIcon: () => {
@@ -206,6 +209,10 @@ vi.mock("@/contexts/task-context", () => ({
 
 vi.mock("@/contexts/active-folder-context", () => ({
   useActiveFolder: () => ({ activeFolder: null }),
+}))
+
+vi.mock("@/contexts/sidebar-context", () => ({
+  useSidebarContext: () => stableSidebar,
 }))
 
 vi.mock("@/contexts/tab-context", () => ({

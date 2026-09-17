@@ -1090,6 +1090,7 @@ mod tests {
             source: Default::default(),
             version_probe: None,
             supports_mcp: true,
+            model_env: None,
         };
         let agent = crate::models::agent::AgentType::custom("experts-pack-agent").unwrap();
 

@@ -824,6 +824,10 @@ pub fn build_router(
             post(handlers::acp::acp_update_agent_model_source),
         )
         .route(
+            "/acp_remember_agent_model_selection",
+            post(handlers::acp::acp_remember_agent_model_selection),
+        )
+        .route(
             "/acp_update_agent_config",
             post(handlers::acp::acp_update_agent_config),
         )

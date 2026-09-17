@@ -389,8 +389,7 @@ const DRAIN_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
 /// ago that it cannot be a spawn still in flight.
 fn prune_reaped(draining: &mut DrainingChildren) {
     draining.retain(|c| {
-        c.pid.load(std::sync::atomic::Ordering::SeqCst) != 0
-            || c.parked_at.elapsed() < DRAIN_GRACE
+        c.pid.load(std::sync::atomic::Ordering::SeqCst) != 0 || c.parked_at.elapsed() < DRAIN_GRACE
     });
 }
 
@@ -2729,7 +2728,8 @@ impl ConnectionManager {
         }
         tracing::info!(
             "[ACP] disconnect by agent type agent={:?} count={}",
-            agent_type, disconnected
+            agent_type,
+            disconnected
         );
 
         // Every child that could still be running as this agent: the ones just
@@ -2880,9 +2880,7 @@ impl ConnectionManager {
     /// Block new connections from being established until the returned guard
     /// is dropped. The caller must enumerate live connections only AFTER
     /// holding this, never before.
-    pub async fn lock_out_new_connections(
-        &self,
-    ) -> tokio::sync::OwnedRwLockWriteGuard<()> {
+    pub async fn lock_out_new_connections(&self) -> tokio::sync::OwnedRwLockWriteGuard<()> {
         self.external_restore_lock.clone().write_owned().await
     }
 
@@ -3913,6 +3911,7 @@ impl crate::acp::delegation::spawner::ConnectionSpawner for ConnectionManagerSpa
             None,
             self.data_dir.as_path(),
             parent_conversation_id,
+            None,
         )
         .await
         .map_err(|e| SpawnerError::Spawn(e.to_string()))?;
@@ -4032,6 +4031,7 @@ impl crate::acp::delegation::spawner::ConnectionSpawner for ConnectionManagerSpa
             None,
             self.data_dir.as_path(),
             parent_conversation_id,
+            None,
         )
         .await
         .map_err(|e| SpawnerError::Spawn(e.to_string()))?;

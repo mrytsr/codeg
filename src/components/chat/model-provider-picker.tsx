@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check, ChevronDown, Loader2, Server } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -14,10 +14,16 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useConnection } from "@/hooks/use-connection"
 import { useModelProviders } from "@/hooks/use-model-providers"
+import { useAcpAgents } from "@/hooks/use-acp-agents"
 import { useTabStore } from "@/stores/tab-store"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
-import { openSettingsWindow, updateConversationModelSelection } from "@/lib/api"
+import {
+  acpRememberAgentModelSelection,
+  openSettingsWindow,
+  updateConversationModelSelection,
+} from "@/lib/api"
 import { getModelProviderApiTypes } from "@/lib/model-provider-capabilities"
+import type { ModelProviderApiType } from "@/lib/model-provider-types"
 import type { ModelProviderRecord } from "@/lib/model-provider-types"
 import {
   getModelProviderDraftSelection,
@@ -33,6 +39,7 @@ import {
   rememberAgentModelSelection,
 } from "@/lib/remembered-agent-model-selection"
 import type { AgentType } from "@/lib/types"
+import { isCustomAgentType } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 interface ModelProviderPickerProps {
@@ -67,6 +74,7 @@ export function ModelProviderPicker({
 }: ModelProviderPickerProps) {
   const t = useTranslations("ModelProviderPicker")
   const { records } = useModelProviders()
+  const { agents: providerSourceAgents } = useAcpAgents()
   const [open, setOpen] = useState(false)
   const connection = useConnection(tabId ?? "__provider_picker__")
   const draftSelection = useModelProviderDraftSelection(tabId)
@@ -88,23 +96,47 @@ export function ModelProviderPicker({
   )
 
   // Without a known agent (pre-bind composer) show every enabled provider;
-  // with one, filter to the API families that agent can actually speak.
-  const supportedApis =
-    agentType != null ? new Set(getModelProviderApiTypes(agentType)) : null
-  const visibleRecords = (records ?? []).filter(
-    (r) => r.enabled && (supportedApis == null || supportedApis.has(r.api))
+  // with one, filter to the API families that agent can actually speak. A
+  // custom agent's families come from the backend
+  // (`AcpAgentInfo.model_provider_api_types`) — a verified env contract pins
+  // them (`glm-acp-agent` speaks Chat Completions only), so a provider its
+  // launch would refuse is never listed.
+  const customApiTypes = useMemo(
+    () =>
+      agentType != null && isCustomAgentType(agentType)
+        ? ((providerSourceAgents.find((a) => a.agent_type === agentType)
+            ?.model_provider_api_types ?? []) as ModelProviderApiType[])
+        : [],
+    [agentType, providerSourceAgents]
+  )
+  const supportedApis = useMemo(
+    () =>
+      agentType != null
+        ? new Set(getModelProviderApiTypes(agentType, customApiTypes))
+        : null,
+    [agentType, customApiTypes]
+  )
+  const visibleRecords = useMemo(
+    () =>
+      (records ?? []).filter(
+        (r) => r.enabled && (supportedApis == null || supportedApis.has(r.api))
+      ),
+    [records, supportedApis]
   )
 
-  const selection =
-    draftSelection ??
-    (summary?.model_source === "provider" &&
-    summary.model_provider_id != null &&
-    summary.model_provider_model_id != null
-      ? {
-          providerId: summary.model_provider_id,
-          modelId: summary.model_provider_model_id,
-        }
-      : null)
+  const selection = useMemo(
+    () =>
+      draftSelection ??
+      (summary?.model_source === "provider" &&
+      summary.model_provider_id != null &&
+      summary.model_provider_model_id != null
+        ? {
+            providerId: summary.model_provider_id,
+            modelId: summary.model_provider_model_id,
+          }
+        : null),
+    [draftSelection, summary]
+  )
 
   const label = selection
     ? `${selection.providerId} · ${selection.modelId}`
@@ -147,6 +179,14 @@ export function ModelProviderPicker({
     rememberedForAgent,
     records,
   ])
+
+  // Auto-default: a composer with no provider · model choice at all — nothing
+  // bound on the conversation, no draft, no applicable remembered pick — falls
+  // back to the first visible provider's first model instead of sitting on the
+  // empty placeholder. A bound conversation gets that default persisted (once —
+  // a failed save or an explicit clear must not loop); a pre-bind composer only
+  // seeds the draft, which is persisted when the conversation binds.
+  const autoDefaultKeyRef = useRef<string | null>(null)
 
   const persistSelection = useCallback(
     async (providerId: string, modelId: string) => {
@@ -206,16 +246,65 @@ export function ModelProviderPicker({
     [agentType, connection, conversationId, t, tabId]
   )
 
+  useEffect(() => {
+    if (records == null) return // catalog not settled yet
+    if (selection != null) return // an explicit choice already owns the slot
+    if (conversationId != null && summary == null) return // row not loaded yet
+    // Read the live draft, not the render-time one: the remembered-restore
+    // effect above may have seeded a draft within this same commit.
+    if (getModelProviderDraftSelection(tabId ?? "") != null) return
+    const firstWithModels = visibleRecords.find((r) => r.models.length > 0)
+    if (!firstWithModels) return
+    const key = `${tabId ?? ""}:${agentType ?? "any"}:${
+      conversationId ?? "prebind"
+    }`
+    if (autoDefaultKeyRef.current === key) return
+    autoDefaultKeyRef.current = key
+    const providerId = firstWithModels.providerId
+    const modelId = firstWithModels.models[0].id
+    if (conversationId == null) {
+      setModelProviderDraftSelection(tabId ?? "", { providerId, modelId })
+      return
+    }
+    void persistSelection(providerId, modelId)
+  }, [
+    records,
+    selection,
+    summary,
+    agentType,
+    conversationId,
+    tabId,
+    visibleRecords,
+    persistSelection,
+  ])
+
   const handleSelect = useCallback(
     (providerId: string, modelId: string) => {
       setOpen(false)
       if (conversationId == null) {
         setModelProviderDraftSelection(tabId ?? "", { providerId, modelId })
+        // Also remember it on the AGENT: the pre-bind session already needs
+        // credentials to start (an agent like Qwen Code refuses `session/new`
+        // unauthenticated), and the draft alone cannot reach it until a
+        // conversation exists. Best-effort — a failure just means the session
+        // keeps the agent's previous configuration.
+        if (agentType != null) {
+          void acpRememberAgentModelSelection(
+            agentType,
+            providerId,
+            modelId
+          ).catch((err) => {
+            console.warn(
+              "[ModelProviderPicker] remember agent selection failed",
+              err
+            )
+          })
+        }
         return
       }
       void persistSelection(providerId, modelId)
     },
-    [conversationId, persistSelection, tabId]
+    [agentType, conversationId, persistSelection, tabId]
   )
 
   const handleOpenProvidersSettings = useCallback(() => {

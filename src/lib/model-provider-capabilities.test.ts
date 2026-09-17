@@ -4,6 +4,7 @@ import {
   countCompatibleModelProviders,
   getModelProviderApiTypes,
   MODEL_PROVIDER_SOURCE_CARD_AGENT_TYPES,
+  supportsModelProviderSourceCard,
 } from "./model-provider-capabilities"
 import type { ModelProviderRecord } from "./model-provider-types"
 
@@ -29,7 +30,28 @@ describe("model provider capabilities", () => {
       "anthropic-messages",
     ])
     expect(getModelProviderApiTypes("codex")).toEqual(["openai-responses"])
-    expect(getModelProviderApiTypes("custom:agent")).toEqual([])
+  })
+
+  // Custom agents project env-only on the backend, and the families are the
+  // backend's per-definition verdict — a verified contract pins what the CLI
+  // speaks (glm-acp-agent is Chat Completions only), a user declaration is
+  // permissive, and an agent codeg cannot project into has none.
+  it("reads a custom agent's API families from the backend verdict", () => {
+    const qwenFamilies = [
+      "openai-completions",
+      "openai-responses",
+      "anthropic-messages",
+    ] as const
+    expect(getModelProviderApiTypes("custom:qwen-code", qwenFamilies)).toEqual([
+      "openai-completions",
+      "openai-responses",
+      "anthropic-messages",
+    ])
+    expect(
+      getModelProviderApiTypes("custom:glm-acp-agent", ["openai-completions"])
+    ).toEqual(["openai-completions"])
+    expect(getModelProviderApiTypes("custom:kilo")).toEqual([])
+    expect(getModelProviderApiTypes("custom:minimax-code")).toEqual([])
   })
 
   it("counts enabled providers with a matching API and at least one model", () => {
@@ -40,6 +62,42 @@ describe("model provider capabilities", () => {
       provider({ providerId: "empty", models: [] }),
     ]
     expect(countCompatibleModelProviders(providers, "codex")).toBe(1)
+    // Custom agents match every family the backend granted them…
+    expect(
+      countCompatibleModelProviders(providers, "custom:qwen-code", [
+        "openai-completions",
+        "openai-responses",
+        "anthropic-messages",
+      ])
+    ).toBe(2)
+    // …and a Chat-Completions-only agent is not offered the Responses provider
+    // it could never use.
+    expect(
+      countCompatibleModelProviders(providers, "custom:glm-acp-agent", [
+        "openai-completions",
+      ])
+    ).toBe(0)
+    expect(countCompatibleModelProviders(providers, "custom:kilo")).toBe(0)
+  })
+
+  it("offers the settings source card only where a projection can land", () => {
+    expect(supportsModelProviderSourceCard("codex")).toBe(true)
+    expect(
+      supportsModelProviderSourceCard("custom:qwen-code", [
+        "openai-completions",
+        "openai-responses",
+        "anthropic-messages",
+      ])
+    ).toBe(true)
+    expect(
+      supportsModelProviderSourceCard("custom:glm-acp-agent", [
+        "openai-completions",
+      ])
+    ).toBe(true)
+    // Verified non-readers: no option, so nothing silently half-applies.
+    expect(supportsModelProviderSourceCard("custom:kilo")).toBe(false)
+    expect(supportsModelProviderSourceCard("custom:minimax-code")).toBe(false)
+    expect(supportsModelProviderSourceCard("cursor")).toBe(false)
   })
 
   // Codex has declared API families but no source card, so its settings panel

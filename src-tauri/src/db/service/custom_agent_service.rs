@@ -12,7 +12,7 @@ use sea_orm::{
 
 use crate::acp::custom_registry::{
     self, CustomAgentDef, CustomAgentSource, CustomAgentSpec, CustomDistributionKind,
-    FALLBACK_VERSION,
+    ModelEnvDeclaration, FALLBACK_VERSION,
 };
 use crate::db::entities::custom_agent;
 use crate::db::error::DbError;
@@ -24,6 +24,15 @@ use crate::models::agent::is_valid_custom_agent_id;
 pub fn def_from_model(model: &custom_agent::Model) -> Option<CustomAgentDef> {
     let spec: CustomAgentSpec = serde_json::from_str(&model.spec_json).ok()?;
     let distribution_kind = CustomDistributionKind::parse(&model.distribution_kind)?;
+    // A corrupt declaration degrades to "undeclared" (standard convention
+    // keys) rather than failing the whole row — it only shapes env injection.
+    let model_env = model
+        .model_env
+        .as_deref()
+        .map(serde_json::from_str::<ModelEnvDeclaration>)
+        .transpose()
+        .ok()
+        .flatten();
     Some(CustomAgentDef {
         registry_id: model.registry_id.clone(),
         name: model.name.clone(),
@@ -42,6 +51,7 @@ pub fn def_from_model(model: &custom_agent::Model) -> Option<CustomAgentDef> {
             .filter(|s| !s.is_empty())
             .map(str::to_string),
         supports_mcp: model.supports_mcp,
+        model_env,
     })
 }
 
@@ -98,6 +108,12 @@ pub async fn upsert(conn: &DatabaseConnection, def: &CustomAgentDef) -> Result<(
 
     let spec_json =
         serde_json::to_string(&def.spec).map_err(|e| DbError::Migration(e.to_string()))?;
+    let model_env_json = def
+        .model_env
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| DbError::Migration(e.to_string()))?;
     let version = if def.version.trim().is_empty() {
         FALLBACK_VERSION.to_string()
     } else {
@@ -119,6 +135,7 @@ pub async fn upsert(conn: &DatabaseConnection, def: &CustomAgentDef) -> Result<(
             active.source = Set(def.source.as_str().to_string());
             active.version_probe = Set(def.version_probe.clone());
             active.supports_mcp = Set(def.supports_mcp);
+            active.model_env = Set(model_env_json.clone());
             active.updated_at = Set(now);
             active.update(conn).await?;
         }
@@ -137,6 +154,7 @@ pub async fn upsert(conn: &DatabaseConnection, def: &CustomAgentDef) -> Result<(
                 source: Set(def.source.as_str().to_string()),
                 version_probe: Set(def.version_probe.clone()),
                 supports_mcp: Set(def.supports_mcp),
+                model_env: Set(model_env_json.clone()),
                 created_at: Set(now),
                 updated_at: Set(now),
             }
@@ -198,6 +216,7 @@ mod tests {
             source: Default::default(),
             version_probe: None,
             supports_mcp: true,
+            model_env: None,
         }
     }
 
@@ -306,6 +325,7 @@ mod tests {
             source: Set("registry".into()),
             version_probe: Set(None),
             supports_mcp: Set(true),
+            model_env: Set(None),
             created_at: Set(Utc::now()),
             updated_at: Set(Utc::now()),
         };
@@ -358,10 +378,35 @@ mod tests {
         assert_eq!(back.source, CustomAgentSource::Manual);
         assert_eq!(back.version_probe.as_deref(), Some("qwen --version"));
         assert!(back.supports_mcp, "the default survives the row");
+        assert!(back.model_env.is_none(), "no declaration by default");
         let npx = back.spec.npx.expect("npx channel survives");
         assert_eq!(npx.package, "@qwen-code/qwen-code@0.21.0");
         assert_eq!(npx.cmd.as_deref(), Some("qwen"));
         assert_eq!(npx.args, vec!["--acp".to_string()]);
         let _ = BTreeMap::<String, String>::new();
+    }
+
+    #[tokio::test]
+    async fn model_env_declaration_round_trips_through_the_row() {
+        let db = fresh_in_memory_db().await;
+        let mut def = npx_def("glm-env");
+        def.model_env = Some(ModelEnvDeclaration {
+            base_url: Some("ACP_GLM_BASE_URL".into()),
+            api_key: Some("Z_AI_API_KEY".into()),
+            model: Some("ACP_GLM_MODEL".into()),
+        });
+        upsert(&db.conn, &def).await.unwrap();
+        let row = get(&db.conn, "glm-env").await.unwrap().unwrap();
+        let back = def_from_model(&row).expect("readable");
+        let decl = back.model_env.expect("declaration survives");
+        assert_eq!(decl.base_url.as_deref(), Some("ACP_GLM_BASE_URL"));
+        assert_eq!(decl.api_key.as_deref(), Some("Z_AI_API_KEY"));
+        assert_eq!(decl.model.as_deref(), Some("ACP_GLM_MODEL"));
+
+        // Clearing the declaration persists as a NULL column.
+        def.model_env = None;
+        upsert(&db.conn, &def).await.unwrap();
+        let row = get(&db.conn, "glm-env").await.unwrap().unwrap();
+        assert!(row.model_env.is_none());
     }
 }

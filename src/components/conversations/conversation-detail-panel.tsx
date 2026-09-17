@@ -618,6 +618,9 @@ const ConversationTabView = memo(function ConversationTabView({
       () => isReparentUnmount(useTabStore.getState(), tabId, groupId),
       [tabId, groupId]
     ),
+    // Lets the lifecycle re-arm the connect when a pre-bind Model Provider
+    // pick lands on the agent (see the hook's auto-connect effect).
+    tabId,
   })
   const { status: connStatus, sessionId: connSessionId } = conn
   const messageQueue = useMessageQueue()

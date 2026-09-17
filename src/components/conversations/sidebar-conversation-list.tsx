@@ -45,10 +45,12 @@ import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useTabActions, useTabStore } from "@/contexts/tab-context"
 import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
+import { useSidebarContext } from "@/contexts/sidebar-context"
 import { useTerminalContext } from "@/contexts/terminal-context"
 import { useThemeColor, useZoomLevel } from "@/hooks/use-appearance"
 import { useSortedAvailableAgents } from "@/hooks/use-sorted-available-agents"
 import { useImeGuard } from "@/hooks/use-ime-guard"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { OpenInSubContent } from "@/components/layout/open-in-menu"
 import {
   openImportSessionsWindow,
@@ -934,6 +936,11 @@ export function SidebarConversationList({
     openChatModeTab,
   } = useTabActions()
   const { openConversations } = useWorkbenchRoute()
+  // On mobile the list lives inside the sidebar Drawer: new-conversation
+  // actions close it first so the session they open is visible (the same rule
+  // the sidebar header's New-chat row follows).
+  const { toggle: toggleSidebar } = useSidebarContext()
+  const isMobile = useIsMobile()
 
   const folderIndex = useMemo(() => {
     const map = new Map<
@@ -2088,6 +2095,9 @@ export function SidebarConversationList({
   )
 
   const handleNewConversation = useCallback(() => {
+    // On mobile the sidebar is a Drawer overlay — close it so the new
+    // conversation is visible.
+    if (isMobile) toggleSidebar()
     // Starting a conversation returns to the conversation workspace if a
     // workbench route (e.g. Automations) was taking over the content region.
     openConversations()
@@ -2100,19 +2110,43 @@ export function SidebarConversationList({
       return
     }
     openNewConversationTab(activeFolder.id, activeFolder.path)
-  }, [activeFolder, openChatModeTab, openNewConversationTab, openConversations])
+  }, [
+    activeFolder,
+    isMobile,
+    openChatModeTab,
+    openNewConversationTab,
+    openConversations,
+    toggleSidebar,
+  ])
 
   const handleNewConversationForFolder = useCallback(
     (folderId: number) => {
       const folder = folderIndex.get(folderId)
       if (!folder) return
+      // On mobile the sidebar is a Drawer overlay — close it so the new
+      // conversation is visible (after the guard: a no-op keeps the drawer up).
+      if (isMobile) toggleSidebar()
       // Starting a conversation returns to the conversation workspace if a
       // workbench route (e.g. Automations) was taking over the content region.
       openConversations()
       openNewConversationTab(folderId, folder.path)
     },
-    [folderIndex, openNewConversationTab, openConversations]
+    [
+      folderIndex,
+      isMobile,
+      openNewConversationTab,
+      openConversations,
+      toggleSidebar,
+    ]
   )
+
+  // Folderless variant for the Chats section header, which passes a bare
+  // "open chat mode" action. Same mobile drawer-close duty; its own stable
+  // callback so the section header's memo keeps bailing out.
+  const handleNewChatMode = useCallback(() => {
+    if (isMobile) toggleSidebar()
+    openChatModeTab()
+  }, [isMobile, openChatModeTab, toggleSidebar])
 
   // "Import local sessions" now lives in a dedicated picker window (scan →
   // folder-grouped multi-select → batch import). The folder context-menu entry
@@ -2737,14 +2771,15 @@ export function SidebarConversationList({
           expanded={row.expanded}
           onToggle={toggleSection}
           // The chats section gets an always-visible New-chat button (its primary
-          // entry point, reachable even when empty). `openChatModeTab` is a stable
-          // context callback, so the memo holds. Recent gets the same
+          // entry point, reachable even when empty). `handleNewChatMode` wraps
+          // the stable `openChatModeTab` with the mobile drawer-close (stable
+          // itself, so the memo holds). Recent gets the same
           // affordance, but starting a conversation in the ACTIVE FOLDER — the
           // section spans folders and chats alike, and the folder is where a
           // "continue where I left off" list lands you.
           onNewChat={
             row.section === "chats"
-              ? openChatModeTab
+              ? handleNewChatMode
               : row.section === "recent"
                 ? handleNewConversation
                 : undefined

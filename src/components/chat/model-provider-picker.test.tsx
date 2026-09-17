@@ -11,6 +11,7 @@ import {
   loadRememberedAgentModelSelection,
   rememberAgentModelSelection,
 } from "@/lib/remembered-agent-model-selection"
+import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 
 import { ModelProviderPicker } from "./model-provider-picker"
 import enMessages from "@/i18n/messages/en.json"
@@ -72,12 +73,17 @@ vi.mock("@/stores/app-workspace-store", async () => {
   return { useAppWorkspaceStore: store }
 })
 const updateSelection = vi.fn()
+const rememberAgentSelection = vi.fn<(...args: unknown[]) => Promise<void>>(
+  async () => {}
+)
 const openSettingsWindow = vi.fn<(...args: unknown[]) => Promise<void>>(
   async () => {}
 )
 vi.mock("@/lib/api", () => ({
   updateConversationModelSelection: (...args: unknown[]) =>
     updateSelection(...args),
+  acpRememberAgentModelSelection: (...args: unknown[]) =>
+    rememberAgentSelection(...args),
   openSettingsWindow: (...args: unknown[]) => openSettingsWindow(...args),
 }))
 
@@ -139,14 +145,25 @@ function renderPicker(
   )
 }
 
+const boundConversationRow = {
+  id: 42,
+  model_source: "provider",
+  model_provider_id: "anthropic",
+  model_provider_model_id: "claude-sonnet-4-5",
+  model: "claude-sonnet-4-5",
+}
+
 describe("ModelProviderPicker", () => {
   beforeEach(() => {
     updateSelection.mockReset()
+    rememberAgentSelection.mockReset()
+    rememberAgentSelection.mockResolvedValue(undefined)
     openSettingsWindow.mockClear()
     reapplyConfig.mockClear()
     resetModelProviderSelectionStore()
     localStorage.clear()
     tabStoreState = { tabs: [{ id: "tab-1", conversationId: 42 }] }
+    useAppWorkspaceStore.setState({ conversations: [boundConversationRow] })
   })
 
   it("shows the conversation's current provider · model selection", async () => {
@@ -185,7 +202,7 @@ describe("ModelProviderPicker", () => {
     expect(reapplyConfig).toHaveBeenCalledWith(42)
   })
 
-  it("keeps a pre-bind selection across remounts without saving it", async () => {
+  it("keeps a pre-bind selection across remounts and remembers it on the agent", async () => {
     tabStoreState = { tabs: [{ id: "tab-1", conversationId: null }] }
     const { unmount } = renderPicker()
     fireEvent.click(
@@ -197,7 +214,18 @@ describe("ModelProviderPicker", () => {
         "anthropic · claude-opus-4-5"
       )
     ).toBeInTheDocument()
+    // No conversation exists yet, so nothing can be saved to one…
     expect(updateSelection).not.toHaveBeenCalled()
+    // …but the choice is remembered on the AGENT: the pre-bind session needs
+    // credentials to start at all (an agent that refuses `session/new`
+    // unauthenticated cannot be configured any other way).
+    await vi.waitFor(() => {
+      expect(rememberAgentSelection).toHaveBeenCalledWith(
+        "claude_code",
+        "anthropic",
+        "claude-opus-4-5"
+      )
+    })
 
     unmount()
     renderPicker()
@@ -249,7 +277,7 @@ describe("ModelProviderPicker", () => {
     expect(updateSelection).not.toHaveBeenCalled()
   })
 
-  it("does not restore a remembered choice that no longer exists", async () => {
+  it("falls back to the first provider's first model when the remembered choice no longer exists", async () => {
     // The remembered model was removed from the (still enabled) provider.
     rememberAgentModelSelection("claude_code", {
       providerId: "anthropic",
@@ -260,7 +288,57 @@ describe("ModelProviderPicker", () => {
     renderPicker()
 
     const trigger = screen.getByRole("button", { name: "Model provider" })
-    expect(within(trigger).getByText("Provider · Model")).toBeInTheDocument()
+    await vi.waitFor(() => {
+      expect(
+        within(trigger).getByText("anthropic · claude-sonnet-4-5")
+      ).toBeInTheDocument()
+    })
+    // A fallback default is not a user choice — nothing is saved anywhere.
+    expect(updateSelection).not.toHaveBeenCalled()
+    expect(rememberAgentSelection).not.toHaveBeenCalled()
+  })
+
+  it("seeds a pre-bind composer with no remembered choice to the first provider's first model", async () => {
+    tabStoreState = { tabs: [{ id: "tab-1", conversationId: null }] }
+
+    renderPicker()
+
+    const trigger = await screen.findByRole("button", {
+      name: "Model provider",
+    })
+    await vi.waitFor(() => {
+      expect(
+        within(trigger).getByText("anthropic · claude-sonnet-4-5")
+      ).toBeInTheDocument()
+    })
+    // Draft-only seed: persisted when the conversation binds, never pushed
+    // to the agent or a conversation on its own.
+    expect(updateSelection).not.toHaveBeenCalled()
+    expect(rememberAgentSelection).not.toHaveBeenCalled()
+  })
+
+  it("defaults a bound conversation with no selection to the first provider's first model and saves it", async () => {
+    useAppWorkspaceStore.setState({
+      conversations: [{ id: 42, model_source: "provider" }],
+    })
+
+    renderPicker()
+
+    const trigger = await screen.findByRole("button", {
+      name: "Model provider",
+    })
+    await vi.waitFor(() => {
+      expect(updateSelection).toHaveBeenCalledWith(
+        42,
+        "anthropic",
+        "claude-sonnet-4-5"
+      )
+    })
+    await vi.waitFor(() => {
+      expect(
+        within(trigger).getByText("anthropic · claude-sonnet-4-5")
+      ).toBeInTheDocument()
+    })
   })
 
   it("does not override an explicit draft choice with the remembered one", async () => {

@@ -1587,6 +1587,9 @@
     "customAgentSaved": "{name} guardado",
     "customAgentVersionProbeLabel": "Comando de consulta de versión (opcional)",
     "customAgentVersionProbeHint": "Comando que imprime la versión instalada localmente. Si se deja vacío, codeg ejecuta el comando del agente con --version.",
+    "customAgentModelEnvLabel": "Nombres de variables de entorno del proveedor",
+    "customAgentModelEnvHint": "JSON opcional que declara las variables de entorno que este agente lee para un proveedor de modelos compartido (URL base, clave de API, modelo). Los agentes con contrato verificado (qwen-code, glm-acp-agent) no lo necesitan; declarar nombres es lo que activa la opción Origen del modelo para cualquier otro agente.",
+    "customAgentModelEnvInvalid": "JSON no válido: se esperaba un objeto con las claves de cadena opcionales \"baseUrl\", \"apiKey\" y \"model\".",
     "customAgentRemove": "Eliminar agente",
     "customAgentRemoveHint": "Elimina la definición del agente. Las conversaciones existentes conservan su historial; el agente simplemente ya no se puede iniciar.",
     "customAgentIconLabel": "Icono (opcional)",
@@ -5973,7 +5976,8 @@
     "removeTerminalCard": "Quitar tarjeta de terminal",
     "terminalNoDirectory": "Esta tarjeta no tiene directorio de trabajo",
     "confirmDeleteTerminals": "Se cerrarán {count} terminal(es) en ejecución y se detendrán sus procesos.",
-    "confirmDeleteNotesAndTerminals": "Se eliminarán permanentemente {notes} nota(s) que escribiste y se detendrán {terminals} terminal(es) en ejecución."  },
+    "confirmDeleteNotesAndTerminals": "Se eliminarán permanentemente {notes} nota(s) que escribiste y se detendrán {terminals} terminal(es) en ejecución."
+  },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",
     "noProviders": "No providers",

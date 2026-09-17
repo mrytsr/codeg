@@ -1587,6 +1587,9 @@
     "customAgentSaved": "تم حفظ {name}",
     "customAgentVersionProbeLabel": "أمر الاستعلام عن الإصدار (اختياري)",
     "customAgentVersionProbeHint": "أمر يطبع الإصدار المثبت محليًا. عند تركه فارغًا يشغّل codeg أمر الوكيل مع ‎--version.",
+    "customAgentModelEnvLabel": "أسماء متغيرات بيئة مزوّد النماذج",
+    "customAgentModelEnvHint": "JSON اختياري يصرّح بأسماء متغيرات البيئة التي يقرأ بها هذا الوكيل إعدادات مزوّد النماذج المشترك (عنوان URL الأساسي ومفتاح API والنموذج). الوكلاء الذين لديهم عقد مُتحقَّق منه (qwen-code وglm-acp-agent) لا يحتاجون ذلك؛ وهذا التصريح هو ما يُظهر خيار مصدر النموذج لبقية الوكلاء.",
+    "customAgentModelEnvInvalid": "JSON غير صالح — يُتوقع كائن يحتوي على المفاتيح النصية الاختيارية \"baseUrl\" و\"apiKey\" و\"model\".",
     "customAgentRemove": "إزالة الوكيل",
     "customAgentRemoveHint": "يحذف تعريف الوكيل. تحتفظ المحادثات الحالية بسجلها، ولن يصبح بالإمكان تشغيل الوكيل فحسب.",
     "customAgentIconLabel": "الأيقونة (اختياري)",
@@ -5973,7 +5976,8 @@
     "removeTerminalCard": "إزالة بطاقة الطرفية",
     "terminalNoDirectory": "لا يوجد دليل عمل لهذه البطاقة",
     "confirmDeleteTerminals": "سيتم إغلاق {count} من الطرفيات قيد التشغيل وإنهاء عملياتها.",
-    "confirmDeleteNotesAndTerminals": "سيتم حذف {notes} من الملاحظات التي كتبتها نهائيًا، وإنهاء {terminals} من الطرفيات قيد التشغيل."  },
+    "confirmDeleteNotesAndTerminals": "سيتم حذف {notes} من الملاحظات التي كتبتها نهائيًا، وإنهاء {terminals} من الطرفيات قيد التشغيل."
+  },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",
     "noProviders": "No providers",

@@ -291,10 +291,12 @@ pub(crate) fn resolve_system_agent_binary_for(agent_type: AgentType, cmd: &str) 
         cmd.to_string()
     };
     let home = home_dir_or_default();
-    registry::binary_system_dirs(agent_type).iter().find_map(|dir| {
-        let cand = home.join(dir).join(&exe);
-        cand.is_file().then_some(cand)
-    })
+    registry::binary_system_dirs(agent_type)
+        .iter()
+        .find_map(|dir| {
+            let cand = home.join(dir).join(&exe);
+            cand.is_file().then_some(cand)
+        })
 }
 
 /// Resolve the VENDOR CLI wrapped by an ACP adapter agent (`claude`, `codex`
@@ -3096,7 +3098,9 @@ fn cline_model_id_keys_for_provider(provider: &str) -> (&'static str, &'static s
 /// written by `cline auth` reads back correctly. With several entries and no
 /// usable `lastUsedProvider` there is no defensible "current" provider, so this
 /// reports none rather than guessing one and overwriting it on the next save.
-fn load_cline_provider_settings_at(path: &Path) -> Option<serde_json::Map<String, serde_json::Value>> {
+fn load_cline_provider_settings_at(
+    path: &Path,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
     let root = fs::read_to_string(path)
         .ok()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())?;
@@ -3119,14 +3123,21 @@ fn load_cline_provider_settings_at(path: &Path) -> Option<serde_json::Map<String
         "apiProvider".to_string(),
         serde_json::Value::String(normalize_cline_provider_id(&selected)),
     );
-    for (source, target) in [("apiKey", "apiKey"), ("model", "model"), ("baseUrl", "apiBaseUrl")] {
+    for (source, target) in [
+        ("apiKey", "apiKey"),
+        ("model", "model"),
+        ("baseUrl", "apiBaseUrl"),
+    ] {
         if let Some(value) = settings
             .get(source)
             .and_then(|v| v.as_str())
             .map(str::trim)
             .filter(|v| !v.is_empty())
         {
-            merged.insert(target.to_string(), serde_json::Value::String(value.to_string()));
+            merged.insert(
+                target.to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
         }
     }
     Some(merged)
@@ -3294,7 +3305,10 @@ fn persist_cline_provider_settings_at(
         .ok_or_else(|| AcpError::protocol("cline providers.json root must be an object"))?;
     // `version` is a zod literal — anything else and cline reads the file as empty.
     root_obj.insert("version".to_string(), serde_json::json!(1));
-    if !root_obj.get("modes").is_some_and(serde_json::Value::is_object) {
+    if !root_obj
+        .get("modes")
+        .is_some_and(serde_json::Value::is_object)
+    {
         root_obj.insert("modes".to_string(), serde_json::json!({}));
     }
     root_obj.insert(
@@ -3339,18 +3353,17 @@ fn persist_cline_provider_settings_at(
     // not otherwise recognize, and is honoured for the same reason.
     let agent_managed_credential =
         cline_provider_is_agent_managed(provider) || token_source == "oauth";
-    for (key, value) in [
-        ("apiKey", api_key),
-        ("model", model),
-        ("baseUrl", base_url),
-    ] {
+    for (key, value) in [("apiKey", api_key), ("model", model), ("baseUrl", base_url)] {
         let credential = key != "model";
         match value {
             Some(value) => {
                 if credential && agent_managed_credential {
                     continue;
                 }
-                settings.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+                settings.insert(
+                    key.to_string(),
+                    serde_json::Value::String(value.to_string()),
+                );
             }
             None => {
                 if credential && agent_managed_credential {
@@ -9857,11 +9870,7 @@ pub(crate) fn agent_env_keys(agent_type: AgentType) -> (&'static str, &'static s
         // the base-url slot stays an inert `AGY_BASE_URL` placeholder for the
         // same reason `CURSOR_MODEL`/`QODER_BASE_URL` above are: it keeps the
         // generic cascade off the `OPENAI_*` keys.
-        AgentType::Antigravity => (
-            "AGY_BASE_URL",
-            "GEMINI_API_KEY",
-            "AGY_ACP_DEFAULT_MODEL",
-        ),
+        AgentType::Antigravity => ("AGY_BASE_URL", "GEMINI_API_KEY", "AGY_ACP_DEFAULT_MODEL"),
         // `CLINE_API_KEY` is not just a convenience: it is one of only two ways
         // past cline's ACP auth gate (`isSessionReady`), and the only one a BYO
         // provider can take — see [`apply_cline_launch_env`]. `CLINE_MODEL`
@@ -9909,7 +9918,8 @@ pub(crate) fn agent_env_keys(agent_type: AgentType) -> (&'static str, &'static s
 /// [`build_runtime_env_from_setting`] (see [`agent_env_keys`]); this only fills
 /// what is still missing, so an explicit `env_json` row keeps winning.
 fn apply_cline_launch_env(config_json: Option<&str>, merged: &mut BTreeMap<String, String>) {
-    let Some(config) = config_json.and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+    let Some(config) =
+        config_json.and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
     else {
         return;
     };
@@ -10035,10 +10045,7 @@ pub(crate) fn build_runtime_env_from_setting(
 /// default forever, so whenever the env model is active and carries no
 /// explicit window, inject the bounded one here. An explicit value (written by
 /// the cascade, or hand-edited by the user) always wins.
-fn heal_kimi_env_model_context_window(
-    agent_type: AgentType,
-    env: &mut BTreeMap<String, String>,
-) {
+fn heal_kimi_env_model_context_window(agent_type: AgentType, env: &mut BTreeMap<String, String>) {
     if agent_type != AgentType::KimiCode {
         return;
     }
@@ -10457,9 +10464,12 @@ fn cascade_update_agent_config(
         }
         AgentType::Custom(_) => {
             // Custom agents are deliberately configuration-free: codeg writes
-            // no config file for them and they are excluded from the
-            // model-provider surface, so there is nothing to cascade. Whatever
-            // credentials they need go through the generic launch-env panel.
+            // no config file for them. Their Model Provider support is
+            // env-only projection at launch (see
+            // `model_provider_launch::apply_custom_env_only`), which needs no
+            // cascade, so there is still nothing to reconcile here — whatever
+            // native credentials they need go through the generic launch-env
+            // panel.
         }
     }
     Ok(())
@@ -10633,8 +10643,27 @@ pub(crate) async fn resolve_conversation_model_selection_core(
         return Ok(None);
     }
 
-    let api_types = crate::commands::model_provider_file::model_provider_api_types(&agent_type);
+    resolve_catalog_selection(data_dir, agent_type, &provider_id, &model_id).await
+}
+
+/// Validate a catalog (provider, model) pair against the agent's launch
+/// capability and resolve it into a launch selection.
+///
+/// `None` for an agent that cannot take the projection at all — a custom agent
+/// whose CLI keeps provider config in its own files. Built-ins have no such
+/// ambiguity, so an empty capability there is a real error.
+async fn resolve_catalog_selection(
+    data_dir: &Path,
+    agent_type: AgentType,
+    provider_id: &str,
+    model_id: &str,
+) -> Result<Option<ResolvedConversationModelSelection>, AcpError> {
+    let api_types =
+        crate::commands::model_provider_file::model_provider_api_types_for_agent(&agent_type);
     if api_types.is_empty() {
+        if matches!(agent_type, AgentType::Custom(_)) {
+            return Ok(None);
+        }
         return Err(AcpError::protocol(format!(
             "{agent_type:?} does not support the shared Model Provider source"
         )));
@@ -10642,8 +10671,8 @@ pub(crate) async fn resolve_conversation_model_selection_core(
 
     let (provider, model) = crate::commands::model_provider_file::resolve_model_selection_core(
         data_dir,
-        &provider_id,
-        &model_id,
+        provider_id,
+        model_id,
     )
     .await
     .map_err(|e| AcpError::protocol(e.to_string()))?;
@@ -10658,11 +10687,63 @@ pub(crate) async fn resolve_conversation_model_selection_core(
     }
 
     Ok(Some(ResolvedConversationModelSelection {
-        provider_id,
-        model_id,
+        provider_id: provider_id.to_string(),
+        model_id: model_id.to_string(),
         provider,
         model,
     }))
+}
+
+/// The provider/model this agent last used, remembered on its settings row
+/// (`agent_setting.catalog_provider_id` / `catalog_model_id`).
+///
+/// Launch paths that have no selection of their own resolve from here — the
+/// pre-bind session, or a conversation created before the user picked a
+/// provider. Without it such a launch gets no credentials at all, which an
+/// agent like `qwen-code` answers by refusing `session/new`
+/// ("Authentication required"), leaving the user unable to reach the picker
+/// that would fix it.
+///
+/// Every failure degrades to `None` (native launch): a remembered entry whose
+/// catalog row was deleted or disabled must not block a session the user can
+/// repair from the UI, and the launch logs a warning so the state is
+/// diagnosable.
+async fn resolve_agent_memory_model_selection(
+    db: &AppDatabase,
+    data_dir: &Path,
+    agent_type: AgentType,
+) -> Result<Option<ResolvedConversationModelSelection>, AcpError> {
+    let setting = agent_setting_service::get_by_agent_type(&db.conn, agent_type)
+        .await
+        .map_err(|e| AcpError::protocol(e.to_string()))?;
+    let Some(setting) = setting else {
+        return Ok(None);
+    };
+    if setting.model_source != "provider" {
+        return Ok(None);
+    }
+    let (Some(provider_id), Some(model_id)) =
+        (setting.catalog_provider_id, setting.catalog_model_id)
+    else {
+        return Ok(None);
+    };
+    let (provider_id, model_id) = (provider_id.trim().to_string(), model_id.trim().to_string());
+    if provider_id.is_empty() || model_id.is_empty() {
+        return Ok(None);
+    }
+
+    match resolve_catalog_selection(data_dir, agent_type, &provider_id, &model_id).await {
+        Ok(selection) => Ok(selection),
+        Err(e) => {
+            tracing::warn!(
+                "[ACP][{}] remembered provider selection {}/{} did not resolve; launching native: {e}",
+                agent_type,
+                provider_id,
+                model_id
+            );
+            Ok(None)
+        }
+    }
 }
 
 /// Overlay the resolved selection into the launch environment. This is the
@@ -10710,24 +10791,40 @@ fn apply_conversation_model_selection_env(
     );
 }
 
+/// A shared-catalog provider/model choice supplied by the connect caller —
+/// the composer's pick made before a conversation row exists (a pre-bind
+/// draft) or a remembered choice the client restored. Lets the pre-bind
+/// session launch WITH credentials instead of waiting for a conversation it
+/// cannot start without (see `resolve_agent_memory_model_selection`).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogModelSelectionInput {
+    pub provider_id: String,
+    pub model_id: String,
+}
+
 pub(crate) async fn build_session_runtime_env(
     db: &AppDatabase,
     agent_type: AgentType,
     session_id: Option<&str>,
     data_dir: &Path,
 ) -> Result<BTreeMap<String, String>, AcpError> {
-    build_session_runtime_env_with_conversation(db, agent_type, session_id, data_dir, None).await
+    build_session_runtime_env_with_conversation(db, agent_type, session_id, data_dir, None, None)
+        .await
 }
 
 /// [`build_session_runtime_env`] with an optional conversation selection.
 /// Launch paths that already know the conversation pass its id so the shared
-/// provider selection is validated and projected into the launch environment.
+/// provider selection is validated and projected into the launch environment;
+/// `selection_override` carries a choice the caller knows about but the
+/// database does not yet (a pre-bind draft pick).
 pub(crate) async fn build_session_runtime_env_with_conversation(
     db: &AppDatabase,
     agent_type: AgentType,
     session_id: Option<&str>,
     data_dir: &Path,
     conversation_id: Option<i32>,
+    selection_override: Option<&CatalogModelSelectionInput>,
 ) -> Result<BTreeMap<String, String>, AcpError> {
     let setting = agent_setting_service::get_by_agent_type(&db.conn, agent_type)
         .await
@@ -10773,18 +10870,98 @@ pub(crate) async fn build_session_runtime_env_with_conversation(
         runtime_env.insert("OPENCLAW_RESET_SESSION".into(), "1".into());
     }
 
-    if let Some(conversation_id) = conversation_id {
-        if let Some(selection) =
-            resolve_conversation_model_selection_core(db, data_dir, conversation_id).await?
-        {
-            apply_conversation_model_selection_env(&mut runtime_env, &selection);
-            crate::commands::model_provider_launch::apply_launch_adapter(
-                agent_type,
-                &selection,
-                &mut runtime_env,
-                data_dir,
-                conversation_id,
-            )?;
+    // Shared-provider credentials, by precedence: the conversation's own
+    // selection, the caller's pre-bind pick (or a restored remembered choice),
+    // then the agent's remembered one. The pre-bind session
+    // (`conversation_id == None`) has only the latter two — without them the
+    // launch carries no credentials and an agent that cannot start
+    // unauthenticated (`qwen-code`) never gets far enough for the user to pick
+    // one.
+    let selection = match conversation_id {
+        Some(conversation_id) => {
+            match resolve_conversation_model_selection_core(db, data_dir, conversation_id).await? {
+                Some(selection) => Some(selection),
+                None => match selection_override {
+                    Some(override_selection) => {
+                        resolve_catalog_selection(
+                            data_dir,
+                            agent_type,
+                            override_selection.provider_id.trim(),
+                            override_selection.model_id.trim(),
+                        )
+                        .await?
+                    }
+                    None => resolve_agent_memory_model_selection(db, data_dir, agent_type).await?,
+                },
+            }
+        }
+        None => match selection_override {
+            Some(override_selection) => {
+                resolve_catalog_selection(
+                    data_dir,
+                    agent_type,
+                    override_selection.provider_id.trim(),
+                    override_selection.model_id.trim(),
+                )
+                .await?
+            }
+            None => resolve_agent_memory_model_selection(db, data_dir, agent_type).await?,
+        },
+    };
+
+    if let Some(selection) = selection {
+        apply_conversation_model_selection_env(&mut runtime_env, &selection);
+        // Custom agents carry an optional per-slot env-key declaration on
+        // their stored definition; when there is none, codeg's verified
+        // contract for that agent supplies the names (see
+        // `custom_registry::effective_model_env`). Built-ins need neither.
+        let model_env = match &agent_type {
+            AgentType::Custom(id) => crate::acp::custom_registry::effective_model_env(
+                id,
+                crate::acp::custom_registry::model_env_of(id).as_ref(),
+            ),
+            _ => None,
+        };
+        match conversation_id {
+            Some(conversation_id) => {
+                crate::commands::model_provider_launch::apply_launch_adapter(
+                    agent_type,
+                    &selection,
+                    &mut runtime_env,
+                    data_dir,
+                    conversation_id,
+                    model_env.as_ref(),
+                )?;
+            }
+            // No conversation to hang a per-conversation workspace off yet.
+            // Only the env-only half of the projection runs, and only for
+            // agents that need it to start at all — the workspace agents
+            // (codex, cline, opencode, …) keep their previous pre-bind
+            // behaviour and pick the full projection up once the conversation
+            // exists, instead of sharing a bogus `0` workspace between drafts.
+            None => {
+                if matches!(agent_type, AgentType::Custom(_)) {
+                    crate::commands::model_provider_launch::apply_custom_env_only(
+                        &selection,
+                        &mut runtime_env,
+                        model_env.as_ref(),
+                    )?;
+                }
+            }
+        }
+    } else if matches!(agent_type, AgentType::Custom(_)) {
+        let provider_sourced = agent_setting_service::get_by_agent_type(&db.conn, agent_type)
+            .await
+            .map_err(|e| AcpError::protocol(e.to_string()))?
+            .map(|setting| setting.model_source == "provider")
+            .unwrap_or(false);
+        if provider_sourced {
+            tracing::warn!(
+                "[ACP][{}] model source is \"provider\" but no provider/model selection could be \
+                 resolved (no conversation selection and no remembered choice); launching with the \
+                 agent's own configuration",
+                agent_type
+            );
         }
     }
 
@@ -10896,6 +11073,7 @@ pub(crate) async fn compute_conversation_config_fingerprint(
         None,
         data_dir,
         Some(conversation_id),
+        None,
     )
     .await?;
     Ok(fingerprint_config(agent_type, &runtime_env))
@@ -11004,6 +11182,7 @@ pub async fn acp_connect(
     preferred_mode_id: Option<String>,
     preferred_config_values: Option<BTreeMap<String, String>>,
     conversation_id: Option<i32>,
+    model_selection: Option<CatalogModelSelectionInput>,
     manager: State<'_, ConnectionManager>,
     db: State<'_, AppDatabase>,
     app_handle: tauri::AppHandle,
@@ -11025,6 +11204,7 @@ pub async fn acp_connect(
         session_id.as_deref(),
         &app_data_dir,
         conversation_id,
+        model_selection.as_ref(),
     )
     .await?;
 
@@ -11046,6 +11226,62 @@ pub async fn acp_connect(
             preferred_config_values.unwrap_or_default(),
         )
         .await
+}
+
+/// Remember a shared-catalog provider/model for an agent without a
+/// conversation.
+///
+/// The composer's pre-bind pick has no conversation row to save to
+/// (`update_conversation_model_selection` needs one), but the pre-bind session
+/// still has to launch — and an agent like `qwen-code` refuses `session/new`
+/// without credentials. Validated against the catalog first so a dead entry is
+/// never stored.
+pub async fn acp_remember_agent_model_selection_core(
+    db: &AppDatabase,
+    data_dir: &Path,
+    agent_type: AgentType,
+    provider_id: String,
+    model_id: String,
+) -> Result<(), AcpError> {
+    let provider_id = provider_id.trim().to_string();
+    let model_id = model_id.trim().to_string();
+    if provider_id.is_empty() || model_id.is_empty() {
+        return Err(AcpError::protocol(
+            "provider id and model id must both be set",
+        ));
+    }
+    let selection =
+        resolve_catalog_selection(data_dir, agent_type, &provider_id, &model_id).await?;
+    if selection.is_none() {
+        return Err(AcpError::protocol(format!(
+            "{agent_type:?} does not support the shared Model Provider source"
+        )));
+    }
+    agent_setting_service::set_catalog_model_selection(
+        &db.conn,
+        agent_type,
+        &provider_id,
+        &model_id,
+    )
+    .await
+    .map_err(|e| AcpError::protocol(e.to_string()))
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[tauri::command]
+pub async fn acp_remember_agent_model_selection(
+    agent_type: AgentType,
+    provider_id: String,
+    model_id: String,
+    db: State<'_, AppDatabase>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), AcpError> {
+    let data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    acp_remember_agent_model_selection_core(&db, &data_dir, agent_type, provider_id, model_id).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -11711,6 +11947,14 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
             // today, customs only when the user declared the shared
             // `.agents/skills` store.
             skills_capable: skill_storage_spec(agent_type).is_some(),
+            // Same reasoning: the composer and settings filter the provider
+            // list with the families codeg would actually accept a selection
+            // for, so the rule lives with the launch code that enforces it.
+            model_provider_api_types:
+                crate::commands::model_provider_file::model_provider_api_types_for_agent(&agent_type)
+                    .iter()
+                .map(|api| api.as_str().to_string())
+                .collect(),
         });
     }
 
@@ -11745,8 +11989,7 @@ pub async fn acp_clear_binary_cache(agent_type: AgentType) -> Result<(), AcpErro
 /// Scan the system temp directory for artifacts leaked by agent launches from
 /// BEFORE per-launch temp isolation shipped. Read-only.
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn acp_scan_leaked_temp(
-) -> Result<crate::acp::temp_reclaim::LeakedTempScan, AcpError> {
+pub async fn acp_scan_leaked_temp() -> Result<crate::acp::temp_reclaim::LeakedTempScan, AcpError> {
     tokio::task::spawn_blocking(crate::acp::temp_reclaim::scan)
         .await
         .map_err(|e| AcpError::protocol(e.to_string()))
@@ -16975,6 +17218,7 @@ wire_api = "chat"
             None,
             catalog.path(),
             Some(conv.id),
+            None,
         )
         .await
         .expect("build launch env");
@@ -17028,6 +17272,464 @@ wire_api = "chat"
         )
         .expect("secrets json");
         assert_eq!(secrets["openAiApiKey"], "test-key");
+    }
+
+    /// Seed a shared provider catalog, a conversation bound to one of its
+    /// models, and `agent_type`'s model source = "provider" — then return the
+    /// launch env `build_session_runtime_env_with_conversation` produces. This
+    /// is the exact chain the spawn path runs, so the assertions below cover
+    /// the wiring rather than one function in isolation.
+    async fn custom_agent_launch_env(
+        agent_id: &'static str,
+        model_env: Option<crate::acp::custom_registry::ModelEnvDeclaration>,
+    ) -> BTreeMap<String, String> {
+        use crate::acp::custom_registry::{
+            CustomAgentDef, CustomAgentSpec, CustomDistributionKind, NpxSpec,
+        };
+        use crate::models::model_provider_file::{
+            ModelEntryDraft, ModelProviderApiType, ModelProviderDraft, WireModelInput,
+        };
+
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let catalog = tempfile::tempdir().expect("catalog dir");
+        let agent = AgentType::Custom(agent_id);
+
+        // The stored definition is what the capability gate and the env-key
+        // declaration are read from.
+        crate::db::service::custom_agent_service::upsert(
+            &db.conn,
+            &CustomAgentDef {
+                registry_id: agent_id.to_string(),
+                name: agent_id.to_string(),
+                description: String::new(),
+                version: "1.0.0".to_string(),
+                distribution_kind: CustomDistributionKind::Npx,
+                spec: CustomAgentSpec {
+                    npx: Some(NpxSpec {
+                        package: "some-acp-agent@1.0.0".to_string(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                icon_url: None,
+                skills_shared_store: false,
+                skills_dir: None,
+                source: Default::default(),
+                version_probe: None,
+                supports_mcp: true,
+                model_env,
+            },
+        )
+        .await
+        .expect("seed custom agent");
+        // The launch path reads the hydrated registry cache, so mirror what a
+        // real save does before building the env.
+        crate::db::service::custom_agent_service::hydrate_registry(&db.conn)
+            .await
+            .expect("hydrate registry");
+
+        crate::commands::model_provider_file::create_model_provider_core(
+            catalog.path(),
+            ModelProviderDraft {
+                provider_id: "provider-a".to_string(),
+                original_id: String::new(),
+                api: ModelProviderApiType::OpenAiCompletions,
+                base_url: "https://example.com/v1".to_string(),
+                proxy: None,
+                api_key: "test-key".to_string(),
+                auth_header: true,
+                compat_supports_developer_role: None,
+                enabled: true,
+                models: vec![ModelEntryDraft {
+                    id: "model-a".to_string(),
+                    reasoning: true,
+                    input: WireModelInput::TextImage,
+                    context_window: None,
+                    max_tokens: None,
+                    base_instructions: None,
+                }],
+                clear_api_key: None,
+            },
+        )
+        .await
+        .expect("create provider");
+
+        let folder =
+            crate::db::test_helpers::seed_folder(&db, &format!("/tmp/codeg-{agent_id}-launch"))
+                .await;
+        let conv = conversation_service::create(
+            &db.conn,
+            folder,
+            agent,
+            Some("provider selection".to_string()),
+            None,
+        )
+        .await
+        .expect("create conversation");
+        conversation_service::update_model_selection(
+            &db.conn,
+            conv.id,
+            Some("provider-a".to_string()),
+            Some("model-a".to_string()),
+        )
+        .await
+        .expect("save selection");
+
+        agent_setting_service::ensure_defaults(
+            &db.conn,
+            &[agent_setting_service::AgentDefaultInput {
+                agent_type: agent,
+                registry_id: agent_id.to_string(),
+                default_sort_order: 0,
+            }],
+        )
+        .await
+        .expect("ensure defaults");
+        agent_setting_service::update(
+            &db.conn,
+            agent,
+            agent_setting_service::AgentSettingsUpdate {
+                enabled: true,
+                env_json: None,
+                model_provider_id: None,
+                model_source: "provider".to_string(),
+            },
+        )
+        .await
+        .expect("switch source");
+
+        build_session_runtime_env_with_conversation(
+            &db,
+            agent,
+            None,
+            catalog.path(),
+            Some(conv.id),
+            None,
+        )
+        .await
+        .expect("build launch env")
+    }
+
+    /// Qwen Code is a verified standard-convention reader: a provider
+    /// selection reaches its process as the `OPENAI_*` trio, which the CLI
+    /// treats as "use this OpenAI-compatible endpoint" (verified against the
+    /// real package).
+    #[tokio::test]
+    async fn qwen_code_provider_selection_projects_the_openai_trio() {
+        let env = custom_agent_launch_env("qwen-code", None).await;
+        assert_eq!(
+            env.get("OPENAI_BASE_URL").map(String::as_str),
+            Some("https://example.com/v1")
+        );
+        assert_eq!(
+            env.get("OPENAI_API_KEY").map(String::as_str),
+            Some("test-key")
+        );
+        assert_eq!(env.get("OPENAI_MODEL").map(String::as_str), Some("model-a"));
+        assert_eq!(
+            env.get("CODEG_MODEL_SOURCE").map(String::as_str),
+            Some("provider")
+        );
+    }
+
+    /// GLM Agent reads its own key names, so its stored declaration is what
+    /// the projection injects (`glm-acp-agent`'s documented env contract).
+    #[tokio::test]
+    async fn declared_custom_agent_provider_selection_projects_declared_keys() {
+        use crate::acp::custom_registry::ModelEnvDeclaration;
+
+        let env = custom_agent_launch_env(
+            "glm-acp-agent",
+            Some(ModelEnvDeclaration {
+                base_url: Some("ACP_GLM_BASE_URL".to_string()),
+                api_key: Some("Z_AI_API_KEY".to_string()),
+                model: Some("ACP_GLM_MODEL".to_string()),
+            }),
+        )
+        .await;
+        assert_eq!(
+            env.get("ACP_GLM_BASE_URL").map(String::as_str),
+            Some("https://example.com/v1")
+        );
+        assert_eq!(
+            env.get("Z_AI_API_KEY").map(String::as_str),
+            Some("test-key")
+        );
+        assert_eq!(
+            env.get("ACP_GLM_MODEL").map(String::as_str),
+            Some("model-a")
+        );
+        // The standard keys are NOT sprayed at an agent that did not ask for
+        // them — they could mean something else to its CLI.
+        assert!(!env.contains_key("OPENAI_BASE_URL"));
+        assert!(!env.contains_key("OPENAI_API_KEY"));
+        assert!(!env.contains_key("OPENAI_MODEL"));
+    }
+
+    /// GLM Agent without a declaration launches through its SHIPPED contract:
+    /// `ACP_GLM_*` names and nothing else — in particular no `OPENAI_*`, which
+    /// its CLI never reads.
+    #[tokio::test]
+    async fn glm_agent_uses_the_built_in_contract_without_a_declaration() {
+        let env = custom_agent_launch_env("glm-acp-agent", None).await;
+        assert_eq!(
+            env.get("ACP_GLM_BASE_URL").map(String::as_str),
+            Some("https://example.com/v1")
+        );
+        assert_eq!(env.get("Z_AI_API_KEY").map(String::as_str), Some("test-key"));
+        assert_eq!(
+            env.get("ACP_GLM_MODEL").map(String::as_str),
+            Some("model-a")
+        );
+        assert!(!env.contains_key("OPENAI_BASE_URL"));
+        assert!(!env.contains_key("OPENAI_API_KEY"));
+        assert!(!env.contains_key("OPENAI_MODEL"));
+    }
+
+    /// An agent codeg cannot project into (provider config lives in its own
+    /// files, e.g. Kilo / MiniMax Code) starts native even if a provider
+    /// selection was recorded earlier — no half-applied credentials.
+    #[tokio::test]
+    async fn unprojectable_custom_agent_launches_native() {
+        let env = custom_agent_launch_env("kilo", None).await;
+        assert!(!env.contains_key("OPENAI_BASE_URL"));
+        assert!(!env.contains_key("OPENAI_API_KEY"));
+        assert!(!env.contains_key("OPENAI_MODEL"));
+        assert!(
+            !env.contains_key("CODEG_MODEL_SOURCE"),
+            "the selection is dropped rather than half-applied"
+        );
+    }
+
+    /// A conversation created before the user picked a provider still gets
+    /// credentials when the agent remembers one — the "remembered first,
+    /// otherwise pick" rule. Without this an agent that cannot start
+    /// unauthenticated (qwen-code) never gets far enough to be configured.
+    #[tokio::test]
+    async fn remembered_agent_selection_covers_pre_bind_and_unset_conversations() {
+        use crate::acp::custom_registry::{
+            CustomAgentDef, CustomAgentSpec, CustomDistributionKind, ModelEnvDeclaration, NpxSpec,
+        };
+        use crate::models::model_provider_file::{
+            ModelEntryDraft, ModelProviderApiType, ModelProviderDraft, WireModelInput,
+        };
+
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let catalog = tempfile::tempdir().expect("catalog dir");
+        let agent = AgentType::Custom("qwen-code");
+        crate::db::service::custom_agent_service::upsert(
+            &db.conn,
+            &CustomAgentDef {
+                registry_id: "qwen-code".to_string(),
+                name: "Qwen Code".to_string(),
+                description: String::new(),
+                version: "0.23.3".to_string(),
+                distribution_kind: CustomDistributionKind::Npx,
+                spec: CustomAgentSpec {
+                    npx: Some(NpxSpec {
+                        package: "@qwen-code/qwen-code@0.23.3".to_string(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                icon_url: None,
+                skills_shared_store: false,
+                skills_dir: None,
+                source: Default::default(),
+                version_probe: None,
+                supports_mcp: true,
+                // Exactly the qwen-code case: standard keys, no declaration.
+                model_env: None::<ModelEnvDeclaration>,
+            },
+        )
+        .await
+        .expect("seed custom agent");
+        crate::db::service::custom_agent_service::hydrate_registry(&db.conn)
+            .await
+            .expect("hydrate registry");
+
+        crate::commands::model_provider_file::create_model_provider_core(
+            catalog.path(),
+            ModelProviderDraft {
+                provider_id: "provider-a".to_string(),
+                original_id: String::new(),
+                api: ModelProviderApiType::OpenAiCompletions,
+                base_url: "https://example.com/v1".to_string(),
+                proxy: None,
+                api_key: "test-key".to_string(),
+                auth_header: true,
+                compat_supports_developer_role: None,
+                enabled: true,
+                models: vec![ModelEntryDraft {
+                    id: "model-a".to_string(),
+                    reasoning: true,
+                    input: WireModelInput::TextImage,
+                    context_window: None,
+                    max_tokens: None,
+                    base_instructions: None,
+                }],
+                clear_api_key: None,
+            },
+        )
+        .await
+        .expect("create provider");
+
+        agent_setting_service::ensure_defaults(
+            &db.conn,
+            &[agent_setting_service::AgentDefaultInput {
+                agent_type: agent,
+                registry_id: "qwen-code".to_string(),
+                default_sort_order: 0,
+            }],
+        )
+        .await
+        .expect("ensure defaults");
+        agent_setting_service::update(
+            &db.conn,
+            agent,
+            agent_setting_service::AgentSettingsUpdate {
+                enabled: true,
+                env_json: None,
+                model_provider_id: None,
+                model_source: "provider".to_string(),
+            },
+        )
+        .await
+        .expect("switch source");
+
+        // Before any selection is remembered: nothing to project, and the
+        // pre-bind launch is native (which is what the UI now refuses to do
+        // for an agent that needs credentials).
+        let env = build_session_runtime_env_with_conversation(
+            &db,
+            agent,
+            None,
+            catalog.path(),
+            None,
+            None,
+        )
+        .await
+        .expect("pre-bind env");
+        assert!(!env.contains_key("OPENAI_BASE_URL"));
+
+        // Remembering a choice (what saving a conversation selection does, and
+        // what a pre-bind pick now does through the command surface) is enough
+        // for the pre-bind launch to carry credentials.
+        assert!(
+            super::acp_remember_agent_model_selection_core(
+                &db,
+                catalog.path(),
+                agent,
+                "no-such-provider".to_string(),
+                "model-a".to_string(),
+            )
+            .await
+            .is_err(),
+            "a selection that does not resolve must not be remembered"
+        );
+        super::acp_remember_agent_model_selection_core(
+            &db,
+            catalog.path(),
+            agent,
+            "provider-a".to_string(),
+            "model-a".to_string(),
+        )
+        .await
+        .expect("remember selection");
+
+        let env = build_session_runtime_env_with_conversation(
+            &db,
+            agent,
+            None,
+            catalog.path(),
+            None,
+            None,
+        )
+        .await
+        .expect("pre-bind env");
+        assert_eq!(
+            env.get("OPENAI_BASE_URL").map(String::as_str),
+            Some("https://example.com/v1")
+        );
+        assert_eq!(
+            env.get("OPENAI_API_KEY").map(String::as_str),
+            Some("test-key")
+        );
+        assert_eq!(env.get("OPENAI_MODEL").map(String::as_str), Some("model-a"));
+
+        // …and a conversation that has no selection of its own resolves the
+        // same way, while an explicit conversation selection still wins.
+        let folder =
+            crate::db::test_helpers::seed_folder(&db, "/tmp/codeg-remembered-selection").await;
+        let conv = conversation_service::create(
+            &db.conn,
+            folder,
+            agent,
+            Some("no selection yet".to_string()),
+            None,
+        )
+        .await
+        .expect("create conversation");
+        let env = build_session_runtime_env_with_conversation(
+            &db,
+            agent,
+            None,
+            catalog.path(),
+            Some(conv.id),
+            None,
+        )
+        .await
+        .expect("conversation env");
+        assert_eq!(env.get("OPENAI_MODEL").map(String::as_str), Some("model-a"));
+
+        crate::commands::model_provider_file::create_model_provider_core(
+            catalog.path(),
+            ModelProviderDraft {
+                provider_id: "provider-b".to_string(),
+                original_id: String::new(),
+                api: ModelProviderApiType::OpenAiCompletions,
+                base_url: "https://other.example.com/v1".to_string(),
+                proxy: None,
+                api_key: "other-key".to_string(),
+                auth_header: true,
+                compat_supports_developer_role: None,
+                enabled: true,
+                models: vec![ModelEntryDraft {
+                    id: "model-b".to_string(),
+                    reasoning: true,
+                    input: WireModelInput::TextImage,
+                    context_window: None,
+                    max_tokens: None,
+                    base_instructions: None,
+                }],
+                clear_api_key: None,
+            },
+        )
+        .await
+        .expect("create second provider");
+        conversation_service::update_model_selection(
+            &db.conn,
+            conv.id,
+            Some("provider-b".to_string()),
+            Some("model-b".to_string()),
+        )
+        .await
+        .expect("save selection");
+        let env = build_session_runtime_env_with_conversation(
+            &db,
+            agent,
+            None,
+            catalog.path(),
+            Some(conv.id),
+            None,
+        )
+        .await
+        .expect("conversation env");
+        assert_eq!(
+            env.get("OPENAI_BASE_URL").map(String::as_str),
+            Some("https://other.example.com/v1"),
+            "the conversation's own selection outranks the remembered one"
+        );
     }
 
     #[tokio::test]
@@ -17111,6 +17813,7 @@ wire_api = "chat"
             None,
             catalog.path(),
             Some(conv.id),
+            None,
         )
         .await
         .expect("build launch env with selection");
@@ -17140,6 +17843,7 @@ wire_api = "chat"
             None,
             catalog.path(),
             Some(conv.id),
+            None,
         )
         .await
         .expect("build launch env without selection");
@@ -17225,6 +17929,7 @@ wire_api = "chat"
             None,
             catalog.path(),
             Some(conv.id),
+            None,
         )
         .await;
         assert!(result.is_err(), "corrupt catalog must fail launch");
@@ -19329,7 +20034,9 @@ wire_api = "chat"
         );
         heal_kimi_env_model_context_window(AgentType::KimiCode, &mut explicit);
         assert_eq!(
-            explicit.get("KIMI_MODEL_MAX_CONTEXT_SIZE").map(String::as_str),
+            explicit
+                .get("KIMI_MODEL_MAX_CONTEXT_SIZE")
+                .map(String::as_str),
             Some("262144")
         );
 
@@ -19990,7 +20697,11 @@ model = "gpt"
     /// each of these assertions is the difference between a working agent and a
     /// user whose every provider silently vanished.
     fn assert_valid_cline_provider_store(root: &serde_json::Value) {
-        assert_eq!(root["version"], serde_json::json!(1), "version is a zod literal");
+        assert_eq!(
+            root["version"],
+            serde_json::json!(1),
+            "version is a zod literal"
+        );
         assert!(root["modes"].is_object(), "`modes` must be an object");
         for (id, entry) in root["providers"].as_object().expect("providers object") {
             let token_source = entry["tokenSource"].as_str().unwrap_or_default();
@@ -20127,7 +20838,10 @@ model = "gpt"
             root["providers"]["deepseek"]["settings"]["reasoning"]["effort"],
             "high"
         );
-        assert_eq!(root["providers"]["deepseek"]["settings"]["apiKey"], "sk-rotated");
+        assert_eq!(
+            root["providers"]["deepseek"]["settings"]["apiKey"],
+            "sk-rotated"
+        );
         assert_eq!(root["lastUsedProvider"], "deepseek");
     }
 
@@ -20135,13 +20849,27 @@ model = "gpt"
     fn cline_save_clears_a_field_the_panel_emptied() {
         let store = ClineStore::new();
         store
-            .save("openai-native", Some("sk-a"), Some("gpt-5.4"), Some("https://a.example/v1"))
+            .save(
+                "openai-native",
+                Some("sk-a"),
+                Some("gpt-5.4"),
+                Some("https://a.example/v1"),
+            )
             .expect("save");
-        store.save("openai-native", Some("sk-a"), None, None).expect("save 2");
+        store
+            .save("openai-native", Some("sk-a"), None, None)
+            .expect("save 2");
 
-        let settings = read_cline_json(&store.providers)["providers"]["openai-native"]["settings"].clone();
-        assert!(settings.get("model").is_none(), "cleared model must be removed");
-        assert!(settings.get("baseUrl").is_none(), "cleared base URL must be removed");
+        let settings =
+            read_cline_json(&store.providers)["providers"]["openai-native"]["settings"].clone();
+        assert!(
+            settings.get("model").is_none(),
+            "cleared model must be removed"
+        );
+        assert!(
+            settings.get("baseUrl").is_none(),
+            "cleared base URL must be removed"
+        );
     }
 
     #[test]
@@ -20165,7 +20893,9 @@ model = "gpt"
         )
         .expect("seed");
 
-        store.save("openai-codex", Some("sk-x"), None, None).expect("save");
+        store
+            .save("openai-codex", Some("sk-x"), None, None)
+            .expect("save");
         assert_eq!(
             read_cline_json(&store.providers)["providers"]["openai-codex"]["tokenSource"],
             "oauth",
@@ -20194,7 +20924,9 @@ model = "gpt"
         )
         .expect("seed");
 
-        store.save("deepseek", Some("sk-x"), None, None).expect("save");
+        store
+            .save("deepseek", Some("sk-x"), None, None)
+            .expect("save");
         // Round-tripping the out-of-enum value would hand cline a file it reads
         // as empty — every provider gone, endpoint and key with it.
         assert_valid_cline_provider_store(&read_cline_json(&store.providers));
@@ -20236,16 +20968,29 @@ model = "gpt"
     fn cline_models_catalog_keeps_models_registered_elsewhere() {
         let store = ClineStore::new();
         store
-            .save("openai-compatible", Some("sk"), Some("first"), Some("https://a.example/v1"))
+            .save(
+                "openai-compatible",
+                Some("sk"),
+                Some("first"),
+                Some("https://a.example/v1"),
+            )
             .expect("save");
         store
-            .save("openai-compatible", Some("sk"), Some("second"), Some("https://b.example/v1"))
+            .save(
+                "openai-compatible",
+                Some("sk"),
+                Some("second"),
+                Some("https://b.example/v1"),
+            )
             .expect("save 2");
 
         let entry = read_cline_json(&store.models)["providers"]["openai-compatible"].clone();
         assert_eq!(entry["provider"]["defaultModelId"], "second");
         assert_eq!(entry["provider"]["baseUrl"], "https://b.example/v1");
-        assert!(entry["models"]["first"].is_object(), "earlier model stays selectable");
+        assert!(
+            entry["models"]["first"].is_object(),
+            "earlier model stays selectable"
+        );
         assert!(entry["models"]["second"].is_object());
     }
 
@@ -20267,16 +21012,28 @@ model = "gpt"
         );
 
         store
-            .save("openai-compatible", Some("sk"), Some("m"), Some("http://127.0.0.1:11434/v1"))
+            .save(
+                "openai-compatible",
+                Some("sk"),
+                Some("m"),
+                Some("http://127.0.0.1:11434/v1"),
+            )
             .expect("a plain-http loopback endpoint is legitimate");
     }
 
     #[test]
     fn cline_reader_picks_the_last_used_provider() {
         let store = ClineStore::new();
-        store.save("deepseek", Some("sk-deep"), Some("deepseek-chat"), None).expect("save");
         store
-            .save("openai-compatible", Some("sk-compat"), Some("m"), Some("https://a.example/v1"))
+            .save("deepseek", Some("sk-deep"), Some("deepseek-chat"), None)
+            .expect("save");
+        store
+            .save(
+                "openai-compatible",
+                Some("sk-compat"),
+                Some("m"),
+                Some("https://a.example/v1"),
+            )
             .expect("save 2");
 
         let loaded = load_cline_provider_settings_at(&store.providers).expect("load");
@@ -20349,7 +21106,10 @@ model = "gpt"
             "model": "my-model",
             "apiBaseUrl": "https://proxy.example/v1",
         }));
-        assert_eq!(env.get("CLINE_API_KEY").map(String::as_str), Some("sk-test"));
+        assert_eq!(
+            env.get("CLINE_API_KEY").map(String::as_str),
+            Some("sk-test")
+        );
         assert_eq!(
             env.get("CLINE_PROVIDER").map(String::as_str),
             Some("openai-compatible"),
@@ -20359,7 +21119,10 @@ model = "gpt"
         // The endpoint travels in providers.json — `CLINE_API_BASE_URL` is
         // cline's ACCOUNT service and must never receive an LLM endpoint.
         assert!(!env.contains_key("CLINE_API_BASE_URL"));
-        assert!(!env.contains_key("OPENAI_API_KEY"), "the cline key must not leak into OPENAI_*");
+        assert!(
+            !env.contains_key("OPENAI_API_KEY"),
+            "the cline key must not leak into OPENAI_*"
+        );
     }
 
     #[test]
@@ -20552,7 +21315,10 @@ model = "gpt"
         }));
         // Ollama has no API key, but the gate only tests the var for emptiness.
         assert_eq!(env.get("CLINE_API_KEY").map(String::as_str), Some("local"));
-        assert_eq!(env.get("CLINE_PROVIDER").map(String::as_str), Some("ollama"));
+        assert_eq!(
+            env.get("CLINE_PROVIDER").map(String::as_str),
+            Some("ollama")
+        );
     }
 
     #[test]
@@ -20568,6 +21334,8 @@ model = "gpt"
             env_json: Some(serde_json::json!({ "CLINE_PROVIDER": "cline-pass" }).to_string()),
             model_provider_id: None,
             model_source: "native".to_string(),
+            catalog_provider_id: None,
+            catalog_model_id: None,
             created_at: now,
             updated_at: now,
         };
@@ -20576,6 +21344,9 @@ model = "gpt"
             Some(&setting),
             Some(&serde_json::json!({ "apiProvider": "deepseek", "apiKey": "sk" }).to_string()),
         );
-        assert_eq!(env.get("CLINE_PROVIDER").map(String::as_str), Some("cline-pass"));
+        assert_eq!(
+            env.get("CLINE_PROVIDER").map(String::as_str),
+            Some("cline-pass")
+        );
     }
 }

@@ -514,6 +514,8 @@ mod tests {
             env_json: Set(Some("{}".to_string())),
             model_provider_id: Set(Some(provider.id)),
             model_source: Set("native".to_string()),
+            catalog_provider_id: Set(None),
+            catalog_model_id: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         }

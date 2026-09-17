@@ -9,9 +9,10 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react"
-import { Reorder, useDragControls } from "motion/react"
+import { Reorder } from "motion/react"
 import { useLocale, useTranslations } from "next-intl"
 import { useImeGuard } from "@/hooks/use-ime-guard"
+import { useLongPressDrag } from "@/hooks/use-long-press-drag"
 import { useSearchParams } from "next/navigation"
 import {
   AlertCircle,
@@ -135,7 +136,7 @@ import { CodexModelListEditor } from "@/components/settings/codex-model-list-edi
 import {
   countCompatibleModelProviders,
   getModelProviderApiTypes,
-  MODEL_PROVIDER_SOURCE_CARD_AGENT_TYPES,
+  supportsModelProviderSourceCard,
 } from "@/lib/model-provider-capabilities"
 import type {
   ModelProviderApiType,
@@ -4281,7 +4282,19 @@ function AgentReorderItem({
   onSelect,
   children,
 }: AgentReorderItemProps) {
-  const dragControls = useDragControls()
+  // Mouse: drag starts immediately on grip pointerdown. Touch/pen: a
+  // long-press (anywhere on the card, including the grip) starts the drag
+  // via useLongPressDrag, which installs a native touchmove guard so the
+  // browser's scroll gesture doesn't swallow the reorder on mobile.
+  const handleTouchDragStart = useCallback(() => {
+    onDragStart(agent.agent_type)
+  }, [agent.agent_type, onDragStart])
+
+  const { dragControls, gestureHandlers } = useLongPressDrag({
+    enabled: !reordering,
+    onStart: handleTouchDragStart,
+    onEnd: onDragEnd,
+  })
 
   const startDrag = useCallback(
     (event: PointerEvent<HTMLButtonElement>) => {
@@ -4290,6 +4303,16 @@ function AgentReorderItem({
       dragControls.start(event)
     },
     [dragControls]
+  )
+
+  // Touch/pen pointerdowns fall through to the item-level gestureHandlers
+  // (bubble up from the grip), which run the long-press flow.
+  const handleGripPointerDown = useCallback(
+    (event: PointerEvent<HTMLButtonElement>) => {
+      if (event.pointerType !== "mouse") return
+      startDrag(event)
+    },
+    [startDrag]
   )
 
   return (
@@ -4303,15 +4326,21 @@ function AgentReorderItem({
       dragMomentum={false}
       layout="position"
       className={cn(
-        "rounded-lg border bg-card p-3 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        "select-none rounded-lg border bg-card p-3 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
         selected && "border-primary/60 bg-primary/5",
-        dragging === agent.agent_type && "border-primary/60 bg-primary/5"
+        dragging === agent.agent_type &&
+          "border-primary/60 bg-primary/5 touch-none"
       )}
       tabIndex={0}
+      {...gestureHandlers}
       onDragStart={() => {
+        gestureHandlers.onDragStart()
         onDragStart(agent.agent_type)
       }}
-      onDragEnd={onDragEnd}
+      onDragEnd={() => {
+        gestureHandlers.onDragEnd()
+        onDragEnd()
+      }}
       onClick={() => {
         onSelect(agent.agent_type)
       }}
@@ -4322,7 +4351,7 @@ function AgentReorderItem({
         onSelect(agent.agent_type)
       }}
     >
-      {children(startDrag)}
+      {children(handleGripPointerDown)}
     </Reorder.Item>
   )
 }
@@ -4791,6 +4820,44 @@ export function AcpAgentSettings() {
       }, 150)
     },
     [t]
+  )
+
+  /** Flip an agent's Model Source (native ↔ shared provider), shared by the
+   * built-in source-card panel and the custom-agent panel. Optimistic update
+   * with rollback, plus the affected-sessions toast. */
+  const handleModelSourceSelect = useCallback(
+    (agentType: AgentType, selected: boolean) => {
+      const previous = modelProviderSources[agentType] ?? false
+      setModelProviderSources((prev) => ({
+        ...prev,
+        [agentType]: selected,
+      }))
+      acpUpdateAgentModelSource(agentType, selected ? "provider" : "native")
+        .then((affected) => {
+          reportAffectedSessions(affected)
+          setAgents((prev) =>
+            prev.map((agent) =>
+              agent.agent_type === agentType
+                ? {
+                    ...agent,
+                    model_source: selected ? "provider" : "native",
+                  }
+                : agent
+            )
+          )
+        })
+        .catch((err) => {
+          console.error("[Settings] save model source failed:", err)
+          setModelProviderSources((prev) => ({
+            ...prev,
+            [agentType]: previous,
+          }))
+          toast.error(t("toasts.saveEnvFailed"), {
+            description: toErrorMessage(err),
+          })
+        })
+    },
+    [modelProviderSources, reportAffectedSessions, setAgents, t]
   )
 
   const persistEnv = useCallback(
@@ -5613,20 +5680,45 @@ export function AcpAgentSettings() {
     : false
 
   const selectedAgentKind = selectedAgent?.agent_type ?? null
+  // A custom agent is only offered the shared provider source when its stored
+  // definition can actually take the projection (declared env names, or a
+  // verified standard-convention reader) — see
+  // `custom_registry::supports_model_provider_env`.
+  // A custom agent's projectable API families come from the backend
+  // (`AcpAgentInfo.model_provider_api_types`): a verified env contract pins
+  // what its CLI speaks, a user declaration is permissive. Empty means codeg
+  // cannot project into it, so the card is not offered at all.
+  const selectedCustomAgentApiTypes = useMemo(() => {
+    if (!selectedAgentKind || !isCustomAgentType(selectedAgentKind)) return []
+    return (agents.find((agent) => agent.agent_type === selectedAgentKind)
+      ?.model_provider_api_types ?? []) as ModelProviderApiType[]
+  }, [agents, selectedAgentKind])
   const selectedModelProviderApiTypes = useMemo(
     () =>
-      selectedAgentKind ? getModelProviderApiTypes(selectedAgentKind) : [],
-    [selectedAgentKind]
+      selectedAgentKind
+        ? getModelProviderApiTypes(
+            selectedAgentKind,
+            selectedCustomAgentApiTypes
+          )
+        : [],
+    [selectedAgentKind, selectedCustomAgentApiTypes]
   )
   const selectedCompatibleModelProviderCount = useMemo(
     () =>
       selectedAgentKind
-        ? countCompatibleModelProviders(modelProviderRecords, selectedAgentKind)
+        ? countCompatibleModelProviders(
+            modelProviderRecords,
+            selectedAgentKind,
+            selectedCustomAgentApiTypes
+          )
         : 0,
-    [modelProviderRecords, selectedAgentKind]
+    [modelProviderRecords, selectedAgentKind, selectedCustomAgentApiTypes]
   )
   const selectedAgentSupportsSourceCard = selectedAgentKind
-    ? MODEL_PROVIDER_SOURCE_CARD_AGENT_TYPES.includes(selectedAgentKind)
+    ? supportsModelProviderSourceCard(
+        selectedAgentKind,
+        selectedCustomAgentApiTypes
+      )
     : false
   // Claude's provider mode is rendered in the legacy-agent branch below so the
   // native config panel can be reused when the user switches back to native.
@@ -7638,7 +7730,7 @@ export function AcpAgentSettings() {
                       <div className="min-w-0 flex items-center gap-2">
                         <button
                           type="button"
-                          className="text-muted-foreground cursor-grab active:cursor-grabbing rounded p-0.5 hover:bg-muted"
+                          className="text-muted-foreground cursor-grab active:cursor-grabbing rounded p-0.5 hover:bg-muted touch-none select-none"
                           title={t("actions.dragSort")}
                           aria-label={t("actions.dragSortAgent", {
                             name: agent.name,
@@ -8025,45 +8117,7 @@ export function AcpAgentSettings() {
                       selected={selectedUsesModelProviderSource}
                       onSelect={(selected) => {
                         if (!selectedAgentKind) return
-                        const agentType = selectedAgentKind
-                        const previous =
-                          modelProviderSources[agentType] ?? false
-                        setModelProviderSources((prev) => ({
-                          ...prev,
-                          [agentType]: selected,
-                        }))
-                        acpUpdateAgentModelSource(
-                          agentType,
-                          selected ? "provider" : "native"
-                        )
-                          .then((affected) => {
-                            reportAffectedSessions(affected)
-                            setAgents((prev) =>
-                              prev.map((agent) =>
-                                agent.agent_type === agentType
-                                  ? {
-                                      ...agent,
-                                      model_source: selected
-                                        ? "provider"
-                                        : "native",
-                                    }
-                                  : agent
-                              )
-                            )
-                          })
-                          .catch((err) => {
-                            console.error(
-                              "[Settings] save model source failed:",
-                              err
-                            )
-                            setModelProviderSources((prev) => ({
-                              ...prev,
-                              [agentType]: previous,
-                            }))
-                            toast.error(t("toasts.saveEnvFailed"), {
-                              description: toErrorMessage(err),
-                            })
-                          })
+                        handleModelSourceSelect(selectedAgentKind, selected)
                       }}
                     />
                     {selectedUsesModelProviderSource && (
@@ -11405,14 +11459,29 @@ supports_websockets = true`}
                         // so the generic "config management" editor below would be
                         // offering to write a file that may not exist in a format it
                         // cannot know. Environment variables (above) are the one
-                        // channel that works for every agent, so they are the whole
-                        // surface — plus the skills declaration and removing the
-                        // agent.
-                        // All four blocks share the settings-card vocabulary
+                        // channel that works for every agent; the Model Source card
+                        // adds the shared Model Provider projection (env-only on the
+                        // backend), and the skills declaration and removal round the
+                        // surface out.
+                        // All five blocks share the settings-card vocabulary
                         // (`SettingCard` / `SettingRow`, as in the task settings
                         // dialog) so the panel reads as one stack of settings rather
-                        // than four differently-shaped boxes.
+                        // than five differently-shaped boxes.
                         <>
+                          {selectedAgentSupportsSourceCard && (
+                            <ModelProviderSourceCard
+                              apiTypes={selectedModelProviderApiTypes}
+                              count={selectedCompatibleModelProviderCount}
+                              selected={selectedUsesModelProviderSource}
+                              onSelect={(selected) => {
+                                if (!selectedAgentKind) return
+                                handleModelSourceSelect(
+                                  selectedAgentKind,
+                                  selected
+                                )
+                              }}
+                            />
+                          )}
                           <SettingCard>
                             <SettingRow
                               icon={Pencil}
@@ -14631,14 +14700,26 @@ supports_websockets = true`}
                   // so the generic "config management" editor below would be
                   // offering to write a file that may not exist in a format it
                   // cannot know. Environment variables (above) are the one
-                  // channel that works for every agent, so they are the whole
-                  // surface — plus the skills declaration and removing the
-                  // agent.
-                  // All four blocks share the settings-card vocabulary
+                  // channel that works for every agent; the Model Source card
+                  // adds the shared Model Provider projection (env-only on the
+                  // backend), and the skills declaration and removal round the
+                  // surface out.
+                  // All five blocks share the settings-card vocabulary
                   // (`SettingCard` / `SettingRow`, as in the task settings
                   // dialog) so the panel reads as one stack of settings rather
-                  // than four differently-shaped boxes.
+                  // than five differently-shaped boxes.
                   <>
+                    {selectedAgentSupportsSourceCard && (
+                      <ModelProviderSourceCard
+                        apiTypes={selectedModelProviderApiTypes}
+                        count={selectedCompatibleModelProviderCount}
+                        selected={selectedUsesModelProviderSource}
+                        onSelect={(selected) => {
+                          if (!selectedAgentKind) return
+                          handleModelSourceSelect(selectedAgentKind, selected)
+                        }}
+                      />
+                    )}
                     <SettingCard>
                       <SettingRow
                         icon={Pencil}

@@ -341,6 +341,9 @@ pub fn catalog_entry_to_def(
         // itself loudly by failing to connect, which is what the settings
         // toggle is there to fix.
         supports_mcp: true,
+        // Nor about Model Provider env projection; the user declares that
+        // per-agent from the edit form after adding.
+        model_env: None,
     })
 }
 

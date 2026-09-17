@@ -1587,6 +1587,9 @@
     "customAgentSaved": "{name} を保存しました",
     "customAgentVersionProbeLabel": "バージョン確認コマンド（任意）",
     "customAgentVersionProbeHint": "ローカルにインストールされたバージョンを表示するコマンドです。空欄の場合はエージェントコマンドに --version を付けて実行します。",
+    "customAgentModelEnvLabel": "モデルプロバイダー環境変数名",
+    "customAgentModelEnvHint": "共有モデルプロバイダーの設定（ベース URL、API キー、モデル）をこのエージェントが読み取る環境変数名を宣言する任意の JSON です。codeg が検証済みの契約を持つエージェント（qwen-code、glm-acp-agent）は記入不要です。それ以外のエージェントは宣言すると「モデルソース」オプションが表示されます。",
+    "customAgentModelEnvInvalid": "JSON が無効です — \"baseUrl\"、\"apiKey\"、\"model\" の文字列キー（省略可）を持つオブジェクトを指定してください。",
     "customAgentRemove": "エージェントを削除",
     "customAgentRemoveHint": "エージェント定義を削除します。既存の会話の履歴は残り、エージェントを起動できなくなるだけです。",
     "customAgentIconLabel": "アイコン（任意）",
@@ -5973,7 +5976,8 @@
     "removeTerminalCard": "ターミナルカードを削除",
     "terminalNoDirectory": "このカードには作業ディレクトリがありません",
     "confirmDeleteTerminals": "実行中のターミナル {count} 個が閉じられ、そのプロセスも終了します。",
-    "confirmDeleteNotesAndTerminals": "書き込んだメモ {notes} 件が完全に削除され、実行中のターミナル {terminals} 個も終了します。"  },
+    "confirmDeleteNotesAndTerminals": "書き込んだメモ {notes} 件が完全に削除され、実行中のターミナル {terminals} 個も終了します。"
+  },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",
     "noProviders": "No providers",

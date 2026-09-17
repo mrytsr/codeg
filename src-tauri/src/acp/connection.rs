@@ -1258,6 +1258,28 @@ fn tag_mcp_suspect(
     if mcp_servers.is_empty() || !matches!(agent_type, AgentType::Custom(_)) {
         return err;
     }
+    // An agent that refuses the session over missing credentials says so
+    // itself, and blaming MCP for it sends the user to a switch that is not
+    // wrong — the qwen-code case ("Authentication required … OPENAI_API_KEY")
+    // is answered by pointing at the shared provider selection, not at MCP
+    // support. Only tag failures that could plausibly be about the servers
+    // codeg put on the wire.
+    let text = err.to_string();
+    let lowered = text.to_ascii_lowercase();
+    let auth_shaped = lowered.contains("authenticat")
+        || lowered.contains("unauthorized")
+        || lowered.contains("api key")
+        || lowered.contains("api_key");
+    if auth_shaped {
+        tracing::warn!(
+            "[ACP][{}] session/new failed while {} MCP server(s) were attached, but the \
+             failure looks like authentication, not MCP; not blaming the MCP switch: {}",
+            agent_type,
+            mcp_servers.len(),
+            text
+        );
+        return err;
+    }
     // Also log it. The coded error reaches the desktop webview through the
     // global `acp://event` emit, but a web/remote client that has not attached
     // yet never sees it — the connection is removed from the manager map as
@@ -1271,9 +1293,9 @@ fn tag_mcp_suspect(
          does not accept MCP, turn off \"MCP support\" for it in settings: {}",
         agent_type,
         mcp_servers.len(),
-        err
+        text
     );
-    sacp::util::internal_error(format!("{err}{MCP_SUSPECT_SENTINEL}"))
+    sacp::util::internal_error(format!("{text}{MCP_SUSPECT_SENTINEL}"))
 }
 
 /// RAII guard that removes the `AgentConnection` entry from the manager
@@ -15502,6 +15524,7 @@ mod tests {
             source: Default::default(),
             version_probe: None,
             supports_mcp: true,
+            model_env: None,
         };
         assert!(
             hydrate(&[def]).is_empty(),
@@ -15553,6 +15576,7 @@ mod tests {
             source: Default::default(),
             version_probe: None,
             supports_mcp: true,
+            model_env: None,
         };
         // Same reason as the cursor case: an unregistered id would satisfy the
         // negative assertion for the wrong reason.
@@ -22829,6 +22853,7 @@ mod tests {
             source: Default::default(),
             version_probe: None,
             supports_mcp: true,
+            model_env: None,
         };
         assert!(hydrate(&[def("delegate-on"), def("delegate-off")]).is_empty());
 

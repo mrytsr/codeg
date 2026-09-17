@@ -244,6 +244,28 @@ export async function acpConnect(
 }
 
 /**
+ * Remember a shared-catalog provider/model for an agent that has no
+ * conversation to save it to yet (a pre-bind composer pick).
+ *
+ * The pre-bind session launches before any conversation selection exists, and
+ * an agent that cannot start unauthenticated (Qwen Code refuses `session/new`
+ * without `OPENAI_*`) would otherwise be stuck: the picker is the fix, but the
+ * session it needs to reach the picker cannot start. Remembering the pick on
+ * the agent gives that launch credentials.
+ */
+export async function acpRememberAgentModelSelection(
+  agentType: AgentType,
+  providerId: string,
+  modelId: string
+): Promise<void> {
+  return getTransport().call("acp_remember_agent_model_selection", {
+    agentType,
+    providerId,
+    modelId,
+  })
+}
+
+/**
  * Drop inline image bytes from blocks whose bytes already live server-side.
  *
  * Web / remote-workspace mode uploads each composed image through
@@ -1192,6 +1214,18 @@ export interface CustomAgentSpec {
 
 export type CustomDistributionKind = "npx" | "uvx" | "binary"
 
+/**
+ * Per-slot env-var names a custom agent reads for the shared Model Provider
+ * projection (see `CustomAgentDef::model_env` on the backend). Slots left
+ * unset fall back to the standard convention keys for the provider's API
+ * family (`OPENAI_*` / `ANTHROPIC_*`).
+ */
+export interface CustomAgentModelEnv {
+  baseUrl?: string | null
+  apiKey?: string | null
+  model?: string | null
+}
+
 export interface CustomAgentInfo {
   registryId: string
   /** `custom:<registryId>` — pass this wherever an `AgentType` is expected. */
@@ -1223,6 +1257,8 @@ export interface CustomAgentInfo {
    * any server is sent.
    */
   supportsMcp: boolean
+  /** Env-var name declaration for Model Provider projection, when declared. */
+  modelEnv: CustomAgentModelEnv | null
   /** False when the definition cannot launch here (e.g. no build for this OS). */
   launchable: boolean
   problem: string | null
@@ -1273,6 +1309,13 @@ export async function acpSaveCustomAgent(params: {
    * on, for a new row) — the safe default here is what is already stored.
    */
   supportsMcp?: boolean
+  /**
+   * Env-var name declaration for Model Provider projection. Omitted = the
+   * backend keeps the stored row's declaration; an explicit empty object
+   * clears it. Slots left unset inside the object fall back to the standard
+   * convention keys for the provider's API family.
+   */
+  modelEnv?: CustomAgentModelEnv
 }): Promise<void> {
   return getTransport().call("acp_save_custom_agent", { params })
 }
@@ -1299,7 +1342,11 @@ export async function acpPatchCustomAgent(
   patch: Partial<
     Pick<
       CustomAgentInfo,
-      "skillsSharedStore" | "skillsDir" | "supportsMcp" | "versionProbe"
+      | "skillsSharedStore"
+      | "skillsDir"
+      | "supportsMcp"
+      | "versionProbe"
+      | "modelEnv"
     >
   >
 ): Promise<void> {
@@ -1325,6 +1372,14 @@ export async function acpPatchCustomAgent(
     supportsMcp: current.supportsMcp,
     versionProbe: current.versionProbe,
     ...patch,
+    // `modelEnv` is pulled back out of the spread: `null` is a serialized-
+    // absent declaration, and the save surface treats an omitted field as
+    // "keep stored", so a null patch value normalizes to an explicit empty
+    // object (clear) rather than being dropped.
+    modelEnv:
+      patch.modelEnv === null
+        ? {}
+        : (patch.modelEnv ?? current.modelEnv ?? undefined),
   })
 }
 

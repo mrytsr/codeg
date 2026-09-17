@@ -91,6 +91,7 @@ pub async fn acp_connect(
         params.session_id.as_deref(),
         &state.data_dir,
         params.conversation_id,
+        None,
     )
     .await
     .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
@@ -1508,6 +1509,33 @@ mod tests {
         assert!(text.contains(r#"{"agentType":"antigravity"}"#));
         assert!(!text.contains("codex"));
     }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpRememberAgentModelSelectionParams {
+    pub agent_type: AgentType,
+    pub provider_id: String,
+    pub model_id: String,
+}
+
+/// Remember a shared-catalog provider/model for an agent that has no
+/// conversation yet — the composer's pre-bind pick. See
+/// [`acp_commands::acp_remember_agent_model_selection_core`].
+pub async fn acp_remember_agent_model_selection(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpRememberAgentModelSelectionParams>,
+) -> Result<Json<()>, AppCommandError> {
+    acp_commands::acp_remember_agent_model_selection_core(
+        &state.db,
+        &state.data_dir,
+        params.agent_type,
+        params.provider_id,
+        params.model_id,
+    )
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(()))
 }
 
 #[derive(Deserialize)]

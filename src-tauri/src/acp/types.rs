@@ -1119,6 +1119,15 @@ pub struct AcpAgentInfo {
     pub cursor_settings: Option<CursorSettings>,
     pub model_provider_id: Option<i32>,
     pub model_source: String,
+    /// API families the shared Model Provider source can offer this agent.
+    /// Empty means "no shared provider source" (either a built-in that has its
+    /// own config file and no adapter, or a custom agent whose CLI cannot take
+    /// the projection). For custom agents this is per-definition — a verified
+    /// env contract pins the families the CLI speaks (`glm-acp-agent` is Chat
+    /// Completions only), a user declaration is permissive. Composer and
+    /// settings filter the provider list with it, so a provider the launch
+    /// would refuse is never offered.
+    pub model_provider_api_types: Vec<String>,
     /// Display icon for a custom ACP agent — normally an inlined
     /// `data:image/…;base64,…` URL (see
     /// `crate::acp::custom_registry::CustomAgentDef::icon_url`). Always `None`

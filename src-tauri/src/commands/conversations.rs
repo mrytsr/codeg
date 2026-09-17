@@ -19,8 +19,7 @@ use crate::models::*;
 use crate::parsers::codex::CodexParser;
 use crate::parsers::{
     build_agent_parser, build_workspace_agent_parser, folder_name_from_path,
-    normalize_path_for_matching, path_eq_for_matching,
-    AgentParser, ParseError,
+    normalize_path_for_matching, path_eq_for_matching, AgentParser, ParseError,
 };
 use crate::web::event_bridge::{
     emit_event, ConversationChange, ConversationsBulkChanged, EventEmitter, ImportScanProgress,
@@ -943,9 +942,8 @@ pub(crate) async fn import_selected_from_summaries(
         let target_row = folder_index.get(&norm_key).copied();
         let target_folder_id = target_row.map(|row| row.id);
         let existing_parent_id = target_row.and_then(|row| row.parent_id);
-        let target_has_children = target_folder_id.is_some_and(|folder_id| {
-            folder_child_counts.get(&folder_id).copied().unwrap_or(0) > 0
-        });
+        let target_has_children = target_folder_id
+            .is_some_and(|folder_id| folder_child_counts.get(&folder_id).copied().unwrap_or(0) > 0);
         let parent_id = root_key
             .as_ref()
             .and_then(|key| worktree_parents.get(key).copied())
@@ -1898,8 +1896,14 @@ pub async fn get_folder_conversation_turns(
         .app_data_dir()
         .map(|p| crate::paths::resolve_effective_data_dir(&p))
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    get_folder_conversation_turns_core(&db.conn, conversation_id, before_index, limit, Some(&data_dir))
-        .await
+    get_folder_conversation_turns_core(
+        &db.conn,
+        conversation_id,
+        before_index,
+        limit,
+        Some(&data_dir),
+    )
+    .await
 }
 
 /// Emit a `conversation://changed` Upsert for `conversation_id` so every
@@ -2595,7 +2599,7 @@ pub async fn update_conversation_model_selection_core(
             .api
             .unwrap_or(ModelProviderApiType::OpenAiCompletions);
         let capabilities =
-            crate::commands::model_provider_file::model_provider_api_types(&agent_type);
+            crate::commands::model_provider_file::model_provider_api_types_for_agent(&agent_type);
         if !capabilities.contains(&api) {
             return Err(AppCommandError::invalid_input(format!(
                 "{agent_type:?} does not support API type {}",
@@ -2618,9 +2622,32 @@ pub async fn update_conversation_model_selection_core(
         ));
     }
 
-    conversation_service::update_model_selection(conn, conversation_id, provider_id, model_id)
+    conversation_service::update_model_selection(
+        conn,
+        conversation_id,
+        provider_id.clone(),
+        model_id.clone(),
+    )
+    .await
+    .map_err(AppCommandError::from)?;
+
+    // Remember the choice on the AGENT too. Launch paths that have no
+    // conversation selection of their own — the pre-bind session, or a
+    // conversation created before the user picked anything — resolve
+    // credentials from this, so an agent that cannot even start without them
+    // (`qwen-code` refuses `session/new` unauthenticated) is not stuck.
+    if let (Some(provider_id), Some(model_id)) = (provider_id, model_id) {
+        agent_setting_service::set_catalog_model_selection(
+            conn,
+            agent_type,
+            provider_id.trim(),
+            model_id.trim(),
+        )
         .await
-        .map_err(AppCommandError::from)
+        .map_err(AppCommandError::from)?;
+    }
+
+    Ok(())
 }
 
 /// `update_conversation_model_selection_core` followed by a one-connection
@@ -3699,14 +3726,10 @@ mod tests {
 
         let db = fresh_in_memory_db().await;
         let folder_id = seed_folder(&db, "/tmp/codeg-ws-test").await;
-        let conv_id = create_conversation_core(
-            &db.conn,
-            folder_id,
-            AgentType::Codex,
-            Some("ws".into()),
-        )
-        .await
-        .expect("create conversation");
+        let conv_id =
+            create_conversation_core(&db.conn, folder_id, AgentType::Codex, Some("ws".into()))
+                .await
+                .expect("create conversation");
         let session_id = "01a0ws01-0000-7000-8000-000000000000";
 
         // Bind the row to the shared Model Provider source (what

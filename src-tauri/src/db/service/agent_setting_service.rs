@@ -82,6 +82,8 @@ pub async fn ensure_defaults(
             env_json: Set(None),
             model_provider_id: Set(None),
             model_source: Set(default_model_source()),
+            catalog_provider_id: Set(None),
+            catalog_model_id: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -150,6 +152,40 @@ pub async fn update(
     active.env_json = Set(patch.env_json);
     active.model_provider_id = Set(patch.model_provider_id);
     active.model_source = Set(normalize_model_source(&patch.model_source)?);
+    active.updated_at = Set(Utc::now());
+    active.update(conn).await?;
+    Ok(())
+}
+
+/// Remember the shared-catalog provider/model last applied to this agent's
+/// conversations.
+///
+/// Read by launch paths that have no conversation selection to resolve — the
+/// pre-bind session, or a conversation the user has not picked a provider for
+/// yet (see `build_session_runtime_env_with_conversation`). Written whenever a
+/// conversation selection is saved, so the memory is always something the user
+/// actually chose for this agent.
+pub async fn set_catalog_model_selection(
+    conn: &DatabaseConnection,
+    agent_type: AgentType,
+    provider_id: &str,
+    model_id: &str,
+) -> Result<(), DbError> {
+    let agent_type_str = serde_json::to_string(&agent_type)
+        .map_err(|e| DbError::Migration(format!("agent_type serialize failed: {e}")))?;
+    let Some(model) = agent_setting::Entity::find()
+        .filter(agent_setting::Column::AgentType.eq(agent_type_str.clone()))
+        .one(conn)
+        .await?
+    else {
+        // A selection cannot be saved for an agent with no settings row, so
+        // this is unreachable in practice; degrade instead of failing the save.
+        return Ok(());
+    };
+
+    let mut active = model.into_active_model();
+    active.catalog_provider_id = Set(Some(provider_id.to_string()));
+    active.catalog_model_id = Set(Some(model_id.to_string()));
     active.updated_at = Set(Utc::now());
     active.update(conn).await?;
     Ok(())

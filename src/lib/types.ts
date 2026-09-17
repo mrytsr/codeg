@@ -3263,6 +3263,14 @@ export interface AcpAgentInfo {
   cursor_settings: CursorSettings | null
   model_provider_id: number | null
   model_source: AgentModelSource
+  /**
+   * API families the shared Model Provider source can offer this agent. Empty
+   * means "no shared provider source". For custom agents it is per-definition:
+   * a verified env contract pins what the CLI speaks (`glm-acp-agent` is Chat
+   * Completions only), a user declaration is permissive. Filters the provider
+   * lists so a provider the launch would refuse is never offered.
+   */
+  model_provider_api_types: string[]
   /** Display icon for a custom ACP agent — normally an inlined
    *  `data:image/…;base64,…` URL. Always null for built-ins, which ship
    *  hand-drawn marks in `agent-icon.tsx`. */

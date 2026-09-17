@@ -47,6 +47,7 @@ function makeAgent(agentType: AgentType, sortOrder: number): AcpAgentInfo {
     distribution_type: "npm",
     is_acp_adapter: false,
     model_source: "native",
+    model_provider_api_types: [],
     custom_source: null,
     enabled: true,
     sort_order: sortOrder,

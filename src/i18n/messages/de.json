@@ -1587,6 +1587,9 @@
     "customAgentSaved": "{name} gespeichert",
     "customAgentVersionProbeLabel": "Versionsabfrage-Befehl (optional)",
     "customAgentVersionProbeHint": "Befehl, der die lokal installierte Version ausgibt. Bleibt er leer, führt codeg den Agent-Befehl mit --version aus.",
+    "customAgentModelEnvLabel": "Umgebungsvariablen des Modellanbieters",
+    "customAgentModelEnvHint": "Optionales JSON, das die Umgebungsvariablen deklariert, mit denen dieser Agent eine gemeinsame Modellprovider-Konfiguration liest (Basis-URL, API-Schlüssel, Modell). Agenten mit verifiziertem Vertrag (qwen-code, glm-acp-agent) brauchen das nicht; erst die Deklaration aktiviert für andere Agenten die Option „Modellquelle“.",
+    "customAgentModelEnvInvalid": "Ungültiges JSON — erwartet wird ein Objekt mit den optionalen Zeichenketten-Schlüsseln \"baseUrl\", \"apiKey\" und \"model\".",
     "customAgentRemove": "Agent entfernen",
     "customAgentRemoveHint": "Löscht die Agent-Definition. Bestehende Unterhaltungen behalten ihren Verlauf; der Agent lässt sich nur nicht mehr starten.",
     "customAgentIconLabel": "Symbol (optional)",
@@ -5973,7 +5976,8 @@
     "removeTerminalCard": "Terminalkarte entfernen",
     "terminalNoDirectory": "Diese Karte hat kein Arbeitsverzeichnis",
     "confirmDeleteTerminals": "{count} laufende Terminal(s) werden geschlossen und ihre Prozesse beendet.",
-    "confirmDeleteNotesAndTerminals": "{notes} von dir geschriebene Notiz(en) werden endgültig gelöscht und {terminals} laufende Terminal(s) beendet."  },
+    "confirmDeleteNotesAndTerminals": "{notes} von dir geschriebene Notiz(en) werden endgültig gelöscht und {terminals} laufende Terminal(s) beendet."
+  },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",
     "noProviders": "No providers",

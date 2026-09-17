@@ -1587,6 +1587,9 @@
     "customAgentSaved": "已保存 {name}",
     "customAgentVersionProbeLabel": "版本查询命令（可选）",
     "customAgentVersionProbeHint": "查询本地安装版本的命令；留空时默认执行智能体命令加 --version。",
+    "customAgentModelEnvLabel": "模型供应商环境变量名",
+    "customAgentModelEnvHint": "可选 JSON，声明该智能体读取共享模型供应商配置所用的环境变量名（Base URL、API Key、模型）。codeg 已内置验证过的智能体（qwen-code、glm-acp-agent）无需填写；其他智能体声明后才会出现“模型来源”选项。",
+    "customAgentModelEnvInvalid": "JSON 无效——应为包含可选 \"baseUrl\"、\"apiKey\"、\"model\" 字符串键的对象。",
     "customAgentRemove": "移除智能体",
     "customAgentRemoveHint": "删除该智能体定义。已有会话的历史会保留，只是该智能体无法再启动。",
     "customAgentIconLabel": "图标（可选）",
@@ -5973,7 +5976,8 @@
     "removeTerminalCard": "移除终端卡片",
     "terminalNoDirectory": "这张卡片没有工作目录",
     "confirmDeleteTerminals": "{count} 个正在运行的终端会被关闭，其中的进程也会一并结束。",
-    "confirmDeleteNotesAndTerminals": "你写下的 {notes} 条便签将被永久删除，另有 {terminals} 个正在运行的终端会被结束。"  },
+    "confirmDeleteNotesAndTerminals": "你写下的 {notes} 条便签将被永久删除，另有 {terminals} 个正在运行的终端会被结束。"
+  },
   "ModelProviderPicker": {
     "placeholder": "供应商 · 模型",
     "noProviders": "暂无供应商",

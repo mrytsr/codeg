@@ -28,14 +28,15 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 
+use crate::acp::codex_model_catalog::CATALOG_REL as CODEX_WORKSPACE_CATALOG_REL;
+use crate::acp::codex_model_catalog::{
+    expand_customs_only, fallback_base_slug, CodexCustomEntry, CodexModelConfig,
+};
+use crate::acp::custom_registry::ModelEnvDeclaration;
 use crate::acp::error::AcpError;
 use crate::commands::acp::ResolvedConversationModelSelection;
 use crate::models::agent::AgentType;
 use crate::models::model_provider_file::ModelProviderApiType;
-use crate::acp::codex_model_catalog::{
-    expand_customs_only, fallback_base_slug, CodexCustomEntry, CodexModelConfig,
-};
-use crate::acp::codex_model_catalog::CATALOG_REL as CODEX_WORKSPACE_CATALOG_REL;
 
 /// Directory (under codeg's data dir) that holds the per-conversation session
 /// workspaces for agents requiring a real config dir at launch.
@@ -95,6 +96,7 @@ pub(crate) fn apply_launch_adapter(
     runtime_env: &mut BTreeMap<String, String>,
     data_dir: &Path,
     conversation_id: i32,
+    model_env: Option<&ModelEnvDeclaration>,
 ) -> Result<(), AcpError> {
     let api = selection
         .provider
@@ -128,6 +130,7 @@ pub(crate) fn apply_launch_adapter(
         AgentType::Cline => write_cline_workspace(&ws, selection, api, runtime_env)?,
         AgentType::Hermes => write_hermes_workspace(&ws, selection, api, runtime_env)?,
         AgentType::KimiCode => write_kimi_workspace(&ws, selection, api, runtime_env)?,
+        AgentType::Custom(_) => apply_custom_env_only(selection, runtime_env, model_env)?,
         other => {
             return Err(AcpError::protocol(format!(
                 "{other:?} does not support the shared Model Provider source"
@@ -163,7 +166,11 @@ fn apply_proxy_env(
 }
 
 /// The per-conversation workspace path for an agent.
-pub(crate) fn workspace_dir(data_dir: &Path, agent_type: AgentType, conversation_id: i32) -> PathBuf {
+pub(crate) fn workspace_dir(
+    data_dir: &Path,
+    agent_type: AgentType,
+    conversation_id: i32,
+) -> PathBuf {
     data_dir
         .join(MODEL_PROVIDER_WORKSPACE_ROOT)
         .join(agent_type.as_wire().as_ref())
@@ -290,6 +297,63 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|s| !s.is_empty())
 }
 
+/// Project the selection into a custom agent's launch env.
+///
+/// codeg cannot know which env keys an arbitrary ACP agent's CLI reads, so the
+/// keys come from two sources: the agent's optional [`ModelEnvDeclaration`]
+/// (`CustomAgentDef::model_env`, per slot) wins, and slots it leaves unset fall
+/// back to the standard convention for the provider's API family —
+/// `OPENAI_BASE_URL`/`OPENAI_API_KEY`/`OPENAI_MODEL` for both OpenAI wire
+/// formats (the completions and responses URLs differ by path suffix, the env
+/// contract does not) and `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/
+/// `ANTHROPIC_MODEL` for Anthropic. Qwen Code reads the OpenAI family
+/// natively; `glm-acp-agent` needs the declaration
+/// (`ACP_GLM_BASE_URL`/`Z_AI_API_KEY`/`ACP_GLM_MODEL`).
+///
+/// Like [`apply_env_only`], only non-empty values are written — a provider
+/// without a base URL or key leaves the agent's own resolution alone, and an
+/// empty `modelEnv` object therefore injects nothing at all.
+pub(crate) fn apply_custom_env_only(
+    selection: &ResolvedConversationModelSelection,
+    runtime_env: &mut BTreeMap<String, String>,
+    model_env: Option<&ModelEnvDeclaration>,
+) -> Result<(), AcpError> {
+    let base_url = non_empty(selection.provider.base_url.as_deref());
+    let api_key = non_empty(selection.provider.api_key.as_deref());
+    let model_id = non_empty(Some(selection.model_id.as_str()));
+
+    let api = selection
+        .provider
+        .api
+        .unwrap_or(ModelProviderApiType::OpenAiCompletions);
+    let (std_url, std_key, std_model) = if api == ModelProviderApiType::AnthropicMessages {
+        (
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_MODEL",
+        )
+    } else {
+        ("OPENAI_BASE_URL", "OPENAI_API_KEY", "OPENAI_MODEL")
+    };
+    fn declared(slot: Option<&String>) -> Option<&str> {
+        slot.map(|s| s.trim()).filter(|s| !s.is_empty())
+    }
+    let url_key = declared(model_env.and_then(|d| d.base_url.as_ref())).unwrap_or(std_url);
+    let key_key = declared(model_env.and_then(|d| d.api_key.as_ref())).unwrap_or(std_key);
+    let model_key = declared(model_env.and_then(|d| d.model.as_ref())).unwrap_or(std_model);
+
+    if let Some(url) = base_url {
+        runtime_env.insert(url_key.to_string(), url.to_string());
+    }
+    if let Some(key) = api_key {
+        runtime_env.insert(key_key.to_string(), key.to_string());
+    }
+    if let Some(model) = model_id {
+        runtime_env.insert(model_key.to_string(), model.to_string());
+    }
+    Ok(())
+}
+
 /// Project the selection's size metadata into kimi's env-model overlay.
 ///
 /// Kimi synthesizes the `KIMI_MODEL_*` env model (`__kimi_env_model__`) with
@@ -309,8 +373,8 @@ fn apply_kimi_env_model_metadata(
     selection: &ResolvedConversationModelSelection,
     runtime_env: &mut BTreeMap<String, String>,
 ) {
-    let context_window = positive_int(selection.model.context_window)
-        .unwrap_or(KIMI_DEFAULT_MAX_CONTEXT_SIZE);
+    let context_window =
+        positive_int(selection.model.context_window).unwrap_or(KIMI_DEFAULT_MAX_CONTEXT_SIZE);
     runtime_env.insert(
         "KIMI_MODEL_MAX_CONTEXT_SIZE".to_string(),
         context_window.to_string(),
@@ -373,7 +437,10 @@ fn write_codex_workspace(
         let custom = CodexCustomEntry {
             slug: selection.model_id.clone(),
             display_name: selection.model.name.clone(),
-            context_window: selection.model.context_window.and_then(|n| u64::try_from(n).ok()),
+            context_window: selection
+                .model
+                .context_window
+                .and_then(|n| u64::try_from(n).ok()),
             base,
             overrides: Map::new(),
         };
@@ -386,7 +453,11 @@ fn write_codex_workspace(
         let body = serde_json::to_string_pretty(&catalog).map_err(|e| {
             AcpError::protocol(format!("serialize codex workspace catalog failed: {e}"))
         })?;
-        write_file(&ws.join(CODEX_WORKSPACE_CATALOG_REL), &format!("{body}\n"), false)?;
+        write_file(
+            &ws.join(CODEX_WORKSPACE_CATALOG_REL),
+            &format!("{body}\n"),
+            false,
+        )?;
     }
 
     // config.toml — a self-contained `[model_providers.<id>]` block pointing
@@ -807,8 +878,8 @@ fn write_kimi_workspace(
     // 400 every request. Real metadata wins; the fallback is the largest
     // value every current OpenAI-compatible endpoint accepts (see
     // [`KIMI_DEFAULT_MAX_CONTEXT_SIZE`]).
-    let context_window = positive_int(selection.model.context_window)
-        .unwrap_or(KIMI_DEFAULT_MAX_CONTEXT_SIZE);
+    let context_window =
+        positive_int(selection.model.context_window).unwrap_or(KIMI_DEFAULT_MAX_CONTEXT_SIZE);
     model.insert(
         "max_context_size".to_string(),
         toml::Value::Integer(context_window),
@@ -965,7 +1036,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let mut env = BTreeMap::new();
         let s = sel("prov.example", "model-1", api);
-        apply_launch_adapter(agent, &s, &mut env, tmp.path(), 7).expect("adapter ok");
+        apply_launch_adapter(agent, &s, &mut env, tmp.path(), 7, None).expect("adapter ok");
         (env, tmp)
     }
 
@@ -1051,7 +1122,7 @@ mod tests {
             ModelProviderApiType::OpenAiCompletions,
         );
 
-        let result = apply_launch_adapter(AgentType::Codex, &s, &mut env, tmp.path(), 7);
+        let result = apply_launch_adapter(AgentType::Codex, &s, &mut env, tmp.path(), 7, None);
 
         assert!(result.is_err());
         assert!(!env.contains_key("CODEX_HOME"));
@@ -1104,7 +1175,11 @@ mod tests {
         )
         .unwrap();
         let models = catalog["models"].as_array().expect("models array");
-        assert_eq!(models.len(), 1, "customs-only catalog has exactly one entry");
+        assert_eq!(
+            models.len(),
+            1,
+            "customs-only catalog has exactly one entry"
+        );
         assert_eq!(models[0]["slug"], "model-1");
         assert_eq!(models[0]["visibility"], "list");
         assert_eq!(models[0]["supported_in_api"], true);
@@ -1131,18 +1206,12 @@ mod tests {
         s.model.context_window = Some(8_192);
         s.model.name = Some("DeepSeek V4 Flash".to_string());
         let mut env = BTreeMap::new();
-        write_codex_workspace(
-            &ws,
-            &s,
-            ModelProviderApiType::OpenAiResponses,
-            &mut env,
-        )
-        .expect("adapter ok");
+        write_codex_workspace(&ws, &s, ModelProviderApiType::OpenAiResponses, &mut env)
+            .expect("adapter ok");
 
-        let catalog: Value = serde_json::from_str(
-            &fs::read_to_string(ws.join("codeg-model-catalog.json")).unwrap(),
-        )
-        .unwrap();
+        let catalog: Value =
+            serde_json::from_str(&fs::read_to_string(ws.join("codeg-model-catalog.json")).unwrap())
+                .unwrap();
         let entry = &catalog["models"][0];
         assert_eq!(entry["slug"], "deepseek-v4-flash");
         assert_eq!(entry["display_name"], "DeepSeek V4 Flash");
@@ -1523,6 +1592,7 @@ mod tests {
             &mut env,
             Path::new("/tmp/unused"),
             1,
+            None,
         )
         .expect("adapter ok");
         assert_eq!(env["KIMI_MODEL_MAX_CONTEXT_SIZE"], "131072");
@@ -1545,6 +1615,7 @@ mod tests {
             &mut env,
             Path::new("/tmp/unused"),
             1,
+            None,
         )
         .expect("adapter ok");
         assert_eq!(env["KIMI_MODEL_MAX_CONTEXT_SIZE"], "131072");
@@ -1569,6 +1640,7 @@ mod tests {
             &mut env,
             Path::new("/tmp/unused"),
             1,
+            None,
         )
         .expect("adapter ok");
         assert_eq!(env["KIMI_MODEL_MAX_CONTEXT_SIZE"], "131072");
@@ -1637,10 +1709,10 @@ mod tests {
             let s = sel("prov.example", "model-1", api);
             let mut env1 = BTreeMap::new();
             let mut env2 = BTreeMap::new();
-            apply_launch_adapter(agent, &s, &mut env1, tmp.path(), 3).expect("first");
+            apply_launch_adapter(agent, &s, &mut env1, tmp.path(), 3, None).expect("first");
             let blob1 = workspace_fingerprint_blob(agent, &env1)
                 .unwrap_or_else(|| panic!("blob1 for {agent:?}"));
-            apply_launch_adapter(agent, &s, &mut env2, tmp.path(), 3).expect("second");
+            apply_launch_adapter(agent, &s, &mut env2, tmp.path(), 3, None).expect("second");
             let blob2 = workspace_fingerprint_blob(agent, &env2)
                 .unwrap_or_else(|| panic!("blob2 for {agent:?}"));
             assert_eq!(blob1, blob2, "{agent:?} workspace not idempotent");
@@ -1656,7 +1728,7 @@ mod tests {
             ModelProviderApiType::OpenAiResponses,
         );
         let mut env = BTreeMap::new();
-        apply_launch_adapter(AgentType::Codex, &s, &mut env, tmp.path(), 9).expect("adapter");
+        apply_launch_adapter(AgentType::Codex, &s, &mut env, tmp.path(), 9, None).expect("adapter");
         let ws = tmp
             .path()
             .join(MODEL_PROVIDER_WORKSPACE_ROOT)
@@ -1687,7 +1759,8 @@ mod tests {
             ModelProviderApiType::OpenAiResponses,
         );
         let mut env3 = BTreeMap::new();
-        apply_launch_adapter(AgentType::Codex, &s, &mut env3, tmp.path(), 5).expect("adapter");
+        apply_launch_adapter(AgentType::Codex, &s, &mut env3, tmp.path(), 5, None)
+            .expect("adapter");
         let blob = workspace_fingerprint_blob(AgentType::Codex, &env3).expect("blob");
         assert!(blob.contains("config.toml"));
         assert!(blob.contains("model-1"));
@@ -1707,7 +1780,8 @@ mod tests {
         );
         s.provider.proxy = Some("http://127.0.0.1:8080".to_string());
         let mut env = BTreeMap::new();
-        apply_launch_adapter(AgentType::ClaudeCode, &s, &mut env, tmp.path(), 1).expect("adapter");
+        apply_launch_adapter(AgentType::ClaudeCode, &s, &mut env, tmp.path(), 1, None)
+            .expect("adapter");
         for var in [
             "HTTPS_PROXY",
             "https_proxy",
@@ -1734,7 +1808,8 @@ mod tests {
         );
         let mut env = BTreeMap::new();
         env.insert("HTTPS_PROXY".to_string(), "http://global:3128".to_string());
-        apply_launch_adapter(AgentType::ClaudeCode, &s, &mut env, tmp.path(), 1).expect("adapter");
+        apply_launch_adapter(AgentType::ClaudeCode, &s, &mut env, tmp.path(), 1, None)
+            .expect("adapter");
         assert_eq!(
             env.get("HTTPS_PROXY").map(String::as_str),
             Some("http://global:3128")
@@ -1752,7 +1827,8 @@ mod tests {
         );
         s.provider.api_key = Some("sk-bad\nINJECTED=1".to_string());
         let mut env = BTreeMap::new();
-        let err = apply_launch_adapter(AgentType::Codex, &s, &mut env, tmp.path(), 1).unwrap_err();
+        let err =
+            apply_launch_adapter(AgentType::Codex, &s, &mut env, tmp.path(), 1, None).unwrap_err();
         assert!(err.to_string().contains("line breaks"), "{err}");
     }
 
@@ -1765,9 +1841,118 @@ mod tests {
             ModelProviderApiType::OpenAiCompletions,
         );
         let mut env = BTreeMap::new();
-        let err = apply_launch_adapter(AgentType::Cursor, &s, &mut env, tmp.path(), 1).unwrap_err();
+        let err =
+            apply_launch_adapter(AgentType::Cursor, &s, &mut env, tmp.path(), 1, None).unwrap_err();
         assert!(err
             .to_string()
             .contains("does not support the shared Model Provider source"));
+    }
+
+    fn custom_sel(api: ModelProviderApiType) -> ResolvedConversationModelSelection {
+        sel("prov.example", "model-1", api)
+    }
+
+    /// A custom agent without a `modelEnv` declaration projects under the
+    /// standard convention keys for the provider's API family, and writes no
+    /// config workspace.
+    #[test]
+    fn custom_without_declaration_uses_standard_family_keys() {
+        for (api, (url_key, key_key, model_key)) in [
+            (
+                ModelProviderApiType::OpenAiCompletions,
+                ("OPENAI_BASE_URL", "OPENAI_API_KEY", "OPENAI_MODEL"),
+            ),
+            (
+                ModelProviderApiType::OpenAiResponses,
+                ("OPENAI_BASE_URL", "OPENAI_API_KEY", "OPENAI_MODEL"),
+            ),
+            (
+                ModelProviderApiType::AnthropicMessages,
+                (
+                    "ANTHROPIC_BASE_URL",
+                    "ANTHROPIC_AUTH_TOKEN",
+                    "ANTHROPIC_MODEL",
+                ),
+            ),
+        ] {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let s = custom_sel(api);
+            let mut env = BTreeMap::new();
+            apply_launch_adapter(
+                AgentType::Custom("qwen-code"),
+                &s,
+                &mut env,
+                tmp.path(),
+                1,
+                None,
+            )
+            .expect("adapter ok");
+            assert_eq!(env[url_key], "https://api.example.com/v1");
+            assert_eq!(env[key_key], "sk-test-123");
+            assert_eq!(env[model_key], "model-1");
+            assert!(
+                !tmp.path().join("custom").exists(),
+                "custom agents write no workspace"
+            );
+        }
+    }
+
+    /// A `modelEnv` declaration renames the slots it covers — the GLM Agent
+    /// case (`ACP_GLM_BASE_URL`/`Z_AI_API_KEY`/`ACP_GLM_MODEL`).
+    #[test]
+    fn custom_declaration_overrides_standard_keys() {
+        let s = custom_sel(ModelProviderApiType::OpenAiCompletions);
+        let mut env = BTreeMap::new();
+        apply_custom_env_only(
+            &s,
+            &mut env,
+            Some(&ModelEnvDeclaration {
+                base_url: Some("ACP_GLM_BASE_URL".to_string()),
+                api_key: Some("Z_AI_API_KEY".to_string()),
+                model: Some("ACP_GLM_MODEL".to_string()),
+            }),
+        )
+        .expect("projection ok");
+        assert_eq!(env["ACP_GLM_BASE_URL"], "https://api.example.com/v1");
+        assert_eq!(env["Z_AI_API_KEY"], "sk-test-123");
+        assert_eq!(env["ACP_GLM_MODEL"], "model-1");
+        assert!(!env.contains_key("OPENAI_BASE_URL"));
+        assert!(!env.contains_key("OPENAI_API_KEY"));
+        assert!(!env.contains_key("OPENAI_MODEL"));
+    }
+
+    /// A blank or absent slot falls back to the standard key for the family —
+    /// a declaration only has to cover the slots the agent actually renames.
+    #[test]
+    fn custom_declaration_blank_slots_fall_back_to_standard() {
+        let s = custom_sel(ModelProviderApiType::OpenAiCompletions);
+        let mut env = BTreeMap::new();
+        apply_custom_env_only(
+            &s,
+            &mut env,
+            Some(&ModelEnvDeclaration {
+                base_url: Some("   ".to_string()),
+                api_key: None,
+                model: Some("ACP_GLM_MODEL".to_string()),
+            }),
+        )
+        .expect("projection ok");
+        assert_eq!(env["OPENAI_BASE_URL"], "https://api.example.com/v1");
+        assert_eq!(env["OPENAI_API_KEY"], "sk-test-123");
+        assert_eq!(env["ACP_GLM_MODEL"], "model-1");
+    }
+
+    /// Empty provider values are never injected, so an agent's own resolution
+    /// survives a provider that declares no base URL or key.
+    #[test]
+    fn custom_empty_values_inject_nothing() {
+        let mut s = custom_sel(ModelProviderApiType::OpenAiCompletions);
+        s.provider.base_url = None;
+        s.provider.api_key = Some("   ".to_string());
+        let mut env = BTreeMap::new();
+        apply_custom_env_only(&s, &mut env, None).expect("projection ok");
+        assert!(!env.contains_key("OPENAI_BASE_URL"));
+        assert!(!env.contains_key("OPENAI_API_KEY"));
+        assert_eq!(env["OPENAI_MODEL"], "model-1");
     }
 }

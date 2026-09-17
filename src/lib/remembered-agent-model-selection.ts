@@ -1,8 +1,12 @@
 "use client"
 
 import { getModelProviderApiTypes } from "@/lib/model-provider-capabilities"
-import type { ModelProviderRecord } from "@/lib/model-provider-types"
+import type {
+  ModelProviderApiType,
+  ModelProviderRecord,
+} from "@/lib/model-provider-types"
 import type { AgentType } from "@/lib/types"
+import { isCustomAgentType } from "@/lib/types"
 
 /** A per-agent remembered provider/model choice (Model Provider source mode). */
 export interface RememberedAgentModelSelection {
@@ -66,13 +70,26 @@ export function loadRememberedAgentModelSelection(
 }
 
 /** True when the remembered choice can still be restored: the provider is
- *  enabled, its model still exists, and its API family matches the agent. */
+ *  enabled, its model still exists, and its API family matches the agent.
+ *  `customApiTypes` is the caller's backend-provided family list for a custom
+ *  agent (`AcpAgentInfo.model_provider_api_types`); omitting it means the
+ *  caller has no list, and a remembered custom-agent choice is treated as
+ *  available — the save path still validates it. */
 export function isRememberedAgentModelSelectionAvailable(
   agentType: AgentType,
   selection: RememberedAgentModelSelection,
-  records: readonly ModelProviderRecord[]
+  records: readonly ModelProviderRecord[],
+  customApiTypes?: readonly ModelProviderApiType[]
 ): boolean {
-  const supportedApis = new Set(getModelProviderApiTypes(agentType))
+  const supportedApis = new Set(
+    getModelProviderApiTypes(
+      agentType,
+      customApiTypes ??
+        (isCustomAgentType(agentType)
+          ? ["openai-completions", "openai-responses", "anthropic-messages"]
+          : [])
+    )
+  )
   const record = records.find((r) => r.providerId === selection.providerId)
   return (
     record != null &&
