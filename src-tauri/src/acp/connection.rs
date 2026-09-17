@@ -19,8 +19,8 @@ use sacp::schema::{
     SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
     SetSessionConfigOptionResponse, SetSessionModeRequest, StopReason, TerminalExitStatus,
     TerminalOutputRequest, TerminalOutputResponse, TextContent, TextResourceContents,
-    ToolCallContent, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    ToolCallContent, ToolCallLocation, ToolKind, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use sacp::schema::{HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio};
 use sacp::util::MatchDispatch;
@@ -4286,22 +4286,48 @@ fn build_client_capabilities(
     // claude-agent-acp 0.69.0 and codex-acp 1.4.0 added
     // "agentFileChangeReport": advertise it and every prompt may
     // carry `_meta.jetbrains.air.agentFileChangeReportRequest = {version: 1,
-    // requestId}`, after which the agent runs an EXTRA model round-trip at the
-    // end of the turn (claude: a Stop hook plus a hidden continuation calling
-    // `mcp__claude_agent_acp__report_changed_files`; codex: an ephemeral
-    // read-only `thread/fork`) and answers on
+    // requestId}`, which the agent answers at the end of the turn on
     // `session_info_update._meta.jetbrains.air.agentFileChangeReport`.
     //
-    // codeg does not ask for it, and the reason is not cost alone: both
-    // adapters CLAMP the reported paths to `cwd` + `additionalDirectories`
+    // The COST half of that decision has now expired on BOTH sides, and the
+    // record should say so. 1.4.0–1.11.0 / 0.69.0–0.77.0 answered by running an
+    // extra model round-trip (claude: a Stop hook plus a hidden continuation
+    // calling `mcp__claude_agent_acp__report_changed_files`; codex: an ephemeral
+    // read-only `thread/fork` with a 30s budget). codex-acp 1.12.0 deleted its
+    // half — it now buffers the `turn/diff/updated` unified diff for the turn
+    // and parses the paths out of it — and claude-agent-acp 0.78.0 deleted the
+    // whole audit (server, tool, both hooks) for a checkpoint read,
+    // `query.rewindFiles(promptUuid, { dryRun: true })` under a 2s budget. So
+    // neither adapter spends a model turn on it any more.
+    //
+    // It stays out anyway, because the reason that mattered was never cost.
+    // Both adapters CLAMP the reported paths to `cwd` + `additionalDirectories`
     // (anything outside a root is dropped as truncated), which is exactly the
     // tree `workspace_state` already watches recursively via `notify`. So the
-    // report can only ever name a SUBSET of what the watcher sees, less
-    // reliably — it is a model self-report that declares `complete: false`
-    // when unsure and truncates at 1024 paths / 256KB. It exists for clients
-    // with no filesystem watcher; codeg is not one. Nothing else in either
-    // release depends on it, and both adapters no-op without the
-    // advertisement, so staying out costs us nothing.
+    // report can only ever name a SUBSET of what the watcher sees, and it
+    // truncates at 1024 paths / 256KB. Both deterministic rewrites made that gap
+    // WIDER, not narrower, and each says so in its own words: codex 1.12.0
+    // hard-codes its `uncertainty` to "Codex turn diffs may omit same-content
+    // renames and changes made outside apply_patch, including shell commands,
+    // version-control commands, generators, and child processes", and claude
+    // 0.78.0 hard-codes `declaredComplete: false` because checkpoints "cover
+    // Claude file tools, but not every mutation source (notably Bash and most
+    // subagents)" — precisely the changes the model audit they replaced was
+    // instructed to go find.
+    //
+    // Claude's rewrite also introduced two costs the audit never had, both paid
+    // by any client that negotiates the report. The adapter flips
+    // `enableFileCheckpointing: true` on the SDK for the whole session, so every
+    // turn pays snapshot I/O whether or not a report was asked for. And its
+    // `settleActive` became async purely to await that bounded preview BEFORE
+    // settling the prompt response: on every prompt the client stamps with an
+    // `agentFileChangeReportRequest` — which is the point of advertising, so in
+    // practice every prompt — the turn's completion now waits on the checkpoint
+    // read, up to 2s, including on turns that changed no file at all.
+    //
+    // The report exists for clients with no filesystem watcher; codeg is not
+    // one. Nothing else in either release depends on it, and both adapters no-op
+    // without the advertisement, so staying out costs us nothing.
     //
     // codex-acp 1.7.0 and claude-agent-acp 0.73.0 have a third,
     // "nativeSubagentSessions" (the draft ACP subagent RFD; the canonical gate
@@ -5598,6 +5624,11 @@ async fn run_connection(
                 init_resp.meta.as_ref(),
                 init_resp.agent_info.as_ref(),
             );
+            // Same `agent_info.version` proof, for a different shape decision:
+            // which generation of codex's `request_user_input` form this
+            // connection will receive.
+            let codex_user_input_shape =
+                codex_user_input_shape(agent_type, init_resp.agent_info.as_ref());
             tracing::info!(
                 "[ACP][{}] steering: advertised={}, agent_version={:?}, native={}",
                 agent_type,
@@ -5713,6 +5744,7 @@ async fn run_connection(
                 // that needs no tool; OpenClaw-style `supports_mcp: false`
                 // agents could ship it someday).
                 s.native_steering_available = native_steering_available;
+                s.codex_user_input_shape = codex_user_input_shape;
                 s.neutral_goal_channel = neutral_goal_channel;
                 // The vocabulary is decided HERE for every adapter, advertising
                 // or not — this assignment is what flips it from "unknown" to
@@ -6827,10 +6859,28 @@ async fn handle_elicitation_request(
             .unwrap_or_default()
     }
     let raw = req.0;
+    // Who is on the other end, from the CONNECTION rather than from the frame.
+    // This handler is registered for every agent and codeg advertises
+    // `elicitation.form` to DeepSeek as well as Codex, so the parser must be
+    // told the peer's identity instead of inferring it from `_meta.codex` —
+    // `_meta` is an open namespace and another speaker (or an MCP server behind
+    // it) may use the same keys for something else entirely. For a codex peer
+    // this also carries the running adapter's `request_user_input` generation,
+    // pinned at initialize: it settles which of a codex question's
+    // `title`/`description` holds the question, which 1.12.0 swapped and the
+    // wire cannot disambiguate.
+    let peer = {
+        let s = state.read().await;
+        if s.agent_type == AgentType::Codex {
+            crate::acp::question::ElicitationPeer::Codex(s.codex_user_input_shape)
+        } else {
+            crate::acp::question::ElicitationPeer::Other
+        }
+    };
     // Everything codex-acp can send once `elicitation.form` is advertised
     // resolves to a plan here — an unhandled shape would silently reject the
     // agent's blocked request (an MCP tool-call approval, most damagingly).
-    let plan = match crate::acp::question::classify_elicitation(&raw) {
+    let plan = match crate::acp::question::classify_elicitation(&raw, peer) {
         Ok(plan) => plan,
         Err(e) => {
             tracing::warn!("[codex elicitation] declining unrenderable request: {e}");
@@ -10723,6 +10773,15 @@ fn resolve_live_tool_input(text: &str, cwd: Option<&str>) -> String {
 
 /// Try to inject `_start_line` into a JSON object with `file_path` + `old_string`.
 /// Returns true if injected.
+///
+/// The camelCase spellings are OpenCode's: its ACP adapter forwards the tool's
+/// own arguments verbatim (`{filePath, oldString, newString}`), and the rename
+/// to the canonical keys happens in the FRONTEND (`aliasToolInputKeys`) — so
+/// reading only the snake_case names meant no live OpenCode edit ever got a
+/// start line, and its hunks restarted at 1 until the conversation was reloaded
+/// and the history parser recovered the real number from `metadata.diff`.
+/// Resolution happens on the `in_progress` frame, before the edit is applied, so
+/// `old_string` is still findable on disk.
 fn inject_start_line(value: &mut serde_json::Value, cwd: Option<&str>) -> bool {
     let obj = match value.as_object_mut() {
         Some(o) => o,
@@ -10730,11 +10789,13 @@ fn inject_start_line(value: &mut serde_json::Value, cwd: Option<&str>) -> bool {
     };
     let fp = obj
         .get("file_path")
+        .or_else(|| obj.get("filePath"))
         .or_else(|| obj.get("path"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     let old_str = obj
         .get("old_string")
+        .or_else(|| obj.get("oldString"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     if let (Some(fp), Some(old_str)) = (fp, old_str) {
@@ -10917,6 +10978,74 @@ fn pi_result_content_is_stringify_noise(
             .is_some_and(pi_result_is_empty_announcement)
 }
 
+/// `_meta` key carrying OpenCode's authoritative tool name (see
+/// [`stamp_opencode_tool_name`]). Namespaced like every other agent's marker
+/// (`claudeCode`, `qoder`, `x.ai/tool`) so it cannot collide with a payload the
+/// adapter itself publishes.
+const OPENCODE_META_KEY: &str = "opencode";
+
+/// Record the raw tool name from an OpenCode `tool_call`'s opening frame as
+/// `_meta.opencode.toolName`, so the frontend classifier has the same identity
+/// the history parser reads out of `part.tool`.
+///
+/// OpenCode's ACP adapter states the tool's name EXACTLY ONCE, and only on this
+/// frame: `pendingToolCall` titles a not-yet-running call with the bare tool id
+/// (`toolTitle` falls through to `toolName` because `ToolStatePending` carries
+/// no title), the `in_progress` update repeats it, and then the COMPLETION frame
+/// replaces `title` with a display label and drops `kind`, `locations` and
+/// `rawInput` entirely — verified against opencode 1.18.30 driven over real ACP:
+///   tool_call        title="glob"  kind="search" rawInput={}
+///   tool_call_update title="glob"  kind="search" rawInput={"pattern":"*.txt"}
+///   tool_call_update (no title, no kind, no rawInput) content=[…]
+/// (`read`→"notes.txt", `todowrite`→"3 todos", `grep`→"third", `bash` keeps the
+/// command.) So from the second frame on, the only signal left is the input
+/// shape — and OpenCode has several tools that are indistinguishable that way:
+/// `glob` (`{pattern, path}`) classified as **grep**, `lsp_*` (`{path}`) as
+/// **read**, and an MCP tool taking `{query}` as **websearch**, each of which the
+/// history parser names correctly. This closes that live/history split at the
+/// source instead of adding more input-shape heuristics.
+///
+/// Gated on `pending` + an empty `rawInput` because `loadSession`/`forkSession`
+/// REPLAY finished tool parts through the same `pendingToolCall` builder: a
+/// replayed frame is also `status: "pending"`, but it is built from the
+/// COMPLETED state, so its title is the display label and its input is fully
+/// populated. Requiring the empty input keeps the marker off those. (codeg
+/// prefers `session/resume`, which replays nothing, so this is belt-and-braces.)
+/// A `pending` frame that did arrive with partial input simply goes unstamped —
+/// today's behavior, never a wrong name.
+///
+/// Merges into whatever `_meta` the adapter sent and never overwrites an
+/// existing `opencode` key.
+fn stamp_opencode_tool_name(
+    agent_type: AgentType,
+    status: &str,
+    raw_input: &Option<serde_json::Value>,
+    title: &str,
+    meta: Option<serde_json::Map<String, serde_json::Value>>,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    if agent_type != AgentType::OpenCode || status != "pending" {
+        return meta;
+    }
+    let input_is_empty = match raw_input {
+        None | Some(serde_json::Value::Null) => true,
+        Some(serde_json::Value::Object(map)) => map.is_empty(),
+        _ => false,
+    };
+    let name = title.trim();
+    if !input_is_empty || name.is_empty() {
+        return meta;
+    }
+    let mut meta = meta.unwrap_or_default();
+    if meta.contains_key(OPENCODE_META_KEY) {
+        return Some(meta);
+    }
+    meta.insert(
+        OPENCODE_META_KEY.to_string(),
+        serde_json::json!({ "toolName": name }),
+    );
+    Some(meta)
+}
+
 /// Resolve the live `raw_output` string for an OpenCode tool call.
 ///
 /// OpenCode's ACP adapter reports a finished tool on BOTH channels: the clean
@@ -10949,6 +11078,19 @@ fn opencode_live_tool_output(
     content: &Option<String>,
     raw_output: &Option<serde_json::Value>,
 ) -> Option<String> {
+    // `read` is the one tool whose `content` is LOSSY rather than merely
+    // redundant: OpenCode hands the client the file body with the line numbers
+    // stripped, while `metadata.display` still carries `lineStart`. The history
+    // parser rebuilds `{start_line, content}` from it, so without this the same
+    // finished `read` renders numbered after a reload and unnumbered while
+    // live. `metadata.display` is unique to `read`, so every other tool keeps
+    // the parity rule below.
+    if let Some(structured) = raw_output
+        .as_ref()
+        .and_then(|raw| crate::parsers::opencode::structure_read_output(raw.get("metadata")))
+    {
+        return Some(structured);
+    }
     if content.as_deref().is_some_and(|c| !c.trim().is_empty()) {
         return None;
     }
@@ -11220,6 +11362,71 @@ async fn pi_take_startup_banner(
         }
         _ => false,
     }
+}
+
+/// The mode id carried by a Gemini `[MODE_UPDATE] <mode>` chunk, if this chunk
+/// IS one.
+///
+/// gemini-cli announces approval-mode changes as PROSE rather than as the
+/// `current_mode_update` the protocol has for it: `handleApprovalModeChanged`
+/// pushes an `agent_message_chunk` whose entire content is
+/// `[MODE_UPDATE] ${payload.mode}` (packages/cli/src/acp/acpSession.ts, 0.60.0).
+/// Rendered as-is that is a literal assistant bubble, and codeg's own mode
+/// selector never follows the switch the user just made in the agent.
+///
+/// Two guards keep this from eating real prose:
+///
+/// - the marker is matched against the WHOLE trimmed chunk, never as a
+///   substring, so an assistant paragraph that happens to quote the marker
+///   mid-sentence still renders;
+/// - the id must be one the agent ADVERTISED for this session, not a mode name
+///   we hardcoded. That is both tighter and self-maintaining: `plan` only
+///   exists when `isPlanEnabled()` (`buildAvailableModes`), so at a session
+///   without it a user typing `[MODE_UPDATE] plan` gets their own text back
+///   instead of a silent swallow, and a mode gemini adds later needs no change
+///   here. Before the modes handshake lands there is nothing to match against
+///   and this returns `None` — prose, which is the safe direction: showing one
+///   ugly literal beats eating a reply.
+///
+/// Residual risk, accepted knowingly: gemini emits one chunk per model stream
+/// event with boundaries it chooses, so a reply that DISCUSSES the marker could
+/// in principle split so that one whole chunk is exactly `[MODE_UPDATE] yolo`.
+/// That would both swallow the line and desync codeg's mode selector (the event
+/// is latched into `modes.current_mode_id`) until the next real switch. There
+/// is no signal on the wire that separates that chunk from a genuine one, and
+/// the alternative — rendering the literal on every real mode switch — is the
+/// common case rather than the pathological one.
+///
+/// NOT consulted by [`is_agent_output_update`], which is sync and has no
+/// session state to read the advertised modes from. Same call as the pi banner
+/// makes, for the same reason: counting one of these as output is the safe
+/// direction, and the turn it would have to mislabel — one carrying a mode
+/// update and nothing else — does not occur, since the mid-turn switch gemini
+/// makes (`exit_plan_mode`) always lands alongside its own tool call.
+///
+/// Cheap for everyone else: non-Gemini agents return before touching the lock,
+/// and a Gemini chunk that is ordinary prose returns at the prefix test.
+async fn gemini_mode_update_chunk(
+    agent_type: AgentType,
+    state: &Arc<RwLock<SessionState>>,
+    text: &str,
+) -> Option<String> {
+    if agent_type != AgentType::Gemini {
+        return None;
+    }
+    let mode_id = text.trim().strip_prefix("[MODE_UPDATE] ")?.trim();
+    if mode_id.is_empty() {
+        return None;
+    }
+    state
+        .read()
+        .await
+        .modes
+        .as_ref()?
+        .available_modes
+        .iter()
+        .any(|mode| mode.id == mode_id)
+        .then(|| mode_id.to_string())
 }
 
 /// Grok wraps every MCP tool invocation in a generic `use_tool` envelope whose
@@ -11621,6 +11828,102 @@ fn pi_bash_input_from_title(title: Option<&str>) -> Option<String> {
         return None;
     }
     Some(serde_json::json!({ "command": command }).to_string())
+}
+
+/// Rebuild a Gemini tool call's `raw_input` from its title and locations.
+///
+/// gemini-cli puts NO `rawInput` on the ACP wire at all: a call arrives as
+/// title + kind + locations + content and nothing else (`acpSession.ts`,
+/// 0.60.0). codeg classifies a live call by the SHAPE of its input, so with
+/// none of it every gemini tool lands on the generic card named after its own
+/// title — no Bash card, no file card, no diff header.
+///
+/// This is a whitelist of exact title formats and NOT a match on `kind`,
+/// because `kind` cannot identify the tool: `search` covers glob, grep AND web
+/// search, and every MCP tool is hardcoded to `other` (`DiscoveredMCPTool`).
+/// Synthesizing off `kind` alone would actively mislabel calls — codeg reads a
+/// bare `pattern` as grep and a bare `query` as web search, so a guessed
+/// `{"pattern": title}` would turn every glob into a grep. Not synthesizing
+/// costs a generic card; guessing wrong invents a card that states something
+/// untrue, so anything unrecognized returns `None` on purpose. Two formats are
+/// deliberately left out for exactly that reason:
+///
+/// - glob and grep can both title themselves a bare `'<pattern>'`. Note it is
+///   `grep.ts` that collides with `glob.ts`, NOT the `ripGrep.ts` that normally
+///   serves this kind: ripgrep appends ` within …` unconditionally (its
+///   `dir_path` defaults to `"."`), while glob and the plain-grep fallback both
+///   append it only when `dir_path` is set. So the collision only happens on
+///   machines without ripgrep — which is exactly the kind of "usually fine"
+///   that makes guessing here a bad trade.
+/// - web-fetch's prompt variant carries a `prompt`, not a `url`, so there is no
+///   honest shape to emit; above 100 chars it is truncated to 97 + `...` as
+///   well.
+///
+/// Every format below is the tool's own `getDisplayTitle()`, which the ACP
+/// layer prefers over `getDescription()`. That preference is what makes the
+/// `execute` rule exact: shell overrides `getDisplayTitle()` to return
+/// `params.command` verbatim, so the title IS the command. (`getDescription()`
+/// is the one that swaps in the model's prose description for commands over
+/// 150 chars — it feeds the CLI's own TUI and never reaches the wire. Reading
+/// that function instead would have made this rule render a Bash card whose
+/// `$ …` line was an English sentence.)
+///
+/// Only consulted when the agent sent no `raw_input` of its own, and after
+/// `synthesize_edit_input_from_diffs`, which reconstructs a better input for
+/// the edits that do carry a diff.
+fn gemini_synthesize_tool_input(
+    agent_type: AgentType,
+    kind: &ToolKind,
+    title: &str,
+    locations: &[ToolCallLocation],
+) -> Option<String> {
+    if agent_type != AgentType::Gemini {
+        return None;
+    }
+    let title = title.trim();
+    let input = match kind {
+        ToolKind::Execute if !title.is_empty() => serde_json::json!({ "command": title }),
+        // NOTE: no `edit`/write-file rule on purpose. gemini ships the edit as a
+        // `diff` content block on both the permission and completion frames
+        // (`acpSession.ts`), so `synthesize_edit_input_from_diffs` — which runs
+        // ahead of this in the `.or()` chain — already rebuilds a real
+        // `{old_string, new_string}` for it. A `{file_path}` here could only
+        // ever fire on a frame that carries NO diff, and there it would make
+        // things worse, not better: `inferFromInput` sees a path plus
+        // `kind: edit` and returns "edit", which renders through EditToolInput
+        // and shows BLANK because the old/new strings it reads are absent. A
+        // generic card beats an empty edit card.
+        //
+        // read-file reports exactly one location, carrying the resolved
+        // absolute path and `params.start_line` (`read-file.ts
+        // toolLocations()`). One location is a sound discriminator because
+        // `toolLocations()` is overridden by only three tools in the whole
+        // tree — read-file, write-file and edit — and everything else inherits
+        // `tools.ts`'s `return []`. So every OTHER Read-kind tool
+        // (read_many_files, read-mcp-resource, the shell-background and
+        // tracker tools) reports ZERO, not several.
+        //
+        // The line becomes `offset`, which is the key codeg's file card reads
+        // (`content-parts-renderer.tsx`, `FileToolInput`); `start_line` is not
+        // in its vocabulary and would render nothing.
+        ToolKind::Read if locations.len() == 1 => {
+            let location = &locations[0];
+            match location.line {
+                Some(line) => serde_json::json!({ "file_path": location.path, "offset": line }),
+                None => serde_json::json!({ "file_path": location.path }),
+            }
+        }
+        ToolKind::Search => serde_json::json!({
+            "query": title
+                .strip_prefix("Searching the web for: \"")?
+                .strip_suffix('"')?,
+        }),
+        ToolKind::Fetch => serde_json::json!({
+            "url": title.strip_prefix("Fetching content from: ")?,
+        }),
+        _ => return None,
+    };
+    Some(input.to_string())
 }
 
 /// Name used when a codex sub-agent's `path` carries no usable segment. Matches
@@ -12142,6 +12445,40 @@ fn synthesize_native_steering(
     init_advertises_steering(meta)
         && registry::steering_prompt_required_min_version(agent_type)
             .is_some_and(|min| steering_version_ok(agent_info, min))
+}
+
+/// codex-acp 1.12.0 swapped the question and the short tab header between a
+/// `request_user_input` property's `title` and `description`. Both generations
+/// emit both strings, so the FORM cannot be dated — but the adapter that built
+/// it can, from the `agentInfo.version` it reports at `initialize`.
+///
+/// Pinned once into `SessionState::codex_user_input_shape` because the running
+/// adapter is not necessarily the pinned one: launch prefers a PATH-resolved
+/// install, and a custom pinned version is a supported configuration
+/// (`registry::supports_custom_version`). `None` for every other agent, and for
+/// a codex adapter that reports no parseable version — the elicitation parser
+/// then falls back to the form's own markers (see
+/// [`crate::acp::question::CodexUserInputShape`]).
+fn codex_user_input_shape(
+    agent_type: AgentType,
+    agent_info: Option<&sacp::schema::Implementation>,
+) -> Option<crate::acp::question::CodexUserInputShape> {
+    use crate::acp::question::CodexUserInputShape;
+    if agent_type != AgentType::Codex {
+        return None;
+    }
+    let version = agent_info.map(|info| info.version.trim())?;
+    // Fail closed on an unparseable version rather than guessing a generation:
+    // `None` lets the parser use the form's markers, which is strictly better
+    // information than a coin flip.
+    if semver::Version::parse(version).is_err() {
+        return None;
+    }
+    Some(if version_at_least(version, "1.12.0") {
+        CodexUserInputShape::QuestionInTitle
+    } else {
+        CodexUserInputShape::QuestionInDescription
+    })
 }
 
 /// Extract a retryable-turn-error indicator from a Codex `session_info_update`'s
@@ -13453,6 +13790,14 @@ async fn emit_conversation_update(
             meta,
             ..
         }) => {
+            // Gemini reports an approval-mode switch as a prose chunk reading
+            // `[MODE_UPDATE] <mode>`. Turn it back into the mode event it should
+            // have been — see `gemini_mode_update_chunk` for the two guards that
+            // keep it from eating prose. No-op for every other agent.
+            if let Some(mode_id) = gemini_mode_update_chunk(agent_type, state, &text.text).await {
+                emit_with_state(state, emitter, AcpEvent::ModeChanged { mode_id }).await;
+                return;
+            }
             // pi-acp opens every new session by pushing its markdown startup
             // banner down this same prose channel. It is recognized against the
             // text pi-acp itself reported on the `session/new` response, not by
@@ -13637,17 +13982,29 @@ async fn emit_conversation_update(
             } else {
                 None
             };
-            let content = serialize_tool_call_content(content_blocks, synthesized_edit.is_none())
-                .map(|c| unwrap_codebuddy_deferred_output(agent_type, &c).unwrap_or(c))
-                // pi announces a command with an empty result, which pi-acp
-                // renders as JSON source (see fn doc).
-                .filter(|_| !pi_result_content_is_stringify_noise(agent_type, &tc.raw_output));
+            // gemini sends no `rawInput` for ANY tool — its arguments survive
+            // only in the title and locations. Rebuild the canonical shape for
+            // the tools whose title format identifies them exactly, so they
+            // classify instead of all landing on the generic card (see
+            // `gemini_synthesize_tool_input`).
+            let gemini_input = if own_raw_input.is_none() {
+                gemini_synthesize_tool_input(agent_type, &tc.kind, &tc.title, &tc.locations)
+            } else {
+                None
+            };
+            let content =
+                serialize_tool_call_content(content_blocks, synthesized_edit.is_none())
+                    .map(|c| unwrap_codebuddy_deferred_output(agent_type, &c).unwrap_or(c))
+                    // pi announces a command with an empty result, which pi-acp
+                    // renders as JSON source (see fn doc).
+                    .filter(|_| !pi_result_content_is_stringify_noise(agent_type, &tc.raw_output));
             let images = extract_tool_call_images(content_blocks);
             let codex_subagent_launch = codex_subagent.is_some();
             let raw_input = codex_subagent
                 .or(synthesized_edit)
                 .or(own_raw_input)
                 .or(pi_bash_input)
+                .or(gemini_input)
                 .map(|text| resolve_live_tool_input(&text, cwd));
             // Initial tool_call notification — the frontend reducer
             // treats `raw_output` as a full replacement, so we bypass
@@ -13693,8 +14050,17 @@ async fn emit_conversation_update(
             let meta_marks_background =
                 codebuddy_meta_marks_background(agent_type, tc.meta.as_ref());
             let grok_spawn = grok_meta_marks_spawn_subagent(agent_type, tc.meta.as_ref());
-            let meta = tc.meta.map(serde_json::Value::Object);
             let status = format!("{:?}", tc.status).to_lowercase();
+            // OpenCode's only authoritative statement of WHICH tool this is
+            // arrives on this opening frame's title (see fn doc).
+            let meta = stamp_opencode_tool_name(
+                agent_type,
+                &status,
+                &tc.raw_input,
+                &tc.title,
+                tc.meta,
+            )
+            .map(serde_json::Value::Object);
             raw_output_cache.remove_if_final(&tool_call_id, Some(status.as_str()));
             // Track Grok's spawn_subagent lifecycle for the subagent-notification
             // pairing (progress meta + finished settle). No-op for other agents.
@@ -13857,6 +14223,32 @@ async fn emit_conversation_update(
             } else {
                 None
             };
+            // gemini repeats title, kind and locations on its SUCCESS
+            // completion frame, so the same reconstruction applies here (see
+            // `gemini_synthesize_tool_input`). Both wirings are needed: the
+            // opening frame is what the card is first classified from, and the
+            // completion frame is all a permission-gated call gets — that one
+            // never sends an opening `tool_call` at all.
+            //
+            // The FAILURE frame is the exception: it carries status, content
+            // and kind only. `zip` is what makes that a no-op rather than a
+            // wrong guess from a kind with no title behind it.
+            let gemini_input = if own_raw_input.is_none() {
+                tcu.fields
+                    .kind
+                    .as_ref()
+                    .zip(tcu.fields.title.as_deref())
+                    .and_then(|(kind, title)| {
+                        gemini_synthesize_tool_input(
+                            agent_type,
+                            kind,
+                            title,
+                            tcu.fields.locations.as_deref().unwrap_or_default(),
+                        )
+                    })
+            } else {
+                None
+            };
             let content = content_blocks
                 .and_then(|c| serialize_tool_call_content(c, synthesized_edit.is_none()))
                 .map(|c| unwrap_codebuddy_deferred_output(agent_type, &c).unwrap_or(c))
@@ -13871,6 +14263,7 @@ async fn emit_conversation_update(
                 .or(synthesized_edit)
                 .or(own_raw_input)
                 .or(pi_bash_input)
+                .or(gemini_input)
                 .map(|text| resolve_live_tool_input(&text, cwd));
             // Diff the incoming raw_output against the last snapshot we
             // emitted for this tool call. This turns cumulative snapshots
@@ -15407,9 +15800,12 @@ mod tests {
             // moves backwards.
             //
             // The other two stay out. "agentFileChangeReport"
-            // (claude-agent-acp 0.69.0 / codex-acp 1.4.0) buys an extra model
-            // round-trip per turn for a clamped, self-reported subset of what
-            // the `workspace_state` watcher already sees, and
+            // (claude-agent-acp 0.69.0 / codex-acp 1.4.0) buys a clamped,
+            // truncating subset of what the `workspace_state` watcher already
+            // sees — on claude still for an extra model round-trip per turn, on
+            // codex since 1.12.0 for free, by parsing the turn diff, which is
+            // explicitly narrower still (it omits anything not done through
+            // `apply_patch`). And
             // "nativeSubagentSessions" would make both adapters SUPPRESS the
             // `Agent`/`Task` tool call that codeg builds its whole subagent
             // rendering around, replacing it with an announcement that carries
@@ -15619,6 +16015,40 @@ mod tests {
         assert!(!version_at_least("0.64", "0.64.0"));
         assert!(!version_at_least("0..1", "0.64.0"));
         assert!(!version_at_least("0.64.1abc", "0.64.0"));
+    }
+
+    #[test]
+    fn codex_user_input_shape_reads_the_running_adapter_version() {
+        use crate::acp::question::CodexUserInputShape::{QuestionInDescription, QuestionInTitle};
+        use sacp::schema::Implementation;
+        let at = |v: &str| {
+            codex_user_input_shape(AgentType::Codex, Some(&Implementation::new("codex-acp", v)))
+        };
+
+        // The 1.12.0 floor, and SemVer precedence around it — a `1.11.1`
+        // prerelease is still the old shape, and 1.12.0 itself is the new one.
+        assert_eq!(at("1.12.0"), Some(QuestionInTitle));
+        assert_eq!(at("1.13.2"), Some(QuestionInTitle));
+        assert_eq!(at("1.11.0"), Some(QuestionInDescription));
+        assert_eq!(at("1.11.1-preview.6"), Some(QuestionInDescription));
+        assert_eq!(at("1.12.0-preview.1"), Some(QuestionInDescription));
+
+        // No `agentInfo`, or one codeg cannot parse: report nothing rather than
+        // guess a generation. The elicitation parser then dates the form from
+        // its own markers.
+        assert_eq!(codex_user_input_shape(AgentType::Codex, None), None);
+        assert_eq!(at("v1.12.0"), None);
+        assert_eq!(at(""), None);
+
+        // Nothing but codex speaks this form; DeepSeek gets the same
+        // `elicitation.form` capability and must stay on the generic reading.
+        assert_eq!(
+            codex_user_input_shape(
+                AgentType::DeepSeek,
+                Some(&Implementation::new("deepseek-acp", "1.12.0"))
+            ),
+            None
+        );
     }
 
     #[test]
@@ -20097,6 +20527,161 @@ mod tests {
         assert_eq!(opencode_live_tool_output(&None, &None), None);
     }
 
+    /// The `read` exception to the "let `content` render" parity rule: OpenCode
+    /// hands the client the file body with its line numbers stripped, so only
+    /// `metadata.display` still knows where the excerpt starts. Frame captured
+    /// from opencode 1.18.30 driven over real ACP.
+    #[test]
+    fn opencode_live_read_output_keeps_the_line_numbers_history_shows() {
+        let raw = Some(serde_json::json!({
+            "output": "<path>/w/notes.txt</path>\n<type>file</type>\n<content>\n1: hello world\n2: second line\n</content>",
+            "metadata": {
+                "preview": "hello world\nsecond line",
+                "truncated": false,
+                "display": {
+                    "type": "file",
+                    "path": "/w/notes.txt",
+                    "text": "hello world\nsecond line",
+                    "lineStart": 1,
+                    "lineEnd": 2,
+                    "totalLines": 2
+                }
+            }
+        }));
+        // Wins over the clean `content` block, which carries the same text
+        // WITHOUT `start_line` — the reason a finished read rendered one way
+        // live and another after a reload.
+        let content = Some("hello world\nsecond line".to_string());
+        assert_eq!(
+            opencode_live_tool_output(&content, &raw).as_deref(),
+            Some(r#"{"content":"hello world\nsecond line","start_line":1}"#)
+        );
+    }
+
+    /// OpenCode spells its edit arguments in camelCase on the wire, so the
+    /// canonical-key lookup found nothing and a live edit's hunks restarted at
+    /// line 1 — while the same call, reloaded from history, was labelled with
+    /// the real line (`parsers::opencode` reads it out of `metadata.diff`).
+    #[test]
+    fn live_start_line_resolves_opencodes_camel_case_edit_input() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("app.ts");
+        std::fs::write(&file, "one\ntwo\nthree\nneedle\nfive\n").expect("write");
+
+        let mut camel = serde_json::json!({
+            "filePath": file.to_string_lossy(),
+            "oldString": "needle",
+            "newString": "haystack",
+        });
+        assert!(inject_start_line(&mut camel, None));
+        assert_eq!(camel["_start_line"], serde_json::json!(4));
+
+        // The canonical spelling every other agent uses is untouched.
+        let mut snake = serde_json::json!({
+            "file_path": file.to_string_lossy(),
+            "old_string": "three",
+        });
+        assert!(inject_start_line(&mut snake, None));
+        assert_eq!(snake["_start_line"], serde_json::json!(3));
+
+        // A string that is not in the file leaves the input alone rather than
+        // stamping a wrong number.
+        let mut absent = serde_json::json!({
+            "filePath": file.to_string_lossy(),
+            "oldString": "not-in-the-file",
+        });
+        assert!(!inject_start_line(&mut absent, None));
+        assert!(absent.get("_start_line").is_none());
+    }
+
+    #[test]
+    fn opencode_tool_name_is_stamped_only_on_the_arg_less_opening_frame() {
+        let stamped = |status: &str, raw_input: serde_json::Value, title: &str| {
+            stamp_opencode_tool_name(
+                AgentType::OpenCode,
+                status,
+                &Some(raw_input),
+                title,
+                None,
+            )
+        };
+        // The real opening frame: `pending`, `rawInput: {}`, title = tool id.
+        assert_eq!(
+            stamped("pending", serde_json::json!({}), "glob"),
+            Some(
+                serde_json::json!({ "opencode": { "toolName": "glob" } })
+                    .as_object()
+                    .unwrap()
+                    .clone()
+            )
+        );
+        // A replayed (loadSession) frame is also `pending`, but it is built from
+        // the COMPLETED state — display title, populated input — so the empty
+        // -input gate is what keeps the marker off it.
+        assert_eq!(
+            stamped("pending", serde_json::json!({"pattern": "*.txt"}), "notes.txt"),
+            None
+        );
+        // Later frames in the lifecycle: nothing to record, the reducer keeps
+        // the opening frame's meta.
+        assert_eq!(
+            stamped("in_progress", serde_json::json!({}), "glob"),
+            None
+        );
+        assert_eq!(stamped("pending", serde_json::json!({}), "   "), None);
+    }
+
+    #[test]
+    fn opencode_tool_name_stamp_leaves_other_agents_and_existing_meta_alone() {
+        for agent in [AgentType::ClaudeCode, AgentType::Codex, AgentType::Grok] {
+            assert_eq!(
+                stamp_opencode_tool_name(
+                    agent,
+                    "pending",
+                    &Some(serde_json::json!({})),
+                    "glob",
+                    None
+                ),
+                None
+            );
+        }
+        // Merges into whatever the adapter already sent, and never overwrites an
+        // `opencode` key the adapter published itself.
+        let with_sibling = stamp_opencode_tool_name(
+            AgentType::OpenCode,
+            "pending",
+            &None,
+            "read",
+            Some(
+                serde_json::json!({ "vendor": { "x": 1 } })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .expect("meta");
+        assert_eq!(with_sibling["vendor"], serde_json::json!({ "x": 1 }));
+        assert_eq!(with_sibling["opencode"], serde_json::json!({ "toolName": "read" }));
+
+        let preexisting = stamp_opencode_tool_name(
+            AgentType::OpenCode,
+            "pending",
+            &None,
+            "read",
+            Some(
+                serde_json::json!({ "opencode": { "toolName": "theirs" } })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .expect("meta");
+        assert_eq!(
+            preexisting["opencode"],
+            serde_json::json!({ "toolName": "theirs" })
+        );
+    }
+
     /// End-to-end over the frames opencode 1.18.23 actually put on the wire for a
     /// codeg-mcp `ask_user_question` (captured by driving `opencode acp` against a
     /// stub MCP server). The card reconstructs the answer from the result TEXT —
@@ -21137,6 +21722,204 @@ mod tests {
         assert!(
             !pi_take_startup_banner(AgentType::Pi, &state, banner).await,
             "taken, not filtered: the same text later is the user's, and renders"
+        );
+    }
+
+    /// gemini-cli announces an approval-mode switch as a prose chunk reading
+    /// `[MODE_UPDATE] <mode>` (`handleApprovalModeChanged`,
+    /// packages/cli/src/acp/acpSession.ts 0.60.0). The ids are the four
+    /// `ApprovalMode` values, and `plan` is only advertised when
+    /// `isPlanEnabled()` (`buildAvailableModes`, packages/cli/src/acp/acpUtils.ts).
+    #[tokio::test]
+    async fn gemini_mode_update_marker_is_recognized_only_as_a_whole_chunk() {
+        let state = Arc::new(RwLock::new(SessionState::new(
+            "conn".to_string(),
+            AgentType::Gemini,
+            None,
+            "main".to_string(),
+            None,
+        )));
+
+        assert_eq!(
+            gemini_mode_update_chunk(AgentType::Gemini, &state, "[MODE_UPDATE] yolo").await,
+            None,
+            "before the modes handshake there is nothing to match against: prose"
+        );
+
+        // A session WITHOUT plan mode, which is what `isPlanEnabled() == false`
+        // advertises.
+        state.write().await.modes = Some(SessionModeStateInfo {
+            current_mode_id: "default".to_string(),
+            available_modes: ["default", "autoEdit", "yolo"]
+                .into_iter()
+                .map(|id| SessionModeInfo {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    description: None,
+                })
+                .collect(),
+        });
+
+        assert_eq!(
+            gemini_mode_update_chunk(AgentType::Gemini, &state, "[MODE_UPDATE] yolo").await,
+            Some("yolo".to_string()),
+            "the real marker is the whole chunk and nothing else"
+        );
+        assert_eq!(
+            gemini_mode_update_chunk(AgentType::Gemini, &state, "  [MODE_UPDATE] autoEdit\n").await,
+            Some("autoEdit".to_string()),
+            "surrounding whitespace is not prose"
+        );
+
+        assert_eq!(
+            gemini_mode_update_chunk(AgentType::Gemini, &state, "[MODE_UPDATE] plan").await,
+            None,
+            "plan is not advertised by this session, so this is the user's text"
+        );
+        assert_eq!(
+            gemini_mode_update_chunk(AgentType::Gemini, &state, "[MODE_UPDATE] ").await,
+            None,
+            "an empty id matches no advertised mode"
+        );
+        assert_eq!(
+            gemini_mode_update_chunk(
+                AgentType::Gemini,
+                &state,
+                "Run it again and you'll see [MODE_UPDATE] yolo in the output.",
+            )
+            .await,
+            None,
+            "a reply that QUOTES the marker mid-sentence must still render"
+        );
+        assert_eq!(
+            gemini_mode_update_chunk(
+                AgentType::Gemini,
+                &state,
+                "[MODE_UPDATE] yolo\n\nSwitched. Want me to continue?",
+            )
+            .await,
+            None,
+            "the marker never arrives glued to prose; matching a prefix would eat the reply"
+        );
+        assert_eq!(
+            gemini_mode_update_chunk(AgentType::ClaudeCode, &state, "[MODE_UPDATE] yolo").await,
+            None,
+            "only gemini-cli speaks this; never filter another agent's prose"
+        );
+    }
+
+    fn gemini_location(path: &str, line: Option<u32>) -> ToolCallLocation {
+        ToolCallLocation::new(path).line(line)
+    }
+
+    /// gemini ships no `rawInput`, so the arguments have to come back out of the
+    /// title. Titles below are the tools' own `getDisplayTitle()` in 0.60.0.
+    ///
+    /// The negative half is the point of the whitelist: synthesizing the wrong
+    /// shape is worse than synthesizing nothing, because codeg classifies on
+    /// shape and would render a card that names the wrong tool.
+    #[test]
+    fn gemini_tool_input_is_synthesized_only_from_identifying_titles() {
+        let synth = |kind: ToolKind, title: &str, locations: &[ToolCallLocation]| {
+            gemini_synthesize_tool_input(AgentType::Gemini, &kind, title, locations)
+        };
+
+        // shell: `getDisplayTitle()` returns `params.command` verbatim, so a
+        // command over the 150-char `getDescription()` threshold still arrives
+        // whole rather than as the model's prose description.
+        assert_eq!(
+            synth(ToolKind::Execute, "pnpm eslint .", &[]),
+            Some(r#"{"command":"pnpm eslint ."}"#.to_string())
+        );
+        let long = format!("echo {}", "x".repeat(200));
+        assert_eq!(
+            synth(ToolKind::Execute, &long, &[]),
+            Some(serde_json::json!({ "command": long }).to_string()),
+            "the wire title is the raw command at any length"
+        );
+        assert_eq!(synth(ToolKind::Execute, "   ", &[]), None);
+
+        // write-file is deliberately NOT synthesized: gemini ships a `diff`
+        // block that `synthesize_edit_input_from_diffs` turns into a real edit
+        // input, and a bare `{file_path}` under `kind: edit` would render an
+        // EditToolInput card with nothing in it.
+        assert_eq!(
+            synth(
+                ToolKind::Edit,
+                "Writing to src/main.rs",
+                &[gemini_location("/repo/src/main.rs", None)],
+            ),
+            None,
+            "the diff path owns edits; a path-only input renders a blank edit card"
+        );
+
+        // read-file reports exactly one location; read_many_files shares the
+        // kind but reports several.
+        assert_eq!(
+            synth(
+                ToolKind::Read,
+                "src/lib.rs",
+                &[gemini_location("/repo/src/lib.rs", Some(42))],
+            ),
+            Some(r#"{"file_path":"/repo/src/lib.rs","offset":42}"#.to_string()),
+            "the line is reported as `offset` — the key the file card actually reads"
+        );
+        assert_eq!(
+            synth(ToolKind::Read, "2 files", &[]),
+            None,
+            "read_many_files inherits `toolLocations() -> []`, so a Read with no \
+             location is what it actually looks like on the wire"
+        );
+
+        assert_eq!(
+            synth(ToolKind::Search, "Searching the web for: \"rust borrow\"", &[]),
+            Some(r#"{"query":"rust borrow"}"#.to_string())
+        );
+        assert_eq!(
+            synth(ToolKind::Fetch, "Fetching content from: https://example.com", &[]),
+            Some(r#"{"url":"https://example.com"}"#.to_string())
+        );
+
+        // The deliberate omissions. glob and grep are BOTH `'<pattern>'` under
+        // kind `search`, so a `{"pattern": …}` guess would render every glob as
+        // a grep; web-fetch's prompt variant has already truncated its argument.
+        assert_eq!(
+            synth(ToolKind::Search, "'**/*.rs'", &[]),
+            None,
+            "a bare pattern is glob, or grep on a machine without ripgrep — do not guess"
+        );
+        assert_eq!(
+            synth(ToolKind::Search, "'TODO' within ./", &[]),
+            None,
+            "ripgrep's ` within …` shape is still a pattern search, not a web search"
+        );
+        assert_eq!(
+            synth(
+                ToolKind::Fetch,
+                "Processing URLs and instructions from prompt: \"summarize http://a...\"",
+                &[],
+            ),
+            None,
+            "the prompt variant is truncated to 97 chars; the argument is already gone"
+        );
+        // Every MCP tool is hardcoded to `other` (`DiscoveredMCPTool`), and its
+        // `getDisplayTitle()` returns a `command` PARAM when the server happens
+        // to define one — which would look exactly like a shell call.
+        assert_eq!(
+            synth(ToolKind::Other, "rm -rf /tmp/cache", &[]),
+            None,
+            "an MCP tool's title can impersonate a command; never synthesize for `other`"
+        );
+
+        assert_eq!(
+            gemini_synthesize_tool_input(
+                AgentType::ClaudeCode,
+                &ToolKind::Execute,
+                "pnpm eslint .",
+                &[],
+            ),
+            None,
+            "agents that send a real rawInput must never get a synthesized one"
         );
     }
 

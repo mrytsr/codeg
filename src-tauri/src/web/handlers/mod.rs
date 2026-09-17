@@ -6,6 +6,7 @@ pub mod backup;
 pub mod canvas;
 pub mod chat_authoring;
 pub mod chat_channel;
+pub mod config_sync;
 pub mod conversations;
 pub mod custom_skills;
 pub mod delegation;

@@ -51,7 +51,7 @@ pub struct CheckItem {
 /// `None` on [`PreflightResult`] for every non-adapter agent.
 #[derive(Debug, Clone, Serialize)]
 pub struct AdapterInfo {
-    /// npm spec codeg installs, e.g. "@agentclientprotocol/claude-agent-acp@0.77.0".
+    /// npm spec codeg installs, e.g. "@agentclientprotocol/claude-agent-acp@0.78.0".
     pub adapter_package: String,
     /// Command the launch gate resolves, e.g. "claude-agent-acp".
     pub adapter_cmd: String,
@@ -605,15 +605,25 @@ async fn check_binary_environment(
         use crate::acp::opencode_plugins::{self, spec_has_floating_version, PluginStatus};
         match opencode_plugins::check_opencode_plugins(None) {
             Ok(summary) => {
-                // Anything opencode will not load counts, which includes a
+                // Anything the install pass can actually fix, which includes a
                 // package sitting in the legacy flat layout: present on disk,
                 // invisible to the pinned opencode, and re-downloaded on every
                 // start. Reporting that as installed is how the original bug
                 // stayed hidden.
+                //
+                // Path plugins are NOT in here: opencode imports those off disk,
+                // so "install" has nothing to do for them and listing them under
+                // a fix action that cannot clear promises a repair that never
+                // comes.
                 let missing: Vec<_> = summary
                     .plugins
                     .iter()
-                    .filter(|p| p.status != PluginStatus::Installed)
+                    .filter(|p| {
+                        matches!(
+                            p.status,
+                            PluginStatus::Missing | PluginStatus::NeedsMigration
+                        )
+                    })
                     .collect();
 
                 if summary.plugins.is_empty() {
@@ -629,7 +639,19 @@ async fn check_binary_environment(
                         check_id: "opencode_plugins".into(),
                         label: "OpenCode plugins".into(),
                         status: CheckStatus::Pass,
-                        message: format!("{} plugin(s) installed", summary.plugins.len()),
+                        // "ready", not "installed": a path plugin is never
+                        // installed anywhere and is still perfectly loadable.
+                        // The count leaves out the ones the warning below says
+                        // are not on disk, so the two rows cannot contradict
+                        // each other.
+                        message: format!(
+                            "{} plugin(s) ready",
+                            summary
+                                .plugins
+                                .iter()
+                                .filter(|p| p.status != PluginStatus::PathMissing)
+                                .count()
+                        ),
                         fixes: vec![],
                     });
                 } else {
@@ -659,6 +681,36 @@ async fn check_binary_environment(
                             kind: FixActionKind::InstallOpencodePlugins,
                             payload: String::new(),
                         }],
+                    });
+                }
+
+                // A declared path plugin with nothing at the end of it. Warn
+                // rather than Fail: opencode starts fine and publishes a load
+                // error for that one plugin. No fix action — the file has to be
+                // put there or the path corrected; installing cannot help.
+                let path_missing: Vec<String> = summary
+                    .plugins
+                    .iter()
+                    .filter(|p| p.status == PluginStatus::PathMissing)
+                    .map(|p| {
+                        p.resolved_path
+                            .clone()
+                            .unwrap_or_else(|| p.declared_spec.clone())
+                    })
+                    .collect();
+                if !path_missing.is_empty() {
+                    checks.push(CheckItem {
+                        check_id: "opencode_plugins_path".into(),
+                        label: "Plugin files".into(),
+                        status: CheckStatus::Warn,
+                        message: format!(
+                            "{} path plugin(s) declared in opencode.json do not exist: {}. \
+                             OpenCode will report a load error for each; fix the path or restore \
+                             the file (these are loaded from disk, not installed).",
+                            path_missing.len(),
+                            path_missing.join(", ")
+                        ),
+                        fixes: vec![],
                     });
                 }
 
@@ -740,7 +792,7 @@ mod adapter_tests {
         );
         assert_eq!(
             info.adapter_package,
-            "@agentclientprotocol/claude-agent-acp@0.77.0"
+            "@agentclientprotocol/claude-agent-acp@0.78.0"
         );
         assert_eq!(info.adapter_cmd, "claude-agent-acp");
         assert!(!info.adapter_installed);
@@ -757,10 +809,7 @@ mod adapter_tests {
     #[test]
     fn codex_adapter_info_uses_codex_home() {
         let info = info_for(AgentType::Codex, None, true);
-        assert_eq!(
-            info.adapter_package,
-            "@agentclientprotocol/codex-acp@1.11.0"
-        );
+        assert_eq!(info.adapter_package, "@agentclientprotocol/codex-acp@1.12.0");
         assert_eq!(info.adapter_cmd, "codex-acp");
         assert!(info.adapter_installed);
         assert_eq!(info.native_cmd, "codex");

@@ -1609,6 +1609,12 @@ export interface WorkTaskConfig {
   mode_id?: string | null
   config_values: Record<string, string>
   label_snapshot?: AutomationLabelSnapshot | null
+  /** The branch this task is FOR: its worktree branches from that branch's tip
+   *  and the merge lands back onto it. Absent/blank = the project folder's
+   *  current branch when the task starts (and what every task created before
+   *  the choice existed does). The branch actually used is recorded on
+   *  `WorkTask.base_branch` once the worktree exists. */
+  base_branch?: string | null
 }
 
 export interface WorkTask {
@@ -4477,13 +4483,22 @@ export interface LeakedTempReclaim {
 
 /// `needs_migration` = present only under the pre-1.18 flat `node_modules/`,
 /// which current opencode never reads. Not installed, from opencode's side.
-export type PluginStatus = "installed" | "needs_migration" | "missing"
+export type PluginStatus =
+  | "installed"
+  | "needs_migration"
+  | "missing"
+  /** Loaded off disk by opencode itself — nothing to install. */
+  | "path"
+  /** Declared as a path plugin, but nothing exists at the resolved path. */
+  | "path_missing"
 
 export interface PluginInfo {
   name: string
   declared_spec: string
   installed_version: string | null
   status: PluginStatus
+  /** Where opencode will look for a path plugin; null for package plugins. */
+  resolved_path: string | null
 }
 
 export interface PluginCheckSummary {

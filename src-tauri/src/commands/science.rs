@@ -733,8 +733,10 @@ fn unlink_one_locked(skill_id: &str, agent_type: AgentType) -> Result<(), Scienc
     let skill_id =
         validate_skill_id(skill_id).map_err(|e| ScienceError::Metadata(e.to_string()))?;
 
-    // Scan ALL global dirs for this agent to handle shared-dir agents (Codex,
-    // Gemini and Cline all also point at `~/.agents/skills/`).
+    // Scan ALL global dirs for this agent to handle shared-dir agents — most
+    // built-ins also point at the cross-agent `~/.agents/skills/` store, so the
+    // link may sit in either. `skill_storage_spec` is the live list; do not
+    // enumerate them here, it drifts.
     let dirs = scoped_skill_dirs(agent_type, AgentSkillScope::Global, None)
         .map_err(|_| ScienceError::UnsupportedAgent(agent_type))?;
 
