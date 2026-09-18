@@ -2078,6 +2078,7 @@
     "conversationCard": {
       "untitledConversation": "Conversación sin título",
       "newConversation": "Nueva conversación",
+      "atToNewConversation": "At en nueva conversación",
       "attachToCurrentSession": "Agregar a la sesión",
       "rename": "Renombrar",
       "status": "Estado",

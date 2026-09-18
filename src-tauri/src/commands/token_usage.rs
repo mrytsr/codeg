@@ -63,6 +63,9 @@ use crate::models::token_usage::{
 };
 use crate::web::event_bridge::{emit_event, EventEmitter, TOKEN_USAGE_SYNC_PROGRESS_EVENT};
 
+#[cfg(feature = "tauri-runtime")]
+use tauri::Manager;
+
 use sea_orm::EntityTrait;
 
 /// Hard ceiling on fact rows pulled into memory for one report. At ~90 bytes a
@@ -914,10 +917,21 @@ impl Drop for RunningFlag {
     }
 }
 
+/// Parse every conversation whose transcript moved and materialize its facts.
+///
+/// `data_dir` is the same directory the app resolves its database from, and it
+/// is required rather than optional: an agent running under the shared-provider
+/// launch path (Kimi Code, OpenCode) keeps its native session store *inside*
+/// `<data_dir>/model-provider/<agent>/<conversation_id>/`, so the parser can
+/// only find the transcript when `get_folder_conversation_core` is handed the
+/// workspace root. Omitting it silently falls back to the env-resolved home
+/// (`~/.kimi-code/sessions`), which does not hold those sessions — the parse
+/// comes back empty and the conversation is stamped with zero tokens.
 pub async fn token_usage_sync_core(
     conn: &sea_orm::DatabaseConnection,
     emitter: &EventEmitter,
     mode: TokenUsageSyncMode,
+    data_dir: &std::path::Path,
 ) -> Result<TokenUsageSyncResult, AppCommandError> {
     let _guard = SYNC_GUARD
         .try_lock()
@@ -985,7 +999,7 @@ pub async fn token_usage_sync_core(
     // Parse concurrently (each `get_folder_conversation_core` hands the file
     // read to the blocking pool), consume in order, write sequentially.
     let mut parsed = stream::iter(stale.into_iter().map(|candidate| async move {
-        let detail = get_folder_conversation_core(conn, candidate.id, None).await;
+        let detail = get_folder_conversation_core(conn, candidate.id, Some(data_dir)).await;
         (candidate, detail)
     }))
     .buffered(PARSE_CONCURRENCY);
@@ -1181,8 +1195,19 @@ pub async fn token_usage_sync(
     db: tauri::State<'_, crate::db::AppDatabase>,
     mode: Option<TokenUsageSyncMode>,
 ) -> Result<TokenUsageSyncResult, AppCommandError> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
     let emitter = EventEmitter::Tauri(app);
-    token_usage_sync_core(&db.conn, &emitter, mode.unwrap_or_default()).await
+    token_usage_sync_core(
+        &db.conn,
+        &emitter,
+        mode.unwrap_or_default(),
+        &data_dir,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -1797,6 +1822,7 @@ mod tests {
             &db.conn,
             &EventEmitter::Noop,
             TokenUsageSyncMode::Incremental,
+            std::path::Path::new("/tmp"),
         )
         .await
         .expect("first sync");
@@ -1816,6 +1842,7 @@ mod tests {
             &db.conn,
             &EventEmitter::Noop,
             TokenUsageSyncMode::Incremental,
+            std::path::Path::new("/tmp"),
         )
         .await
         .expect("second sync");
@@ -1867,6 +1894,7 @@ mod tests {
             &db.conn,
             &EventEmitter::Noop,
             TokenUsageSyncMode::Incremental,
+            std::path::Path::new("/tmp"),
         )
         .await
         .expect("first sync");
@@ -1892,6 +1920,7 @@ mod tests {
             &db.conn,
             &EventEmitter::Noop,
             TokenUsageSyncMode::Incremental,
+            std::path::Path::new("/tmp"),
         )
         .await
         .expect("second sync");
@@ -1910,6 +1939,7 @@ mod tests {
             &db.conn,
             &EventEmitter::Noop,
             TokenUsageSyncMode::Incremental,
+            std::path::Path::new("/tmp"),
         )
         .await
         .expect("third sync");
@@ -1978,6 +2008,7 @@ mod tests {
             &db.conn,
             &EventEmitter::Noop,
             TokenUsageSyncMode::Incremental,
+            std::path::Path::new("/tmp"),
         )
         .await
         .expect("schema rebuild");
@@ -1997,6 +2028,7 @@ mod tests {
             &db.conn,
             &EventEmitter::Noop,
             TokenUsageSyncMode::Incremental,
+            std::path::Path::new("/tmp"),
         )
         .await
         .expect("retry");
@@ -2014,5 +2046,92 @@ mod tests {
             1,
             "the failed settle and its retry must both preserve recorded usage"
         );
+    }
+
+    /// A Kimi conversation launched through the shared Model Provider path keeps
+    /// its `wire.jsonl` under `<data_dir>/model-provider/kimi_code/<id>/sessions/`,
+    /// NOT under the env-resolved `~/.kimi-code/sessions`. The sync has to hand
+    /// `get_folder_conversation_core` the app data dir: without it the parse
+    /// falls back to the native home, reports `ConversationNotFound`, comes back
+    /// with no turns, and stamps the conversation as zero tokens — which is how
+    /// an entire agent disappears from the token-usage dashboard.
+    #[tokio::test]
+    async fn provider_workspace_sessions_are_counted_by_the_sync() {
+        use crate::db::test_helpers::{fresh_in_memory_db, seed_conversation, seed_folder};
+        use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
+
+        let _serial = SYNC_TESTS_SERIAL.lock().await;
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/tu-provider-ws").await;
+        let conv = seed_conversation(&db, folder, crate::models::AgentType::KimiCode).await;
+        let session_id = "session_0000ws00-0000-4000-8000-000000000000";
+
+        // Bind the row to the shared provider source and the session id the
+        // agent writes under (what a real model-provider launch records).
+        let row = crate::db::entities::conversation::Entity::find_by_id(conv)
+            .one(&db.conn)
+            .await
+            .expect("read row")
+            .expect("exists");
+        let mut am = row.into_active_model();
+        am.model_source = Set(Some("provider".into()));
+        am.external_id = Set(Some(session_id.to_string()));
+        am.update(&db.conn).await.expect("bind provider session");
+
+        // Lay down the transcript where the launch adapter's `KIMI_CODE_HOME`
+        // points: `<data_dir>/model-provider/kimi_code/<conv>/sessions/wd_*/<session>/`.
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let wire = data_dir
+            .path()
+            .join("model-provider")
+            .join("kimi_code")
+            .join(conv.to_string())
+            .join("sessions")
+            .join("wd_codeg_ws")
+            .join(session_id)
+            .join("agents")
+            .join("main")
+            .join("wire.jsonl");
+        std::fs::create_dir_all(wire.parent().expect("parent")).expect("create wire dir");
+        let lines = [
+            serde_json::json!({"type":"turn.prompt","input":[{"type":"text","text":"hi"}],"origin":{"kind":"user"},"time":1782276649227i64}),
+            serde_json::json!({"type":"context.append_loop_event","event":{"type":"content.part","uuid":"p1","turnId":"0","step":1,"part":{"type":"text","text":"hello"}},"time":1782276650000i64}),
+            serde_json::json!({"type":"usage.record","model":"kimi-k2","usage":{"inputOther":1000,"output":50,"inputCacheRead":2000,"inputCacheCreation":0},"usageScope":"turn","time":1782276650100i64}),
+        ];
+        std::fs::write(
+            &wire,
+            lines
+                .iter()
+                .map(|l| l.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )
+        .expect("write wire");
+
+        let result = token_usage_sync_core(
+            &db.conn,
+            &EventEmitter::Noop,
+            TokenUsageSyncMode::Full,
+            data_dir.path(),
+        )
+        .await
+        .expect("sync");
+
+        assert_eq!(result.failed, 0);
+        assert_eq!(result.lost, 0);
+        let facts = usage_service::fetch_facts(&db.conn, &FactQuery::default(), 100)
+            .await
+            .expect("facts");
+        assert_eq!(
+            facts.len(),
+            1,
+            "the workspace transcript must yield one usage fact"
+        );
+        assert_eq!(
+            facts[0].total_tokens, 3050,
+            "inputOther + output + inputCacheRead"
+        );
+        assert_eq!(facts[0].agent_type, "kimi_code");
     }
 }

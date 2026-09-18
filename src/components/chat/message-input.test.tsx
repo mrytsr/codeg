@@ -23,6 +23,8 @@ import {
 import {
   emitAttachFileToSession,
   emitAttachSessionToSession,
+  queuePendingSessionAttachment,
+  takePendingSessionAttachment,
 } from "@/lib/session-attachment-events"
 import type { DbConversationSummary } from "@/lib/types"
 
@@ -136,7 +138,8 @@ vi.mock("@/hooks/use-open-file-target", () => ({
 // off the backend so the menu tests exercise only the menu.
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api")>()),
-  quickMessagesList: vi.fn(async () => []),}))
+  quickMessagesList: vi.fn(async () => []),
+}))
 // Real classifier only recognizes actual backend NoActiveTurn payloads; the
 // steering tests flip this per-case to drive the enqueue fallback.
 vi.mock("@/lib/turn-busy", () => ({
@@ -429,6 +432,9 @@ describe("MessageInput session-mention attach", () => {
   afterEach(() => {
     cleanup()
     composerHandle.current = null
+    // Drain the "At in new conversation" handoff so a queued entry from one
+    // test can't bleed into the next composer mount.
+    takePendingSessionAttachment("tab-1")
   })
 
   function summary(id: number, title: string | null): DbConversationSummary {
@@ -527,6 +533,19 @@ describe("MessageInput session-mention attach", () => {
     })
     const text = serializeDocToText(editor.state.doc)
     expect(text.indexOf(link)).toBe(text.lastIndexOf(link))
+  })
+
+  it("applies a mention queued before the composer mounted", async () => {
+    // "At in new conversation" queues the mention before the target tab's
+    // composer exists (dispatchEvent would be lost); the fresh composer must
+    // pick it up once it is ready.
+    queuePendingSessionAttachment("tab-1", summary(123, "Queued session"))
+    const editor = await mountWithEditor()
+    await waitFor(() =>
+      expect(serializeDocToText(editor.state.doc)).toContain(
+        "[Queued session](codeg://session/123)"
+      )
+    )
   })
 })
 

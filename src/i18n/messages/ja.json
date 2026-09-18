@@ -2078,6 +2078,7 @@
     "conversationCard": {
       "untitledConversation": "無題の会話",
       "newConversation": "新しい会話",
+      "atToNewConversation": "新規会話に At を追加",
       "attachToCurrentSession": "セッションに追加",
       "rename": "名前を変更",
       "status": "ステータス",
