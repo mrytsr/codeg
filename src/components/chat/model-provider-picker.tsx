@@ -32,6 +32,7 @@ import {
   useModelProviderDraftSelection,
   markModelProviderRestoreSettled,
   isModelProviderRestoreSettled,
+  isModelProviderSelectionWriteInFlight,
 } from "@/stores/model-provider-selection-store"
 import {
   loadRememberedAgentModelSelection,
@@ -253,6 +254,10 @@ export function ModelProviderPicker({
     // Read the live draft, not the render-time one: the remembered-restore
     // effect above may have seeded a draft within this same commit.
     if (getModelProviderDraftSelection(tabId ?? "") != null) return
+    // The send path may have consumed the draft and be persisting the user's
+    // choice right now; the still-selection-less row is a write in progress,
+    // not "no choice was ever made" — never auto-default over it.
+    if (isModelProviderSelectionWriteInFlight(tabId ?? "")) return
     const firstWithModels = visibleRecords.find((r) => r.models.length > 0)
     if (!firstWithModels) return
     const key = `${tabId ?? ""}:${agentType ?? "any"}:${

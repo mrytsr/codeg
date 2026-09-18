@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   clearModelProviderDraftSelection,
+  clearModelProviderSelectionWriteInFlight,
+  markModelProviderSelectionWriteInFlight,
   resetModelProviderSelectionStore,
   setModelProviderDraftSelection,
 } from "@/stores/model-provider-selection-store"
@@ -338,6 +340,42 @@ describe("ModelProviderPicker", () => {
       expect(
         within(trigger).getByText("anthropic · claude-sonnet-4-5")
       ).toBeInTheDocument()
+    })
+  })
+
+  it("holds the auto-default while a draft choice is being written to the bound conversation", async () => {
+    // A freshly created conversation: bound, but the pre-bind choice is still
+    // being persisted (applyDraftModelSelection marked the write in flight).
+    useAppWorkspaceStore.setState({
+      conversations: [{ id: 42, model_source: "provider" }],
+    })
+    markModelProviderSelectionWriteInFlight("tab-1")
+
+    renderPicker()
+
+    const trigger = await screen.findByRole("button", {
+      name: "Model provider",
+    })
+    // The selection-less row is a write in progress, not "no choice was ever
+    // made" — the slot stays on the placeholder and nothing is auto-saved.
+    expect(within(trigger).getByText("Provider · Model")).toBeInTheDocument()
+    expect(updateSelection).not.toHaveBeenCalled()
+
+    // The marker is a window, not a latch: once released with the row still
+    // selection-less, the auto-default proceeds as it would for any
+    // never-configured conversation.
+    act(() => {
+      clearModelProviderSelectionWriteInFlight("tab-1")
+      useAppWorkspaceStore.setState({
+        conversations: [{ id: 42, model_source: "provider" }],
+      })
+    })
+    await vi.waitFor(() => {
+      expect(updateSelection).toHaveBeenCalledWith(
+        42,
+        "anthropic",
+        "claude-sonnet-4-5"
+      )
     })
   })
 

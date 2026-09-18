@@ -17,11 +17,22 @@ interface ModelProviderSelectionStore {
    * agent's own memory, while an explicit reset is never fought.
    */
   restoreSettledKeys: Record<string, true>
+  /**
+   * Tab ids whose draft choice is currently being persisted to a bound
+   * conversation (send path). Until the authoritative row broadcast lands, the
+   * conversation row still looks selection-less; this marker tells the picker's
+   * auto-default that a choice IS being written, so it must not fill the slot
+   * with the first visible provider's first model.
+   */
+  writesInFlight: Record<string, true>
   setDraft: (tabId: string, selection: ModelProviderDraftSelection) => void
   clearDraft: (tabId: string) => void
   consumeDraft: (tabId: string) => ModelProviderDraftSelection | null
   markRestoreSettled: (key: string) => void
   isRestoreSettled: (key: string) => boolean
+  markWriteInFlight: (tabId: string) => void
+  clearWriteInFlight: (tabId: string) => void
+  isWriteInFlight: (tabId: string) => boolean
 }
 
 /**
@@ -34,6 +45,7 @@ const useModelProviderSelectionStore = create<ModelProviderSelectionStore>(
   (set, get) => ({
     drafts: {},
     restoreSettledKeys: {},
+    writesInFlight: {},
     setDraft: (tabId, selection) =>
       set((state) => ({ drafts: { ...state.drafts, [tabId]: selection } })),
     clearDraft: (tabId) =>
@@ -60,6 +72,20 @@ const useModelProviderSelectionStore = create<ModelProviderSelectionStore>(
             }
       ),
     isRestoreSettled: (key) => key in get().restoreSettledKeys,
+    markWriteInFlight: (tabId) =>
+      set((state) =>
+        tabId in state.writesInFlight
+          ? state
+          : { writesInFlight: { ...state.writesInFlight, [tabId]: true } }
+      ),
+    clearWriteInFlight: (tabId) =>
+      set((state) => {
+        if (!(tabId in state.writesInFlight)) return state
+        const writesInFlight = { ...state.writesInFlight }
+        delete writesInFlight[tabId]
+        return { writesInFlight }
+      }),
+    isWriteInFlight: (tabId) => tabId in get().writesInFlight,
   })
 )
 
@@ -113,10 +139,32 @@ export function isModelProviderRestoreSettled(key: string): boolean {
   return useModelProviderSelectionStore.getState().isRestoreSettled(key)
 }
 
+/** Mark a tab's draft choice as being persisted to its bound conversation
+ *  (send path). The picker's auto-default holds off while this is set, so the
+ *  still-selection-less row is never mistaken for "no choice was ever made". */
+export function markModelProviderSelectionWriteInFlight(tabId: string): void {
+  useModelProviderSelectionStore.getState().markWriteInFlight(tabId)
+}
+
+/** Release the write-in-flight marker once the save resolved (or failed). */
+export function clearModelProviderSelectionWriteInFlight(tabId: string): void {
+  useModelProviderSelectionStore.getState().clearWriteInFlight(tabId)
+}
+
+/** True while a tab's draft choice is being persisted to its conversation. */
+export function isModelProviderSelectionWriteInFlight(
+  tabId?: string | null
+): boolean {
+  return tabId == null
+    ? false
+    : useModelProviderSelectionStore.getState().isWriteInFlight(tabId)
+}
+
 /** Test-only: clear all tab-keyed draft selections and restore markers. */
 export function resetModelProviderSelectionStore(): void {
   useModelProviderSelectionStore.setState({
     drafts: {},
     restoreSettledKeys: {},
+    writesInFlight: {},
   })
 }

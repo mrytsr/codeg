@@ -7,17 +7,40 @@ import {
 import { loadRememberedAgentModelSelection } from "./remembered-agent-model-selection"
 import {
   getModelProviderDraftSelection,
+  isModelProviderSelectionWriteInFlight,
   resetModelProviderSelectionStore,
   setModelProviderDraftSelection,
 } from "@/stores/model-provider-selection-store"
+
+const { applyConversationUpsert, refreshConversations } = vi.hoisted(() => ({
+  applyConversationUpsert: vi.fn(),
+  refreshConversations: vi.fn(async () => {}),
+}))
 
 vi.mock("@/lib/api", () => ({
   updateConversationModelSelection: vi.fn(),
 }))
 
+// The real workspace store pulls in the whole API surface; a minimal zustand
+// store keeps this unit test focused on the apply/save flow itself.
+vi.mock("@/stores/app-workspace-store", async () => {
+  const { create } = await import("zustand")
+  const useAppWorkspaceStore = create<{
+    conversations: Array<Record<string, unknown>>
+    applyConversationUpsert: (summary: Record<string, unknown>) => void
+    refreshConversations: () => Promise<void>
+  }>(() => ({
+    conversations: [],
+    applyConversationUpsert,
+    refreshConversations,
+  }))
+  return { useAppWorkspaceStore }
+})
+
 const { updateConversationModelSelection } = vi.mocked(
   await import("@/lib/api")
 )
+const { useAppWorkspaceStore } = await import("@/stores/app-workspace-store")
 
 const selection = { providerId: "anthropic", modelId: "claude-opus-4-5" }
 const agentType = "claude_code"
@@ -38,6 +61,9 @@ describe("applyDraftModelSelection", () => {
     resetModelProviderSelectionStore()
     updateConversationModelSelection.mockReset()
     localStorage.clear()
+    useAppWorkspaceStore.setState({ conversations: [] })
+    applyConversationUpsert.mockClear()
+    refreshConversations.mockClear()
   })
 
   it("saves the draft, applies it to a fresh session, and remembers it", async () => {
@@ -63,6 +89,49 @@ describe("applyDraftModelSelection", () => {
     expect(conn.reapplyConfig).toHaveBeenCalledWith(42, { freshSession: true })
     expect(getModelProviderDraftSelection("tab-1")).toBeNull()
     expect(loadRememberedAgentModelSelection(agentType)).toEqual(selection)
+    // No workspace row announced yet → the optimistic write is a no-op.
+    expect(applyConversationUpsert).not.toHaveBeenCalled()
+  })
+
+  it("writes the choice onto the row and flags the write while saving", async () => {
+    useAppWorkspaceStore.setState({
+      conversations: [{ id: 42, model_source: "provider" }],
+    })
+    setModelProviderDraftSelection("tab-1", selection)
+    let resolveSave: () => void = () => {}
+    updateConversationModelSelection.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve
+        })
+    )
+    const conn = connection()
+
+    const pending = applyDraftModelSelection({
+      tabId: "tab-1",
+      conversationId: 42,
+      agentType,
+      connection: conn,
+      freshSession: true,
+    })
+
+    // Before the save resolves: the row already carries the user's choice —
+    // the same optimistic write `persistSelection` does — and the picker is
+    // told a write is in flight so its auto-default holds off.
+    expect(applyConversationUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 42,
+        model_source: "provider",
+        model_provider_id: "anthropic",
+        model_provider_model_id: "claude-opus-4-5",
+        model: "claude-opus-4-5",
+      })
+    )
+    expect(isModelProviderSelectionWriteInFlight("tab-1")).toBe(true)
+
+    resolveSave()
+    await expect(pending).resolves.toEqual(selection)
+    expect(isModelProviderSelectionWriteInFlight("tab-1")).toBe(false)
   })
 
   it("keeps resume semantics for an existing conversation", async () => {
@@ -117,6 +186,10 @@ describe("applyDraftModelSelection", () => {
     expect(conn.reapplyConfig).not.toHaveBeenCalled()
     expect(getModelProviderDraftSelection("tab-1")).toEqual(selection)
     expect(loadRememberedAgentModelSelection(agentType)).toBeNull()
+    // The in-flight marker is released and the optimistic row write is
+    // dropped by re-syncing the authoritative rows.
+    expect(isModelProviderSelectionWriteInFlight("tab-1")).toBe(false)
+    expect(refreshConversations).toHaveBeenCalled()
   })
 
   it("restores the draft when applying the saved selection fails", async () => {
