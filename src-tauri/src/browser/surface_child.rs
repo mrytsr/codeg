@@ -596,6 +596,17 @@ fn build_child(
 ) -> Result<wry::WebView, String> {
     #[cfg(target_os = "windows")]
     {
+        // Before the window's first child webview exists, because dropping one
+        // takes the window's own resize hook away with it: see
+        // `shim::hold_resize_hook`. Not fatal — a window that keeps wry's hook
+        // until its first tab closes is still better than no tab at all.
+        if let Err(err) = shim::hold_resize_hook(owner) {
+            tracing::warn!(
+                "[browser] window {}: resize hook not held ({err}); the app's webview may keep \
+                 the wrong size once a tab closes",
+                owner.label()
+            );
+        }
         // A popup is built into the environment its opener handed over —
         // WebView2 refuses a new window created from any other one — and that
         // environment already carries the opener's profile directory. Only a

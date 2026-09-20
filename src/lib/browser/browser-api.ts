@@ -442,6 +442,20 @@ export function browserSetSignInUserAgent(enabled: boolean): Promise<void> {
   })
 }
 
+/** The colours the empty tab's page is painted with: the running theme's
+ *  `--background` as `#rrggbb`, and whether that is a dark scheme. The blank
+ *  document a tab commits is the engine's, and the engine's is white in every
+ *  theme — see the Rust `browser::blank_page`. */
+export function browserSetBlankPageTheme(theme: {
+  background: string
+  dark: boolean
+}): Promise<void> {
+  return getTransport().call<void>("browser_set_blank_page_theme", {
+    background: theme.background,
+    dark: theme.dark,
+  })
+}
+
 /**
  * Highlight the next (or previous) match of `query` in the page and answer
  * whether anything matched. An empty query clears the highlight.

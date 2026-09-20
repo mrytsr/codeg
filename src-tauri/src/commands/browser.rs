@@ -11,6 +11,7 @@ use tauri::Url;
 
 use crate::app_error::AppCommandError;
 use crate::browser::agent::{self, GrantLevel};
+use crate::browser::blank_page;
 use crate::browser::capture::{self, CaptureOutcome, CaptureRegion, CaptureRequest};
 use crate::browser::console::{ConsoleLevel, ConsoleQuery, ConsoleReadout};
 use crate::browser::confirm::{
@@ -3480,6 +3481,31 @@ pub fn set_sign_in_user_agent_core(registry: &BrowserRegistry, enabled: bool) {
             }
         }
     }
+}
+
+/// Record what the empty tab's page should look like and repaint the blank
+/// pages that are already open, so a theme change reaches the tab on screen
+/// and not only the next one opened.
+pub fn set_blank_page_theme_core(
+    registry: &BrowserRegistry,
+    background: String,
+    dark: bool,
+) -> Result<(), AppCommandError> {
+    blank_page::set(blank_page::BlankPageTheme { background, dark })
+        .map_err(AppCommandError::invalid_input)?;
+    blank_page::repaint_all(registry);
+    Ok(())
+}
+
+/// The colours of the empty tab's page, pushed by the frontend (which owns
+/// the theme) at startup and on every change. See `browser::blank_page`.
+#[tauri::command]
+pub async fn browser_set_blank_page_theme(
+    registry: State<'_, BrowserRegistry>,
+    background: String,
+    dark: bool,
+) -> Result<(), AppCommandError> {
+    set_blank_page_theme_core(&registry, background, dark)
 }
 
 /// The "sign-in user agent" preference, pushed by the frontend (which owns

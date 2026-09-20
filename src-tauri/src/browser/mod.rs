@@ -21,6 +21,8 @@
 //! - `service_url` — reading a dev server's address out of terminal output
 //! - `services`   — which of those addresses are live, and telling the
 //!   workspace about a new one so it can offer to open it
+//! - `blank_page` — the empty tab's own page: `about:blank` in the app's
+//!   colours rather than the engine's white
 //! - `doc_guest`  — the `codeg-doc:` guest that shows a local HTML file
 //! - `profile`    — the tabs' own data store / directory and their proxy
 //! - `downloads`  — destination policy and records for page downloads
@@ -61,6 +63,8 @@ pub mod service_url;
 pub mod services;
 pub mod types;
 
+#[cfg(feature = "tauri-runtime")]
+pub mod blank_page;
 #[cfg(feature = "tauri-runtime")]
 pub mod channel;
 #[cfg(feature = "tauri-runtime")]

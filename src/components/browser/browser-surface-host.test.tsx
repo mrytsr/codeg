@@ -108,6 +108,25 @@ function showing(id = "abc"): BrowserTabState {
   }
 }
 
+/** A tab the user opened empty: the blank page and nothing else. */
+function emptyTab(id = "abc"): BrowserWorkspaceTab {
+  const record = tab(id)
+  return {
+    ...record,
+    browser: { ...record.browser, initialUrl: "about:blank" },
+  }
+}
+
+/** Its state once the blank page has committed in it. */
+function emptyState(id = "abc"): BrowserTabState {
+  return {
+    ...state(id),
+    requestedUrl: "about:blank",
+    url: "about:blank",
+    loading: false,
+  }
+}
+
 async function flush() {
   await act(async () => {
     await Promise.resolve()
@@ -682,6 +701,42 @@ describe("BrowserSurfaceHost", () => {
       true
     )
     release()
+  })
+
+  // The blank page an empty tab sits on is a committed document like any
+  // other — the backend paints it in the app's colours (`browser::blank_page`)
+  // — so a notice hides it behind its own still, exactly as it does a page.
+  // Before this, the blank page was excluded from that and the empty tab was
+  // the one surface in the app that covered a toast.
+  it("hides a tab sitting on the blank page for a notice", async () => {
+    api.browserFreezeFrame.mockImplementation(() =>
+      Promise.resolve({ mime: "image/jpeg", data: "AAA", width: 8, height: 8 })
+    )
+    api.browserOpenTab.mockImplementation(() =>
+      Promise.resolve(emptyState("host-empty"))
+    )
+    const { container } = render(
+      <BrowserSurfaceHost tab={emptyTab("host-empty")} />
+    )
+    await flush()
+    api.browserSetVisible.mockClear()
+
+    await act(async () => {
+      acquireNativeSurfaceOcclusion("toast", { passive: true })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await flushPaint()
+    expect(api.browserFreezeFrame).toHaveBeenCalledWith("host-empty")
+    expect(
+      container.querySelector("img[data-browser-frozen-frame]")
+    ).not.toBeNull()
+    // No focus handoff: the notice is not something the user opened.
+    expect(api.browserSetVisible).toHaveBeenLastCalledWith(
+      "host-empty",
+      false,
+      false,
+      false
+    )
   })
 
   // One real overlay in the set and the hide is an overlay's again, notice or

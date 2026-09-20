@@ -23,6 +23,7 @@ import {
   getBrowserPrefs,
   resetBrowserPrefsForTests,
   setBrowserDefaultAgentGrant,
+  setBrowserEvalApproval,
   setBrowserNewTabProfile,
   setBrowserProfiles,
   setBrowserServiceAutoOpen,
@@ -213,6 +214,24 @@ describe("BrowserSettingsSection", () => {
     act(() => setBrowserDefaultAgentGrant("none"))
     expect(level()).toHaveTextContent("Share nothing")
     expect(getBrowserPrefs().defaultAgentGrant).toBe("none")
+  })
+
+  // Running without asking is what an installation does until someone says
+  // otherwise, and this row is where they find that out: a person who never
+  // opens it should still have read the truth in the hint beside it, so the
+  // trigger has to show the default as the default.
+  it("runs code without asking until the dialog is asked for", () => {
+    renderSection()
+    expandSection()
+    const policy = () =>
+      screen.getByRole("combobox", { name: "Running code on a page" })
+    expect(policy()).toHaveTextContent("Run without asking")
+    act(() => setBrowserEvalApproval("ask"))
+    expect(policy()).toHaveTextContent("Ask me every time")
+    expect(getBrowserPrefs().evalApproval).toBe("ask")
+    act(() => setBrowserEvalApproval("silent"))
+    expect(policy()).toHaveTextContent("Run without asking")
+    expect(getBrowserPrefs().evalApproval).toBe("silent")
   })
 
   it("persists the background-unload switch, which is off by default", () => {

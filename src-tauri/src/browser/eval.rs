@@ -1,12 +1,23 @@
 //! Running an agent's own code on a page — the most powerful thing on this
-//! surface, and the only one a person is asked about every single time.
+//! surface, and the one with a switch of its very own.
 //!
 //! Everything else an agent may do to a page is a *named* act: read the tree,
 //! click the ref the tree handed out, type this text, take a picture. A person
 //! sharing a tab at `control` can picture the whole set. Arbitrary code is not
-//! a member of that set — it is the set — so it is gated three more times on
-//! top of the share: a switch of its own that ships off, the `control` level,
-//! and a confirmation for the individual snippet, which is never remembered.
+//! a member of that set — it is the set — so it is gated twice more on top of
+//! the share: a switch of its own, which ships OFF, and the `control` level.
+//! Both are read from the registry here, and an agent cannot reach either.
+//!
+//! A per-snippet confirmation is available on top of those and is not on by
+//! default (`evalApproval` in the frontend's `browser-prefs`). That is a
+//! deliberate placement of the decision rather than an absence of one: the
+//! question used to be asked once per snippet and never remembered, which is
+//! the most repetitive consent in the app, and a dialog answered by reflex is
+//! not consent. So the weight sits on the switch, whose own text says that
+//! turning it on means code runs without asking — a question asked once, while
+//! the person is deciding, instead of a hundred times while they are working.
+//! Either way the run is recorded on that tab's activity strip: not asking is
+//! not the same as not showing.
 //!
 //! Two decisions here are load-bearing and easy to get wrong later.
 //!

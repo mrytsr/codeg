@@ -5018,8 +5018,8 @@
     },
     "browserEval": {
       "label": "Ejecutar código en el navegador integrado",
-      "short": "Ejecuta su propio código en una página que compartiste; tú apruebas cada fragmento.",
-      "hint": "Permite que los agentes ejecuten su propio JavaScript en una página que hayas compartido. Desactivado por defecto, y requiere el interruptor de arriba. Verás cada fragmento y lo aprobarás uno a uno: no hay forma de hacerlo automático."
+      "short": "Ejecuta su propio código en una página que compartiste, sin preguntar.",
+      "hint": "Permite que los agentes ejecuten su propio JavaScript en una página que hayas compartido. Desactivado por defecto, y requiere el interruptor de arriba. Activarlo significa que los fragmentos se ejecutan sin preguntar, así que la decisión está en este interruptor; en Ajustes → Navegador integrado puedes hacer que te muestren cada fragmento."
     },
     "automations": {
       "label": "Crear automatizaciones",
@@ -5153,6 +5153,10 @@
     "agentGrantRead": "Solo lectura",
     "agentGrantControl": "Leer y actuar",
     "agentGrantNone": "No compartir nada",
+    "evalApprovalTitle": "Ejecutar código en una página",
+    "evalApprovalHint": "Qué ocurre cuando un agente pide ejecutar su propio JavaScript en una página compartida como «Leer y actuar». Se ejecuta, sin preguntar: la decisión está en el interruptor «Ejecutar código en el navegador integrado», que está apagado hasta que lo enciendas, y en el nivel de uso compartido de la página; cada ejecución aparece en la actividad del agente de esa pestaña. «Preguntarme siempre» te muestra cada fragmento entero y espera tu respuesta.",
+    "evalApprovalAsk": "Preguntarme siempre",
+    "evalApprovalSilent": "Ejecutar sin preguntar",
     "terminalMenuTitle": "Menú de enlaces del terminal",
     "terminalMenuHint": "Al hacer clic en un enlace del terminal se muestra un pequeño menú (navegador integrado, navegador del sistema, copiar enlace) en lugar de abrirlo de inmediato. ⌘/Ctrl+clic sigue abriendo el enlace directamente.",
     "htmlPreviewTitle": "Vista previa de archivos HTML",
@@ -6491,7 +6495,7 @@
         "description": "Un agente quiere ejecutar JavaScript en esta página. Puede leer y cambiar todo lo que tú puedes en {site}.",
         "descriptionWithTitle": "Un agente quiere ejecutar JavaScript en «{title}». Puede leer y cambiar todo lo que tú puedes en {site}.",
         "codeLabel": "El código que se ejecutará",
-        "everyTime": "Se te preguntará de nuevo por cada fragmento: aprobar este no aprueba el siguiente.",
+        "everyTime": "Se te preguntará de nuevo por cada fragmento: aprobar este no aprueba el siguiente. Si se te pregunta o no se decide en Ajustes → Navegador integrado.",
         "allow": "Ejecutar una vez",
         "deny": "No ejecutar"
       }

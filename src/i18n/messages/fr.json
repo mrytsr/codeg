@@ -5018,8 +5018,8 @@
     },
     "browserEval": {
       "label": "Exécuter du code dans le navigateur intégré",
-      "short": "Exécute son propre code sur une page partagée — vous approuvez chaque extrait.",
-      "hint": "Autorise les agents à exécuter leur propre JavaScript sur une page que vous avez partagée. Désactivé par défaut, et nécessite l’interrupteur ci-dessus. Chaque extrait vous est montré et approuvé un par un : rien ne peut le rendre automatique."
+      "short": "Exécute son propre code sur une page partagée — sans rien demander.",
+      "hint": "Autorise les agents à exécuter leur propre JavaScript sur une page que vous avez partagée. Désactivé par défaut, et nécessite l’interrupteur ci-dessus. L’activer signifie que les extraits s’exécutent sans demande : la décision se prend donc ici ; Réglages → Navigateur intégré permet de vous faire montrer chaque extrait à la place."
     },
     "automations": {
       "label": "Créer des automatisations",
@@ -5153,6 +5153,10 @@
     "agentGrantRead": "Lecture seule",
     "agentGrantControl": "Lecture et actions",
     "agentGrantNone": "Ne rien partager",
+    "evalApprovalTitle": "Exécuter du code sur une page",
+    "evalApprovalHint": "Ce qui se passe quand un agent demande à exécuter son propre JavaScript sur une page partagée en « Lecture et actions ». Il s’exécute, sans demander : la décision se prend sur l’interrupteur « Exécuter du code dans le navigateur intégré », désactivé tant que vous ne l’activez pas, et sur le niveau de partage de la page ; chaque exécution figure dans l’activité de l’agent de cet onglet. « Me demander à chaque fois » vous montre chaque extrait en entier et attend votre réponse.",
+    "evalApprovalAsk": "Me demander à chaque fois",
+    "evalApprovalSilent": "Exécuter sans demander",
     "terminalMenuTitle": "Menu des liens du terminal",
     "terminalMenuHint": "Un clic sur un lien dans le terminal affiche un petit menu (navigateur intégré, navigateur système, copier le lien) au lieu de l'ouvrir immédiatement. ⌘/Ctrl-clic ouvre toujours le lien directement.",
     "htmlPreviewTitle": "Aperçu des fichiers HTML",
@@ -6491,7 +6495,7 @@
         "description": "Un agent veut exécuter du JavaScript sur cette page. Il peut lire et modifier tout ce que vous pouvez sur {site}.",
         "descriptionWithTitle": "Un agent veut exécuter du JavaScript sur « {title} ». Il peut lire et modifier tout ce que vous pouvez sur {site}.",
         "codeLabel": "Le code qui sera exécuté",
-        "everyTime": "La question reviendra pour chaque extrait : approuver celui-ci n’approuve pas le suivant.",
+        "everyTime": "La question reviendra pour chaque extrait : approuver celui-ci n’approuve pas le suivant. C’est dans Réglages → Navigateur intégré que se décide si la question est posée.",
         "allow": "Exécuter une fois",
         "deny": "Ne pas exécuter"
       }

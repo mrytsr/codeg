@@ -17,6 +17,10 @@
 //! fence that keeps a `block` site rule in force inside iframes (WebView2's
 //! `NavigationStarting` is main-frame only).
 //!
+//! One thing here is not about a tab at all: `hold_resize_hook` puts a
+//! subclass on the WINDOW a tab is embedded in, to replace the one wry takes
+//! off it when any child webview of that window is dropped.
+//!
 //! Every function runs on the main thread against the live webview. The
 //! per-webview state lives in a thread-local keyed by the `ICoreWebView2`
 //! pointer — which is also what a channel message reports as its source — and
@@ -29,15 +33,16 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use serde_json::{json, Value};
-use tauri::Url;
+use tauri::{Url, WebviewWindow};
 use tauri_runtime_wry::wry::{self, WebViewExtWindows};
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    ICoreWebView2, ICoreWebView2DevToolsProtocolEventReceivedEventArgs2,
+    ICoreWebView2, ICoreWebView2Controller, ICoreWebView2DevToolsProtocolEventReceivedEventArgs2,
     ICoreWebView2DevToolsProtocolEventReceiver, ICoreWebView2Environment15,
     ICoreWebView2Find, ICoreWebView2Frame, ICoreWebView2Frame2, ICoreWebView2Frame7,
     ICoreWebView2PermissionRequestedEventArgs3,
     ICoreWebView2Settings2, ICoreWebView2_28, ICoreWebView2_4,
     COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_JPEG,
+    COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
     COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MULTIPLE_AUTOMATIC_DOWNLOADS,
     COREWEBVIEW2_PERMISSION_STATE_ALLOW, COREWEBVIEW2_PERMISSION_STATE_DENY,
     COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, COREWEBVIEW2_WEB_ERROR_STATUS,
@@ -58,9 +63,15 @@ use webview2_com::{
     WebResourceRequestedEventHandler,
 };
 use windows::core::{Interface, BOOL, HSTRING, PWSTR};
-use windows::Win32::Foundation::RECT;
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::System::Com::{IStream, STREAM_SEEK_SET};
-use windows::Win32::UI::Shell::SHCreateMemStream;
+use windows::Win32::UI::Shell::{
+    DefSubclassProc, GetWindowSubclass, RemoveWindowSubclass, SetWindowSubclass, SHCreateMemStream,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetClientRect, SetWindowPos, SIZE_MINIMIZED, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOZORDER,
+    WM_ENTERSIZEMOVE, WM_MOVE, WM_MOVING, WM_NCDESTROY, WM_SETFOCUS, WM_SIZE,
+};
 
 use super::super::agent::PointerButton;
 use super::super::channel::MessageSink;
@@ -1620,6 +1631,138 @@ fn classify_web_error(status: COREWEBVIEW2_WEB_ERROR_STATUS) -> Option<BrowserEr
         return Some(BrowserErrorKind::Tls);
     }
     Some(BrowserErrorKind::Failed)
+}
+
+/// Subclass id of the hook below. A subclass is named by (procedure, id) and
+/// the procedure is this file's alone, so the number only has to stay put.
+const RESIZE_HOOK_ID: usize = 0xC0DE;
+
+/// Give `window` a resize hook of its own — one wry cannot take away.
+///
+/// A window's own webview is kept fitted to the window by a subclass wry puts
+/// on the window: `WM_SIZE` → `ICoreWebView2Controller::SetBounds`, plus the
+/// focus and position notices the engine has no other way to hear about. wry
+/// installs it for the webview that IS the window's content and for no other
+/// — but it removes it whenever ANY webview whose parent is that window is
+/// dropped, child webviews included: `impl Drop for InnerWebView` detaches
+/// unconditionally (wry 0.55.1, `src/webview2/mod.rs:71`, still so on `dev`).
+///
+/// A browser tab IS a child webview of the workspace window, so closing one
+/// left that window with no resize hook at all. The app's own webview then
+/// kept the size it happened to have at that moment: close a tab while the
+/// window is maximised, restore the window, and the app is still drawn at the
+/// maximised size — its title bar, and with it the window controls, past the
+/// right edge of the window.
+///
+/// So the window gets a second hook, ours, under an id wry's detach cannot
+/// name, doing the same work on the same controller. It goes on before the
+/// first tab is built, so the window is never left without one; while wry's is
+/// also there both run and set the same bounds twice, which costs a pair of
+/// no-ops per resize and nothing else.
+///
+/// Main thread (the controller is handed out on no other), and idempotent: one
+/// hook per window, however many tabs it goes on to host.
+pub fn hold_resize_hook(window: &WebviewWindow) -> Result<(), String> {
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+    let label = window.label().to_string();
+    window
+        .with_webview(move |platform| {
+            let hwnd = HWND(hwnd as _);
+            // SAFETY: main thread, and `hwnd` is this window's, alive for as
+            // long as the window it belongs to.
+            if unsafe { GetWindowSubclass(hwnd, Some(resize_hook_proc), RESIZE_HOOK_ID, None) }
+                .as_bool()
+            {
+                return;
+            }
+            // The hook's own reference to the controller, held by the window
+            // itself from here on and let go of when the window is destroyed.
+            let held = Box::into_raw(Box::new(platform.controller()));
+            // SAFETY: as above; `held` is a live, leaked `Box` for exactly as
+            // long as the subclass that carries it.
+            let installed = unsafe {
+                SetWindowSubclass(hwnd, Some(resize_hook_proc), RESIZE_HOOK_ID, held as usize)
+            };
+            if !installed.as_bool() {
+                // Nothing carries the reference now.
+                drop(unsafe { Box::from_raw(held) });
+                tracing::warn!(
+                    "[browser] window {label}: no resize hook of its own; closing a tab will \
+                     leave the app's webview at the size it had"
+                );
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// What wry's own parent subclass does, for a window that may lose it. The
+/// reference data is the window's `ICoreWebView2Controller`; see
+/// [`hold_resize_hook`].
+///
+/// wry's `PARENT_DESTROY_MESSAGE` is deliberately not among the messages
+/// answered here: that message is how wry tells its own hook to let go, and
+/// this one outliving it is the whole point.
+unsafe extern "system" fn resize_hook_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    held: usize,
+) -> LRESULT {
+    if held == 0 {
+        return DefSubclassProc(hwnd, msg, wparam, lparam);
+    }
+    let controller = held as *const ICoreWebView2Controller;
+    match msg {
+        WM_SIZE if wparam.0 != SIZE_MINIMIZED as usize => {
+            let mut client = RECT::default();
+            if GetClientRect(hwnd, &mut client).is_ok() {
+                let width = client.right - client.left;
+                let height = client.bottom - client.top;
+                let _ = (*controller).SetBounds(RECT {
+                    left: 0,
+                    top: 0,
+                    right: width,
+                    bottom: height,
+                });
+                // `SetBounds` sizes what the engine draws; this sizes the
+                // window it draws into, which is wry's and not this window.
+                let mut host = HWND::default();
+                if (*controller).ParentWindow(&mut host).is_ok() {
+                    let _ = SetWindowPos(
+                        host,
+                        None,
+                        0,
+                        0,
+                        width,
+                        height,
+                        SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOZORDER,
+                    );
+                }
+            }
+        }
+        // The window took the keyboard itself: the page is what should have
+        // it. (A tab with focus keeps it — focus is on ITS window then, and
+        // this message is for a window that has none of its own.)
+        WM_SETFOCUS | WM_ENTERSIZEMOVE => {
+            let _ = (*controller).MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        }
+        // Everything the engine places in screen coordinates — a select
+        // dropdown, the IME candidates — is placed from where it last heard
+        // the window was.
+        WM_MOVE | WM_MOVING => {
+            let _ = (*controller).NotifyParentWindowPositionChanged();
+        }
+        // The window is going; the hook goes with it, and the reference it
+        // carried is dropped here because nothing else holds this clone.
+        WM_NCDESTROY => {
+            let _ = RemoveWindowSubclass(hwnd, Some(resize_hook_proc), RESIZE_HOOK_ID);
+            drop(Box::from_raw(held as *mut ICoreWebView2Controller));
+        }
+        _ => {}
+    }
+    DefSubclassProc(hwnd, msg, wparam, lparam)
 }
 
 #[cfg(test)]

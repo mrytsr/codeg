@@ -20,6 +20,7 @@ import { useTranslations } from "next-intl"
 import {
   AppWindow,
   Bot,
+  Code2,
   Download,
   Eraser,
   FileCode2,
@@ -68,6 +69,7 @@ import {
   browserRemoveProfile,
 } from "@/lib/browser/browser-api"
 import {
+  BROWSER_EVAL_APPROVALS,
   DEFAULT_BROWSER_PROFILE_ID,
   LINK_SOURCES,
   SERVICE_AUTO_OPEN_MODES,
@@ -75,6 +77,7 @@ import {
   removeBrowserProfile,
   setBrowserDefaultAgentGrant,
   setBrowserDevtools,
+  setBrowserEvalApproval,
   setBrowserHostRules,
   setBrowserHtmlPreviewEngine,
   setBrowserNewTabProfile,
@@ -85,6 +88,7 @@ import {
   setBrowserTerminalClickMenu,
   setDefaultLinkTarget,
   useBrowserPrefs,
+  type BrowserEvalApproval,
   type BrowserProfile,
   type DefaultAgentGrant,
   type LinkSource,
@@ -138,6 +142,11 @@ const AGENT_GRANT_LABEL_KEYS = {
   control: "agentGrantControl",
   none: "agentGrantNone",
 } as const satisfies Record<DefaultAgentGrant, string>
+
+const EVAL_APPROVAL_LABEL_KEYS = {
+  ask: "evalApprovalAsk",
+  silent: "evalApprovalSilent",
+} as const satisfies Record<BrowserEvalApproval, string>
 
 const SERVICE_AUTO_OPEN_LABEL_KEYS = {
   off: "serviceOpenOff",
@@ -692,6 +701,40 @@ export function BrowserSettingsSection() {
                 {AGENT_GRANTS.map((level) => (
                   <SelectItem key={level} value={level}>
                     {t(AGENT_GRANT_LABEL_KEYS[level])}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          }
+        />
+        {/* Whether the one act that is not a member of the set a `control`
+            share describes — the agent's own code — is put in front of the
+            person each time. It is not, unless they say so here: the decision
+            lives on the `browser_eval` switch, which ships off. Two named
+            answers rather than a switch, because this is a setting to read
+            rather than to toggle on a guess about what "on" means. */}
+        <SettingRow
+          icon={Code2}
+          title={t("evalApprovalTitle")}
+          description={t("evalApprovalHint")}
+          control={
+            <Select
+              value={prefs.evalApproval}
+              onValueChange={(value) =>
+                setBrowserEvalApproval(value as BrowserEvalApproval)
+              }
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-44 bg-background text-xs"
+                aria-label={t("evalApprovalTitle")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                {BROWSER_EVAL_APPROVALS.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {t(EVAL_APPROVAL_LABEL_KEYS[value])}
                   </SelectItem>
                 ))}
               </SelectContent>

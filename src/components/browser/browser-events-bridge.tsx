@@ -16,6 +16,7 @@ import {
   applyDefaultAgentGrant,
   forgetDefaultAgentGrant,
 } from "@/lib/browser/browser-agent-grant"
+import { watchBlankPageTheme } from "@/lib/browser/blank-page-theme"
 import {
   getBrowserPrefs,
   subscribeBrowserPrefs,
@@ -108,6 +109,18 @@ const HOST_RULES_RETRY_MS = 1000
 export function BrowserEventsBridge() {
   const { adoptBrowserTab, closeFileTab, openBrowserTab } =
     useWorkspaceActions()
+
+  // The empty tab's page is a document the BACKEND paints (the engine's own
+  // is white in every theme — `browser::blank_page`), in colours only this
+  // side knows: they are variables of the running theme. Its own effect, not
+  // the preference push below: this follows the theme, not the browser's
+  // settings, and it is pushed before any capability round trip so the first
+  // tab of a run opens in the right colours. In web mode there are no native
+  // surfaces to paint.
+  useEffect(() => {
+    if (!isDesktop()) return
+    return watchBlankPageTheme()
+  }, [])
 
   useEffect(() => {
     let cancelled = false

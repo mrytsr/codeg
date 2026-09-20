@@ -5018,8 +5018,8 @@
     },
     "browserEval": {
       "label": "Executar código no navegador integrado",
-      "short": "Executa o próprio código numa página compartilhada — você aprova cada trecho.",
-      "hint": "Permite que os agentes executem o próprio JavaScript numa página que você compartilhou. Desativado por padrão e depende do interruptor acima. Cada trecho é mostrado a você e aprovado um de cada vez — não há como torná-lo automático."
+      "short": "Executa o próprio código numa página compartilhada, sem perguntar.",
+      "hint": "Permite que os agentes executem o próprio JavaScript numa página que você compartilhou. Desativado por padrão e depende do interruptor acima. Ligá-lo significa que os trechos são executados sem perguntar, então a decisão é tomada neste interruptor; em Configurações → Navegador integrado dá para pedir que cada trecho seja mostrado a você."
     },
     "automations": {
       "label": "Criar automações",
@@ -5153,6 +5153,10 @@
     "agentGrantRead": "Apenas leitura",
     "agentGrantControl": "Ler e interagir",
     "agentGrantNone": "Não compartilhar nada",
+    "evalApprovalTitle": "Executar código numa página",
+    "evalApprovalHint": "O que acontece quando um agente pede para executar o próprio JavaScript numa página compartilhada como “Ler e interagir”. Ele executa, sem perguntar — a decisão está no interruptor “Executar código no navegador integrado”, que fica desligado até você ligá-lo, e no nível de compartilhamento da página; cada execução aparece na atividade do agente daquela aba. “Perguntar sempre” mostra cada trecho por inteiro e espera sua resposta.",
+    "evalApprovalAsk": "Perguntar sempre",
+    "evalApprovalSilent": "Executar sem perguntar",
     "terminalMenuTitle": "Menu de links do terminal",
     "terminalMenuHint": "Clicar em um link no terminal mostra um pequeno menu (navegador integrado, navegador do sistema, copiar link) em vez de abri-lo imediatamente. ⌘/Ctrl+clique continua abrindo o link diretamente.",
     "htmlPreviewTitle": "Pré-visualização de arquivos HTML",
@@ -6491,7 +6495,7 @@
         "description": "Um agente quer executar JavaScript nesta página. Ele pode ler e alterar tudo o que você pode em {site}.",
         "descriptionWithTitle": "Um agente quer executar JavaScript em “{title}”. Ele pode ler e alterar tudo o que você pode em {site}.",
         "codeLabel": "O código que será executado",
-        "everyTime": "Você será perguntado de novo a cada trecho — aprovar este não aprova o próximo.",
+        "everyTime": "Você será perguntado de novo a cada trecho — aprovar este não aprova o próximo. Se você é perguntado ou não se define em Configurações → Navegador integrado.",
         "allow": "Executar uma vez",
         "deny": "Não executar"
       }

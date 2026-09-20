@@ -30,6 +30,11 @@ vi.mock("@/lib/transport", () => ({
 }))
 
 import { BrowserEvalConfirm } from "./browser-eval-confirm"
+import {
+  getBrowserPrefs,
+  resetBrowserPrefsForTests,
+  setBrowserEvalApproval,
+} from "@/lib/browser/browser-prefs"
 
 function request(
   over: Partial<BrowserEvalRequestPayload> = {}
@@ -65,10 +70,16 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.handlers.clear()
   mocks.windowLabel = "main"
+  resetBrowserPrefsForTests()
+  // Most of this file is about the dialog, which an installation does not
+  // raise until someone asks for it. The default has its own test below, and
+  // that one resets this.
+  setBrowserEvalApproval("ask")
 })
 
 afterEach(() => {
   vi.useRealTimers()
+  resetBrowserPrefsForTests()
 })
 
 describe("BrowserEvalConfirm", () => {
@@ -157,6 +168,96 @@ describe("BrowserEvalConfirm", () => {
   /** Broadcast to every window, shown by one. Two dialogs would be two
    *  chances to answer, and only the first answer would count. */
   it("is raised only by the window that owns the tab", async () => {
+    mocks.windowLabel = "settings"
+    renderConfirm()
+    await act(async () => {})
+    await ask(request({ ownerWindow: "main" }))
+
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+    expect(mocks.decide).not.toHaveBeenCalled()
+  })
+
+  /** An installation nobody has configured does not raise this dialog: the
+   *  decision was made on the `browser_eval` switch, which ships off. Pinned
+   *  here rather than left to the settings test, because this is the file
+   *  where it would actually go wrong. */
+  it("runs the snippet without a dialog on an installation nobody configured", async () => {
+    resetBrowserPrefsForTests()
+    expect(getBrowserPrefs().evalApproval).toBe("silent")
+    renderConfirm()
+    await act(async () => {})
+    await ask(request({ requestId: "r11" }))
+
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+    expect(mocks.decide).toHaveBeenCalledWith("r11", true)
+  })
+
+  /** And for someone who went and asked for it, the dialog stands there
+   *  answering nothing on its own. */
+  it("asks, and answers nothing itself, once the dialog is turned on", async () => {
+    expect(getBrowserPrefs().evalApproval).toBe("ask")
+    renderConfirm()
+    await act(async () => {})
+    await ask(request({ requestId: "r12" }))
+
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(mocks.decide).not.toHaveBeenCalled()
+  })
+
+  /** Changed in the settings window, read in this one — the only shape this
+   *  change ever really has. The cached snapshot is only dropped on a
+   *  `storage` event while something is subscribed, which is why this
+   *  component holds a subscription rather than reading the preference when
+   *  the request arrives. */
+  it("follows a change made in another window", async () => {
+    renderConfirm()
+    await act(async () => {})
+    await act(async () => {
+      // What the settings window's write looks like from over here — picking
+      // the default is what REMOVES the key, so that is the shape to test.
+      localStorage.removeItem("browser:eval-approval")
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: "browser:eval-approval" })
+      )
+    })
+    await ask(request({ requestId: "r13" }))
+
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+    expect(mocks.decide).toHaveBeenCalledWith("r13", true)
+  })
+
+  /** The setting is read out of storage when the request lands, not from a
+   *  rendered value and not from the cached snapshot.
+   *
+   *  Everything that refreshes those two happens AFTER the settings window
+   *  wrote the key — a commit plus a passive effect for the first, a
+   *  *delivered* `storage` event for the second — and the lag runs in the
+   *  unsafe direction: somebody who just asked to be shown each snippet would
+   *  have the next one run without being asked. So this writes the key the
+   *  way another window does and then delivers a request with NO storage
+   *  event and NO render in between, which is both the not-yet-delivered case
+   *  and the nobody-was-subscribed-to-hear-it case. */
+  it("reads the setting out of storage when the request lands", async () => {
+    resetBrowserPrefsForTests()
+    renderConfirm()
+    await act(async () => {})
+    // The cached snapshot now says "silent" and nothing is going to tell it
+    // otherwise.
+    expect(getBrowserPrefs().evalApproval).toBe("silent")
+
+    localStorage.setItem("browser:eval-approval", "ask")
+    await ask(request({ requestId: "r14" }))
+
+    expect(mocks.decide).not.toHaveBeenCalled()
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+  })
+
+  /** The standing answer is applied after the owner test, not before. Every
+   *  window hears the broadcast; if they all answered, the backend would take
+   *  whichever arrived first as the answer to a question its owner never had
+   *  the chance to see. */
+  it("does not answer for a tab another window owns, even silently", async () => {
+    setBrowserEvalApproval("silent")
     mocks.windowLabel = "settings"
     renderConfirm()
     await act(async () => {})

@@ -7,6 +7,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager, Url};
 
 use super::agent;
+use super::blank_page;
 use super::events;
 use super::registry::BrowserRegistry;
 use super::types::{BrowserErrorInfo, BrowserErrorKind, NavigationBlockReason};
@@ -134,6 +135,14 @@ pub fn page_load(app: &AppHandle, tab_id: &str, url: &Url, started: bool) {
     let Some((state, substituted, lost)) = state else {
         return;
     };
+    if started {
+        // A document has just been put on the surface, and if it is the empty
+        // tab's own blank page it is ours to paint — the engine's is white in
+        // every theme. Before the state goes out and before anything else
+        // here: this is a main-thread callback, the paint is one main-thread
+        // eval, and it is the frame on screen that is waiting for it.
+        blank_page::paint(&registry, &state);
+    }
     events::emit_state(app, &state);
     if started {
         // The ring was cleared above, so nothing has gone wrong on the page

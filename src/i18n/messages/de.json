@@ -5018,8 +5018,8 @@
     },
     "browserEval": {
       "label": "Code im integrierten Browser ausführen",
-      "short": "Führt eigenen Code auf einer freigegebenen Seite aus — Sie genehmigen jeden Schnipsel.",
-      "hint": "Erlaubt Agenten, eigenes JavaScript auf einer von dir geteilten Seite auszuführen. Standardmäßig aus und nur zusammen mit dem Schalter darüber. Jeder Codeausschnitt wird dir gezeigt und einzeln bestätigt – automatisch geht das nicht."
+      "short": "Führt eigenen Code auf einer freigegebenen Seite aus — ohne Nachfrage.",
+      "hint": "Erlaubt Agenten, eigenes JavaScript auf einer von dir geteilten Seite auszuführen. Standardmäßig aus und nur zusammen mit dem Schalter darüber. Einschalten heißt, dass Codeausschnitte ohne Nachfrage laufen – die Entscheidung fällt also an diesem Schalter; unter Einstellungen → Integrierter Browser kannst du dir stattdessen jeden Ausschnitt zeigen lassen."
     },
     "automations": {
       "label": "Automatisierungen erstellen",
@@ -5153,6 +5153,10 @@
     "agentGrantRead": "Nur lesen",
     "agentGrantControl": "Lesen und bedienen",
     "agentGrantNone": "Nichts teilen",
+    "evalApprovalTitle": "Code auf einer Seite ausführen",
+    "evalApprovalHint": "Was passiert, wenn ein Agent eigenes JavaScript auf einer mit „Lesen und bedienen“ geteilten Seite ausführen will. Es läuft, ohne Nachfrage – entschieden wird das am Schalter „Code im integrierten Browser ausführen“, der aus ist, bis du ihn einschaltest, und an der Freigabestufe der Seite; jede Ausführung steht in der Agent-Aktivität dieses Tabs. „Jedes Mal fragen“ zeigt dir jeden Ausschnitt vollständig und wartet auf eine Antwort.",
+    "evalApprovalAsk": "Jedes Mal fragen",
+    "evalApprovalSilent": "Ohne Nachfrage ausführen",
     "terminalMenuTitle": "Link-Menü im Terminal",
     "terminalMenuHint": "Ein Klick auf einen Link im Terminal zeigt ein kleines Menü (integrierter Browser, Systembrowser, Link kopieren), statt ihn sofort zu öffnen. ⌘/Strg-Klick öffnet den Link weiterhin direkt.",
     "htmlPreviewTitle": "Vorschau von HTML-Dateien",
@@ -6491,7 +6495,7 @@
         "description": "Ein Agent möchte JavaScript auf dieser Seite ausführen. Er kann alles lesen und ändern, was du auf {site} kannst.",
         "descriptionWithTitle": "Ein Agent möchte JavaScript auf „{title}“ ausführen. Er kann alles lesen und ändern, was du auf {site} kannst.",
         "codeLabel": "Der Code, der ausgeführt wird",
-        "everyTime": "Du wirst bei jedem Ausschnitt erneut gefragt – diese Freigabe gilt nicht für den nächsten.",
+        "everyTime": "Du wirst bei jedem Ausschnitt erneut gefragt – diese Freigabe gilt nicht für den nächsten. Ob überhaupt gefragt wird, legst du unter Einstellungen → Integrierter Browser fest.",
         "allow": "Einmal ausführen",
         "deny": "Nicht ausführen"
       }

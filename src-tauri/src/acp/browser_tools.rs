@@ -409,11 +409,11 @@ impl BrowserEvalOutcome {
             tab_id,
             ERROR_EVAL_DECLINED,
             format!(
-                "The user did not approve running that code on browser tab {tab_id}. Every \
-                 browser_eval call is shown to them and approved on its own; there is no setting \
-                 that makes it automatic. Do not send the same snippet again — say what you \
-                 wanted to find out, and use browser_snapshot, browser_console_messages or the \
-                 action tools if they can answer it."
+                "That code was not approved to run on browser tab {tab_id}: the user said no, \
+                 or nobody was there to answer. Do not send the same snippet again — neither \
+                 answer changes for being asked twice. Say what you wanted to find out, and \
+                 use browser_snapshot, browser_console_messages or the action tools if they \
+                 can answer it."
             ),
         )
     }

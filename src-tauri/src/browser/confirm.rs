@@ -1,11 +1,20 @@
 //! Asking the person, for one snippet, right now.
 //!
-//! `browser_eval` is the only tool on this surface that stops and waits for a
-//! human. The waiting is the feature: sharing a tab at `control` says an agent
-//! may operate the page, and no amount of that adds up to "and may also run
-//! whatever code it writes". So each snippet is its own question, and the
-//! answer is never kept — there is no "always allow", because the thing being
-//! allowed is different every time.
+//! `browser_eval` is the only tool on this surface that can stop and wait for
+//! a human, and it does so for the people who asked it to: the built-in
+//! browser settings decide whether each snippet is shown, and out of the box
+//! they are not (see `browser::eval` for where that weight went instead).
+//!
+//! Nothing here knows about that setting. The question is asked the same way
+//! either way — the frontend answers it, and an answer that comes back in a
+//! millisecond is as much an answer as one that took a person forty seconds.
+//! That is deliberate: it keeps one path to audit, and it means the rules
+//! below hold for everyone, including someone who is never asked.
+//!
+//! For those who are, each snippet is its own question and this module never
+//! keeps the answer — there is no "always allow" beside the code, because
+//! somebody who turned this dialog on wants each snippet, and a button that
+//! undid that is the one thing they did not ask for.
 //!
 //! Three rules hold this together, and all three are about consent fatigue
 //! rather than about cryptography:

@@ -44,6 +44,15 @@ export type HtmlPreviewEngine = "guest" | "inline"
  *  grant yet" but a standing answer: share nothing until asked. */
 export type DefaultAgentGrant = "none" | "read" | "control"
 
+/** What happens when an agent asks to run its own code on a shared page:
+ *  the per-snippet dialog, or a standing yes. */
+export type BrowserEvalApproval = "ask" | "silent"
+
+export const BROWSER_EVAL_APPROVALS: readonly BrowserEvalApproval[] = [
+  "ask",
+  "silent",
+]
+
 /** What happens when a server codeg started announces its address.
  *
  *  The same three answers VS Code offers for an auto-forwarded port
@@ -145,6 +154,22 @@ export interface BrowserPrefsSnapshot {
    *  address, and a one-press button there must not hand over more than
    *  reading because of a preference set somewhere else. */
   defaultAgentGrant: DefaultAgentGrant
+  /** Whether an agent's own code is put in front of the person before it runs
+   *  on a page they shared for acting.
+   *
+   *  `silent` by default. The question it removes was asked once per snippet
+   *  and never remembered, which is the most repetitive consent in the app:
+   *  somebody who has turned the `browser_eval` switch on and shared a tab at
+   *  `control` has already decided, and the hundredth dialog is answered by
+   *  reflex rather than read. So the decision is moved up to where it is made
+   *  deliberately — the tool switch, which ships OFF and whose own text says
+   *  that turning it on means code runs without asking.
+   *
+   *  This replaces the per-snippet dialog and NOTHING ELSE: the `browser_eval`
+   *  tool switch and the tab's `control` grant are enforced in the backend and
+   *  are not reachable from here. Every silent run is still recorded on that
+   *  tab's agent activity strip, so "without asking" does not mean unseen. */
+  evalApproval: BrowserEvalApproval
   /** What to do when a server started in a codeg terminal (or in a terminal
    *  an agent asked codeg to run) prints its loopback address.
    *
@@ -177,6 +202,7 @@ export const DEFAULT_BROWSER_PREFS: BrowserPrefsSnapshot = Object.freeze({
   newTabProfile: DEFAULT_BROWSER_PROFILE_ID,
   signInUserAgent: true,
   defaultAgentGrant: "control",
+  evalApproval: "silent",
   serviceAutoOpen: "notify",
 }) as BrowserPrefsSnapshot
 
@@ -200,6 +226,7 @@ const PROFILES_KEY = `${KEY_PREFIX}profiles`
 const NEW_TAB_PROFILE_KEY = `${KEY_PREFIX}new-tab-profile`
 const SIGN_IN_UA_KEY = `${KEY_PREFIX}sign-in-user-agent`
 const AGENT_GRANT_KEY = `${KEY_PREFIX}default-agent-grant`
+const EVAL_APPROVAL_KEY = `${KEY_PREFIX}eval-approval`
 const SERVICE_AUTO_OPEN_KEY = `${KEY_PREFIX}service-auto-open`
 
 function readRaw(key: string): string | null {
@@ -225,6 +252,12 @@ function parseAgentGrant(raw: string | null): DefaultAgentGrant {
   return raw === "read" || raw === "none"
     ? raw
     : DEFAULT_BROWSER_PREFS.defaultAgentGrant
+}
+
+/** Anything but the one stored value means the default, as everywhere else in
+ *  here: only somebody who went and asked for the dialog gets it. */
+function parseEvalApproval(raw: string | null): BrowserEvalApproval {
+  return raw === "ask" ? "ask" : "silent"
 }
 
 /** Anything but the two stored values means the default. */
@@ -309,6 +342,7 @@ function read(): BrowserPrefsSnapshot {
     newTabProfile,
     signInUserAgent: readRaw(SIGN_IN_UA_KEY) !== "false",
     defaultAgentGrant: parseAgentGrant(readRaw(AGENT_GRANT_KEY)),
+    evalApproval: parseEvalApproval(readRaw(EVAL_APPROVAL_KEY)),
     serviceAutoOpen: parseServiceAutoOpen(readRaw(SERVICE_AUTO_OPEN_KEY)),
   }
 }
@@ -425,6 +459,28 @@ export function setBrowserDefaultAgentGrant(level: DefaultAgentGrant): void {
   write(AGENT_GRANT_KEY, level === "read" || level === "none" ? level : null)
 }
 
+/** Whether each snippet is put in front of the person (`silent`, the default,
+ *  removes the key). */
+export function setBrowserEvalApproval(value: BrowserEvalApproval): void {
+  write(EVAL_APPROVAL_KEY, value === "ask" ? "ask" : null)
+}
+
+/**
+ * The stored answer as of right now, read past the cached snapshot — same
+ * reasoning as `currentProfiles` above.
+ *
+ * For the one reader that must not be a beat behind. `BrowserEvalConfirm`
+ * answers for the person when this says `silent`, so reading it late is a
+ * snippet running without the confirmation they had just asked for. The cache
+ * is dropped when a `storage` event is *delivered*, and that is both later
+ * than the other window's write and conditional on something being subscribed
+ * at the time; `localStorage` is neither. A snapshot is the right thing to
+ * render from and the wrong thing to decide from.
+ */
+export function readBrowserEvalApprovalNow(): BrowserEvalApproval {
+  return parseEvalApproval(readRaw(EVAL_APPROVAL_KEY))
+}
+
 /** What a newly announced local server does (`notify`, the default, removes
  *  the key). */
 export function setBrowserServiceAutoOpen(mode: ServiceAutoOpen): void {
@@ -480,6 +536,7 @@ export function resetBrowserPrefsForTests(): void {
     localStorage.removeItem(NEW_TAB_PROFILE_KEY)
     localStorage.removeItem(SIGN_IN_UA_KEY)
     localStorage.removeItem(AGENT_GRANT_KEY)
+    localStorage.removeItem(EVAL_APPROVAL_KEY)
     localStorage.removeItem(SERVICE_AUTO_OPEN_KEY)
   } catch {
     /* ignore */

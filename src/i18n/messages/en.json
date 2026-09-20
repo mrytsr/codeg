@@ -5018,8 +5018,8 @@
     },
     "browserEval": {
       "label": "Run code in the built-in browser",
-      "short": "Run its own code on a page you shared — you approve each snippet.",
-      "hint": "Let agents run their own JavaScript on a page you’ve shared. Off by default, and needs the switch above. Every snippet is shown to you and approved one at a time — there is no way to make it automatic."
+      "short": "Run its own code on a page you shared — without asking, unless you ask it to.",
+      "hint": "Let agents run their own JavaScript on a page you’ve shared. Off by default, and needs the switch above. Turning it on means snippets run without asking, so this switch is where the decision is made; Settings → Built-in browser can put each snippet in front of you instead."
     },
     "automations": {
       "label": "Create automations",
@@ -5153,6 +5153,10 @@
     "agentGrantRead": "Read only",
     "agentGrantControl": "Read and act",
     "agentGrantNone": "Share nothing",
+    "evalApprovalTitle": "Running code on a page",
+    "evalApprovalHint": "What happens when an agent asks to run its own JavaScript on a page shared at “Read and act”. It runs, without asking — the decision is the “Run code in the built-in browser” switch, which is off until you turn it on, and the page’s sharing level; every run is listed in that tab’s agent activity. “Ask me every time” puts each snippet in front of you in full and waits for an answer.",
+    "evalApprovalAsk": "Ask me every time",
+    "evalApprovalSilent": "Run without asking",
     "terminalMenuTitle": "Terminal link menu",
     "terminalMenuHint": "Clicking a link in the terminal shows a small menu (built-in browser, system browser, copy link) instead of opening it right away. ⌘/Ctrl-click still opens the link directly.",
     "htmlPreviewTitle": "HTML file previews",
@@ -6491,7 +6495,7 @@
         "description": "An agent wants to run JavaScript on this page. It can read and change anything on {site} that you can.",
         "descriptionWithTitle": "An agent wants to run JavaScript on “{title}”. It can read and change anything on {site} that you can.",
         "codeLabel": "The code it will run",
-        "everyTime": "You’ll be asked again for every snippet — approving this one does not approve the next.",
+        "everyTime": "You’ll be asked again for every snippet — approving this one does not approve the next. Whether you’re asked at all is set in Settings → Built-in browser.",
         "allow": "Run it once",
         "deny": "Don’t run it"
       }
