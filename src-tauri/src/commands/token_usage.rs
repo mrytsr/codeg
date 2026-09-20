@@ -107,7 +107,13 @@ const TOP_CONVERSATIONS: usize = 8;
 ///   counted via cumulative-counter deltas; Claude `Task` sub-agent transcripts
 ///   counted against the session that launched them; and facts anchored at the
 ///   turn's own timestamp instead of its last tool result.
-const FACT_SCHEMA_VERSION: &str = "2";
+/// * `3` — the sync now passes the app data dir to the conversation reader, so
+///   agents whose transcript lives in the shared-provider workspace (Kimi Code,
+///   OpenCode, Codex, Cline, Hermes) are found. Rows written before this were
+///   not merely stale but **wrong**: a workspace-backed conversation came back
+///   as an empty parse and was stamped with zero tokens. The bump forces the
+///   full re-parse that replaces those zeros with the real counts.
+const FACT_SCHEMA_VERSION: &str = "3";
 
 const FACT_SCHEMA_VERSION_KEY: &str = "token_usage_fact_schema_version";
 
