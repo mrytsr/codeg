@@ -757,6 +757,11 @@ pub use tauri_commands::{
     model_provider_clone_builtin, model_provider_create, model_provider_delete,
     model_provider_list, model_provider_probe, model_provider_reorder, model_provider_set_enabled,
     model_provider_test, model_provider_update,
+    __tauri_command_name_model_provider_builtin_list, __tauri_command_name_model_provider_clone_builtin,
+    __tauri_command_name_model_provider_create, __tauri_command_name_model_provider_delete,
+    __tauri_command_name_model_provider_list, __tauri_command_name_model_provider_probe,
+    __tauri_command_name_model_provider_reorder, __tauri_command_name_model_provider_set_enabled,
+    __tauri_command_name_model_provider_test, __tauri_command_name_model_provider_update,
 };
 
 #[cfg(test)]

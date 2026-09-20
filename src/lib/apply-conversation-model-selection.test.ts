@@ -4,6 +4,7 @@ import {
   applyDraftModelSelection,
   type ModelSelectionConnection,
 } from "./apply-conversation-model-selection"
+import type { DbConversationSummary } from "@/lib/types"
 import { loadRememberedAgentModelSelection } from "./remembered-agent-model-selection"
 import {
   getModelProviderDraftSelection,
@@ -37,6 +38,25 @@ vi.mock("@/stores/app-workspace-store", async () => {
   return { useAppWorkspaceStore }
 })
 
+function conversationSummary(id: number): DbConversationSummary {
+  return {
+    id,
+    folder_id: 1,
+    title: null,
+    title_locked: false,
+    agent_type: "claude_code",
+    status: "pending",
+    kind: "regular",
+    model: null,
+    git_branch: null,
+    external_id: null,
+    message_count: 0,
+    child_count: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    pinned_at: null,
+  }
+}
 const { updateConversationModelSelection } = vi.mocked(
   await import("@/lib/api")
 )
@@ -95,7 +115,7 @@ describe("applyDraftModelSelection", () => {
 
   it("writes the choice onto the row and flags the write while saving", async () => {
     useAppWorkspaceStore.setState({
-      conversations: [{ id: 42, model_source: "provider" }],
+      conversations: [{ ...conversationSummary(42), model_source: "provider" }],
     })
     setModelProviderDraftSelection("tab-1", selection)
     let resolveSave: () => void = () => {}

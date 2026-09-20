@@ -3,6 +3,8 @@ pub mod app_update;
 pub mod automation;
 pub mod background;
 pub mod backup;
+pub mod browser_bridge;
+pub mod browser_tools;
 pub mod canvas;
 pub mod chat_authoring;
 pub mod chat_channel;

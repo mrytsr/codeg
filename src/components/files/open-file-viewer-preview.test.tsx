@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { OpenFileViewerPreview } from "./open-file-viewer-preview"
-import type { FileWorkspaceTab } from "@/contexts/workspace-context"
+import type { FileLikeWorkspaceTab } from "@/contexts/workspace-context"
 import { buildFileTabId } from "@/lib/file-tab-id"
 
 const { mockFileViewer } = vi.hoisted(() => ({ mockFileViewer: vi.fn() }))
@@ -21,7 +21,7 @@ vi.mock("next-intl", () => ({
 
 const TAB_ID = buildFileTabId({ kind: "file", path: "/repo/docs/a.doc" })
 
-function tab(overrides: Partial<FileWorkspaceTab>): FileWorkspaceTab {
+function tab(overrides: Partial<FileLikeWorkspaceTab>): FileLikeWorkspaceTab {
   return {
     id: TAB_ID,
     kind: "file",

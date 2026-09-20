@@ -581,16 +581,26 @@ pub async fn resolve_close_request(
         save_system_close_behavior_settings(&db.conn, behavior).await?;
     }
 
+    // `orderOut:` and process exit both leave a macOS native-fullscreen
+    // Space standing (issue #507), and this is a second entry point into
+    // both: the press that raised the dialog may have arrived windowed and
+    // the user can go fullscreen while it is up, so the answer cannot
+    // assume the close path already drained.
     match behavior {
         CloseWindowBehavior::Minimize => {
             if let Some(window) = tauri::Manager::get_webview_window(&app, "main") {
-                let _ = window.hide();
+                crate::commands::windows::with_macos_fullscreen_drained(&app, move || {
+                    let _ = window.hide();
+                });
             }
         }
         // Reuses the tray-quit path: `exit` triggers `ExitRequested`, which
         // sets `APP_QUITTING` and runs the ACP-disconnect / terminal-reclaim
         // cleanup already wired there.
-        CloseWindowBehavior::Exit => tauri::Manager::app_handle(&app).exit(0),
+        CloseWindowBehavior::Exit => {
+            let quit = tauri::Manager::app_handle(&app).clone();
+            crate::commands::windows::with_macos_fullscreen_drained(&app, move || quit.exit(0));
+        }
         CloseWindowBehavior::Ask => {}
     }
 
@@ -608,6 +618,7 @@ pub async fn get_system_proxy_settings(
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn update_system_proxy_settings(
+    app: tauri::AppHandle,
     settings: SystemProxySettings,
     db: State<'_, AppDatabase>,
 ) -> Result<SystemProxySettings, AppCommandError> {
@@ -622,6 +633,7 @@ pub async fn update_system_proxy_settings(
         .map_err(AppCommandError::from)?;
 
     proxy::apply_system_proxy_settings(&normalized)?;
+    crate::browser::profile::proxy_settings_changed(&app);
     Ok(normalized)
 }
 

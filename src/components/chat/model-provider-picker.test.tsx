@@ -18,7 +18,7 @@ import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { ModelProviderPicker } from "./model-provider-picker"
 import enMessages from "@/i18n/messages/en.json"
 import type { ModelProviderRecord } from "@/lib/model-provider-types"
-import type { AgentType } from "@/lib/types"
+import type { AgentType, DbConversationSummary } from "@/lib/types"
 
 const reapplyConfig = vi.fn(async () => true)
 vi.mock("@/hooks/use-connection", () => ({
@@ -147,8 +147,27 @@ function renderPicker(
   )
 }
 
-const boundConversationRow = {
-  id: 42,
+function conversationSummary(id: number): DbConversationSummary {
+  return {
+    id,
+    folder_id: 1,
+    title: null,
+    title_locked: false,
+    agent_type: "claude_code",
+    status: "pending",
+    kind: "regular",
+    model: null,
+    git_branch: null,
+    external_id: null,
+    message_count: 0,
+    child_count: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    pinned_at: null,
+  }
+}
+const boundConversationRow: DbConversationSummary = {
+  ...conversationSummary(42),
   model_source: "provider",
   model_provider_id: "anthropic",
   model_provider_model_id: "claude-sonnet-4-5",
@@ -321,7 +340,7 @@ describe("ModelProviderPicker", () => {
 
   it("defaults a bound conversation with no selection to the first provider's first model and saves it", async () => {
     useAppWorkspaceStore.setState({
-      conversations: [{ id: 42, model_source: "provider" }],
+      conversations: [{ ...conversationSummary(42), model_source: "provider" }],
     })
 
     renderPicker()
@@ -347,7 +366,7 @@ describe("ModelProviderPicker", () => {
     // A freshly created conversation: bound, but the pre-bind choice is still
     // being persisted (applyDraftModelSelection marked the write in flight).
     useAppWorkspaceStore.setState({
-      conversations: [{ id: 42, model_source: "provider" }],
+      conversations: [{ ...conversationSummary(42), model_source: "provider" }],
     })
     markModelProviderSelectionWriteInFlight("tab-1")
 
@@ -367,7 +386,9 @@ describe("ModelProviderPicker", () => {
     act(() => {
       clearModelProviderSelectionWriteInFlight("tab-1")
       useAppWorkspaceStore.setState({
-        conversations: [{ id: 42, model_source: "provider" }],
+        conversations: [
+          { ...conversationSummary(42), model_source: "provider" },
+        ],
       })
     })
     await vi.waitFor(() => {
