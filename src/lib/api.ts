@@ -3224,6 +3224,8 @@ export type SettingsSection =
   | "model-providers"
   | "science"
   | "office-tools"
+  | "collaboration"
+  | "browser"
   | "version-control"
   | "shortcuts"
   | "system"

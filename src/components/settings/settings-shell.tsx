@@ -11,6 +11,8 @@ import {
   Bot,
   BookOpenText,
   Boxes,
+  Bubbles,
+  Compass,
   FileSpreadsheet,
   GitBranch,
   Globe,
@@ -46,6 +48,8 @@ interface SettingsNavItem {
     | "mcp"
     | "skills"
     | "skill_packs"
+    | "collaboration"
+    | "browser"
     | "quick_messages"
     | "shortcuts"
     | "version_control"
@@ -83,6 +87,11 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
     icon: Boxes,
   },
   {
+    href: "/settings/collaboration",
+    labelKey: "collaboration",
+    icon: Bubbles,
+  },
+  {
     href: "/settings/agents",
     labelKey: "agents",
     icon: Bot,
@@ -91,6 +100,11 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
     href: "/settings/model-providers",
     labelKey: "model_providers",
     icon: Server,
+  },
+  {
+    href: "/settings/browser",
+    labelKey: "browser",
+    icon: Compass,
   },
   {
     href: "/settings/quick-messages",
@@ -187,9 +201,16 @@ export function SettingsShell({ children }: SettingsShellProps) {
     [router, setNavOpen]
   )
 
+  // Two entries only exist for one of the two runtimes: the Web service page
+  // configures the server a web client is already talking to, and the Browser
+  // page configures a built-in browser that only the desktop shell has — its
+  // page renders nothing in web mode, so the nav must not lead there.
   const filteredNavItems = SETTINGS_NAV_ITEMS.filter(
     (item) =>
-      !(item.labelKey === "web_service" && detectEnvironment() === "web")
+      !(
+        (item.labelKey === "web_service" || item.labelKey === "browser") &&
+        detectEnvironment() === "web"
+      )
   )
 
   const navContent = (

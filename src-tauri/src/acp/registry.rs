@@ -1740,39 +1740,39 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             name: "OpenCode",
             description: "The open source coding agent",
             distribution: AgentDistribution::Binary {
-                version: "1.18.31",
+                version: "1.18.32",
                 cmd: "opencode",
                 args: &["acp"],
                 env: &[],
                 platforms: &[
                     PlatformBinary {
                         platform: "darwin-aarch64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.31/opencode-darwin-arm64.zip",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.32/opencode-darwin-arm64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "darwin-x86_64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.31/opencode-darwin-x64.zip",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.32/opencode-darwin-x64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "linux-aarch64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.31/opencode-linux-arm64.tar.gz",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.32/opencode-linux-arm64.tar.gz",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "linux-x86_64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.31/opencode-linux-x64.tar.gz",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.32/opencode-linux-x64.tar.gz",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "windows-aarch64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.31/opencode-windows-arm64.zip",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.32/opencode-windows-arm64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "windows-x86_64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.31/opencode-windows-x64.zip",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.32/opencode-windows-x64.zip",
                         sha256: None,
                     },
                 ],
@@ -1791,39 +1791,39 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             // Docker / Nix are the supported channels. The npm `hermes-agent`
             // package is a COMMUNITY bridge (wyrtensi/hermes-agent-npm, not
             // Nous Research), pinned here at an exact, audited version: its
-            // postinstall clones the OFFICIAL repo at tag v2026.9.14 verifying
-            // the full commit SHA (345cd2b0…), bootstraps an isolated Python
-            // 3.11 venv with a checksum-pinned uv, and `uv sync --locked
+            // postinstall clones the OFFICIAL repo at tag v2026.9.21 verifying
+            // the full commit SHA (d337b736…), bootstraps an isolated Python
+            // 3.11 venv with a checksum-pinned uv, and `uv sync --frozen
             // --extra all` (⊇ the acp+mcp extras) from upstream's lockfile —
             // all inside the npm package directory; config/credentials stay in
             // `~/.hermes`. Its `hermes` bin execs the venv's real upstream
             // console script, so `hermes acp` is the same adapter the official
             // install runs. Keep the pin EXACT on version bumps and re-audit
             // the wrapper diff — the exact pin is what bounds the third-party
-            // trust surface. 0.21.3 audited, and unlike 0.20.4→0.20.5→0.20.6→
-            // 0.21.0→0.21.1 this one is NOT byte-identical: two files move.
-            // `scripts/postinstall.js` is NOT one of them — it is identical by
-            // sha256 to the fully-read 0.20.4 wrapper, so `fetchAndVerifyPinnedTag`
-            // still hard-compares `rev-parse <tag>^{commit}` against the 40-hex
-            // pin, as do `bin/` and the rest of `lib/` (incl.
-            // `runtime-checkout.js`). What changed is `lib/uv-installer.js`,
-            // and only its DATA: uv 0.12.2 → 0.12.13 with a fresh 18-entry
-            // sha256 table. The install mechanism is untouched — same
-            // checksum-pinned fetch, same 128MB/256MB archive and extraction
-            // caps — and the new digests are the real upstream ones, spot-checked
-            // against astral-sh/uv's published `<asset>.sha256` for the darwin-arm64,
-            // linux-x64-gnu and windows-x64 assets. `package.json` moves only the
-            // version and the upstream pin. That new pin resolves as advertised:
-            // the annotated tag v2026.9.14 dereferences to exactly 345cd2b0…,
-            // tagged by Teknium.
+            // trust surface. 0.21.4 audited: the whole of `lib/` (incl.
+            // `uv-installer.js` and its uv 0.12.13 digest table) and `bin/` are
+            // byte-identical to the audited 0.21.3, and `package.json` moves
+            // only the version and the upstream pin. The one code change is in
+            // `scripts/postinstall.js`, and it is a single argument:
+            // `uv sync --locked` → `--frozen`. Both install strictly from
+            // upstream's `uv.lock` with its per-artifact hashes and neither
+            // re-resolves; `--frozen` drops only the assertion that the lock is
+            // in sync with `pyproject.toml`, a check whose strictness varies by
+            // uv version. Since the checkout is pinned to an exact commit, that
+            // lockfile is fixed content — so the installed dependency set stays
+            // exactly as pinned, and `fetchAndVerifyPinnedTag` still hard-compares
+            // `rev-parse <tag>^{commit}` against the 40-hex pin before the
+            // `checkout --detach`. That new pin resolves as advertised: the
+            // annotated tag v2026.9.21 dereferences to exactly d337b736…, tagged
+            // by Teknium on 2026-09-21.
             //
             // Launch preference: `resolve_npx_command("hermes")` checks PATH
             // first, so an official-installer `hermes` (which self-updates)
             // naturally outranks the npm-managed copy; the npm global install
             // is the managed/one-click channel codeg's Install button drives.
             distribution: AgentDistribution::Npx {
-                version: "0.21.3",
-                package: "hermes-agent@0.21.3",
+                version: "0.21.4",
+                package: "hermes-agent@0.21.4",
                 cmd: "hermes",
                 args: &["acp"],
                 env: &[],
@@ -1838,8 +1838,8 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             name: "CodeBuddy",
             description: "Tencent Cloud's official AI coding assistant (ACP)",
             distribution: AgentDistribution::Npx {
-                version: "2.155.0",
-                package: "@tencent-ai/codebuddy-code@2.155.0",
+                version: "2.156.0",
+                package: "@tencent-ai/codebuddy-code@2.156.0",
                 cmd: "codebuddy",
                 args: &["--acp"],
                 env: &[],
@@ -2097,26 +2097,36 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             // `models` that the composer's selectors and context ring read, and
             // prompting straight after it works. It also skips `session/load`'s
             // history replay, which codeg only drained to discard. The 1.0.1–
-            // 1.0.34 patches add nothing further here: re-probed live against
-            // the 1.0.34 binary, `initialize` still answers
+            // 1.0.40 patches add nothing further here: re-probed live against
+            // the 1.0.40 binary, `initialize` still answers
             // `sessionCapabilities: {list, resume, close}` plus the same
             // `promptCapabilities.embeddedContext` (and `mcpCapabilities`
             // http+sse, `loadSession: true`), so the resume rung stands. All
             // six `@xai-official/grok-<os>-<arch>` optional deps are published
-            // at 1.0.34 — they are OPTIONAL, so a platform that lags would fail
+            // at 1.0.40 — they are OPTIONAL, so a platform that lags would fail
             // only for that platform's users, at run time, in the trampoline.
             // The pin tracks `dist-tags.latest`, NOT the highest version
-            // number: 1.0.35 exists on the registry but is tagged `alpha`, so
-            // it is staged, not released.
+            // number; at 1.0.40 `latest` and `alpha` point at the same version,
+            // so nothing is staged ahead of it.
+            //
+            // 1.0.40 DID add one thing that reaches codeg, and it needed a fix
+            // on our side: it narrates `session/new` progress on the
+            // `_x.ai/session/setup` notification, whose first five phases carry
+            // `"sessionId": null` because they run before the id exists. sacp
+            // routes on field PRESENCE and then fails to parse the null, which
+            // tore the connection down with `Invalid params: "invalid type:
+            // null, expected a string"` (#794). `DropNullSessionIdNotifications`
+            // in connection.rs claims those frames before the router sees them,
+            // so this bump is safe only together with that guard.
             distribution: AgentDistribution::Npx {
-                version: "1.0.34",
-                package: "@xai-official/grok@1.0.34",
+                version: "1.0.40",
+                package: "@xai-official/grok@1.0.40",
                 cmd: "grok",
                 // Only the ACP subcommand lives here. Grok's ROOT-level launch
                 // flags (`--no-auto-update` always, `--permission-mode <value>`
                 // only for a non-default permission mode) MUST precede this
                 // subcommand — `grok agent stdio` itself rejects them (re-verified
-                // against 1.0.34: it still only accepts --debug/--debug-file/
+                // against 1.0.40: it still only accepts --debug/--debug-file/
                 // --leader-socket) — so `build_agent` inserts them ahead of these
                 // args rather than appending after. Since 1.0.3 `grok --help` no
                 // longer LISTS `--no-auto-update`, but it is still accepted:
@@ -2127,7 +2137,7 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
                 // auto/dontAsk/bypassPermissions/plan).
                 args: &["agent", "stdio"],
                 env: &[],
-                // `@xai-official/grok@1.0.34` declares `engines.node: ">=20"`;
+                // `@xai-official/grok@1.0.40` declares `engines.node: ">=20"`;
                 // surface that in preflight so Node 18 isn't silently accepted.
                 node_required: Some("20.0.0"),
             },
@@ -2149,39 +2159,39 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             // (downloads.cursor.com/lab/<version>/<os>/<arch>/...); custom
             // versions substitute into the same pattern.
             distribution: AgentDistribution::Binary {
-                version: "2026.09.15-d2fe57e",
+                version: "2026.09.18-9a7762b",
                 cmd: "cursor-agent",
                 args: &["acp"],
                 env: &[],
                 platforms: &[
                     PlatformBinary {
                         platform: "darwin-aarch64",
-                        url: "https://downloads.cursor.com/lab/2026.09.15-d2fe57e/darwin/arm64/agent-cli-package.tar.gz",
+                        url: "https://downloads.cursor.com/lab/2026.09.18-9a7762b/darwin/arm64/agent-cli-package.tar.gz",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "darwin-x86_64",
-                        url: "https://downloads.cursor.com/lab/2026.09.15-d2fe57e/darwin/x64/agent-cli-package.tar.gz",
+                        url: "https://downloads.cursor.com/lab/2026.09.18-9a7762b/darwin/x64/agent-cli-package.tar.gz",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "linux-aarch64",
-                        url: "https://downloads.cursor.com/lab/2026.09.15-d2fe57e/linux/arm64/agent-cli-package.tar.gz",
+                        url: "https://downloads.cursor.com/lab/2026.09.18-9a7762b/linux/arm64/agent-cli-package.tar.gz",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "linux-x86_64",
-                        url: "https://downloads.cursor.com/lab/2026.09.15-d2fe57e/linux/x64/agent-cli-package.tar.gz",
+                        url: "https://downloads.cursor.com/lab/2026.09.18-9a7762b/linux/x64/agent-cli-package.tar.gz",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "windows-aarch64",
-                        url: "https://downloads.cursor.com/lab/2026.09.15-d2fe57e/windows/arm64/agent-cli-package.zip",
+                        url: "https://downloads.cursor.com/lab/2026.09.18-9a7762b/windows/arm64/agent-cli-package.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "windows-x86_64",
-                        url: "https://downloads.cursor.com/lab/2026.09.15-d2fe57e/windows/x64/agent-cli-package.zip",
+                        url: "https://downloads.cursor.com/lab/2026.09.18-9a7762b/windows/x64/agent-cli-package.zip",
                         sha256: None,
                     },
                 ],
@@ -2407,8 +2417,8 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             // `runtime_env` override it, so a user who wants the redaction back
             // sets `QODER_EXPOSE_TOKEN_USAGE=0` in the agent's env settings.
             distribution: AgentDistribution::Npx {
-                version: "1.1.57",
-                package: "@qoder-ai/qodercli@1.1.57",
+                version: "1.1.60",
+                package: "@qoder-ai/qodercli@1.1.60",
                 cmd: "qoder",
                 args: &["--acp"],
                 env: &[("QODER_EXPOSE_TOKEN_USAGE", "1")],
@@ -2737,8 +2747,8 @@ mod tests {
         let meta = get_agent_meta(AgentType::Cursor);
         assert_binary_version(
             AgentType::Cursor,
-            "2026.09.15-d2fe57e",
-            "/lab/2026.09.15-d2fe57e/",
+            "2026.09.18-9a7762b",
+            "/lab/2026.09.18-9a7762b/",
         );
         match meta.distribution {
             AgentDistribution::Binary {
@@ -2843,8 +2853,8 @@ mod tests {
         );
         assert_npx_version(
             AgentType::CodeBuddy,
-            "2.155.0",
-            "@tencent-ai/codebuddy-code@2.155.0",
+            "2.156.0",
+            "@tencent-ai/codebuddy-code@2.156.0",
             Some("22.0.0"),
         );
         // Kimi Code must never land on 0.37.0–0.38.0: every session in that
@@ -2864,8 +2874,8 @@ mod tests {
         assert_npx_version(AgentType::Pi, "0.0.33", "pi-acp@0.0.33", Some("22.0.0"));
         assert_npx_version(
             AgentType::Grok,
-            "1.0.34",
-            "@xai-official/grok@1.0.34",
+            "1.0.40",
+            "@xai-official/grok@1.0.40",
             Some("20.0.0"),
         );
         assert_npx_version(
@@ -2876,19 +2886,19 @@ mod tests {
         );
         assert_npx_version(
             AgentType::Qoder,
-            "1.1.57",
-            "@qoder-ai/qodercli@1.1.57",
+            "1.1.60",
+            "@qoder-ai/qodercli@1.1.60",
             Some("20.0.0"),
         );
-        assert_binary_version(AgentType::OpenCode, "1.18.31", "/releases/download/v1.18.31/");
+        assert_binary_version(AgentType::OpenCode, "1.18.32", "/releases/download/v1.18.32/");
         // Hermes rides the community npm bridge (upstream retired its PyPI
         // channel at 0.19.0; see the registry entry). The npm package version
         // tracks the upstream version 1:1, and the pin must stay EXACT — the
         // audited wrapper code is only what the pinned version ships.
         assert_npx_version(
             AgentType::Hermes,
-            "0.21.3",
-            "hermes-agent@0.21.3",
+            "0.21.4",
+            "hermes-agent@0.21.4",
             Some("20.0.0"),
         );
     }

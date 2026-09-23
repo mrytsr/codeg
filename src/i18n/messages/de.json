@@ -52,6 +52,8 @@
       "science": "Wissenschaft",
       "office_tools": "Office-Tools",
       "skill_packs": "Skill-Pakete",
+      "collaboration": "Zusammenarbeit",
+      "browser": "Browser",
       "quick_messages": "Schnellnachrichten",
       "logs": "Laufzeitprotokolle"
     }
@@ -862,7 +864,11 @@
       "authNotInstalled": "cursor-agent ist nicht installiert",
       "authLoggedIn": "Angemeldet",
       "authNotLoggedIn": "Nicht angemeldet",
+      "authUnverified": "Angemeldet – Anmeldedaten nicht bestätigt",
+      "authUnverifiedHint": "cursor-agent hat noch eine Anmeldung gespeichert, konnte sie aber gerade nicht bei Cursor verwenden – meist ist die Sitzung abgelaufen. Sitzungen schlagen mit „Authentication required“ fehl, bis du dich erneut anmeldest; die CLI kann eine Browser-Anmeldung nicht selbst erneuern.",
+      "authUnverifiedHintApiKey": "cursor-agent hat einen API-Schlüssel gespeichert, Cursor hat ihn aber gerade abgelehnt — meist ist er widerrufen, abgelaufen oder vertippt. Sitzungen schlagen mit \"Authentication required\" fehl, bis du unten einen funktionierenden Schlüssel speicherst.",
       "loginHint": "Führe dies im Terminal aus, um dich mit deinem Cursor-Konto anzumelden (ein Browserfenster öffnet sich), und klicke danach auf Aktualisieren:",
+      "loginHintRemote": "Führe dies auf dem codeg-Host aus, auf dem cursor-agent installiert ist, nicht auf diesem Rechner, und klicke danach auf Aktualisieren. Dieser Host hat meist keinen Browser zum Öffnen, führe ihn also mit NO_OPEN_BROWSER=1 aus — dann gibt er stattdessen eine Anmelde-URL aus, die du in deinem eigenen Browser öffnest. Für einen unbeaufsichtigten Server stelle die Methode oben auf API-Schlüssel um.",
       "apiKeyLabel": "Cursor-API-Schlüssel",
       "apiKeyPlaceholder": "Schlüssel von cursor.com/dashboard",
       "apiKeyHint": "CURSOR_API_KEY – ein Cursor-Dashboard-Kontoschlüssel, Alternative zur Browser-Anmeldung für Headless-/Servermaschinen. Kein Drittanbieter- oder OpenAI-Schlüssel.",
@@ -1714,9 +1720,9 @@
   "GeneralSettings": {
     "loading": "Wird geladen...",
     "sectionTitle": "Allgemein",
-    "sectionDescription": "Zentrale Einstellungen für das Standardterminal, die Rendering-Beschleunigung, Benachrichtigungen und die Multi-Agent-Delegation.",
+    "sectionDescription": "Zentrale Einstellungen für das Standardterminal, die Rendering-Beschleunigung, das Verhalten beim Schließen des Fensters sowie Benachrichtigungen und Töne.",
     "terminalTitle": "Standardterminal",
-    "terminalDescription": "Wählen Sie die Shell, die beim Öffnen neuer Terminal-Tabs über die Terminalleiste oder den Dateibaum verwendet wird. Agenten nutzen sie ebenfalls, wenn sie codeg um die Ausführung einer vollständigen Befehlszeile bitten.",
+    "terminalDescription": "Wählen Sie die Shell, die codeg für neue Terminal-Tabs startet und für vollständige Befehlszeilen, deren Ausführung ein Agent bei codeg anfragt. Agenten mit einer eigenen Shell (Codex, Claude Code) führen Befehle im eigenen Prozess aus — dorthin reicht diese Einstellung nicht.",
     "terminalSystemDefault": "Systemstandard",
     "terminalPowerShell7": "PowerShell 7 (pwsh)",
     "terminalWindowsPowerShell": "Windows PowerShell",
@@ -1739,6 +1745,10 @@
     "restartNow": "Jetzt neu starten",
     "restartFailed": "Neustart fehlgeschlagen: {message}",
     "loadFailed": "Laden fehlgeschlagen: {message}"
+  },
+  "CollaborationSettings": {
+    "sectionTitle": "Zusammenarbeit",
+    "sectionDescription": "Wie Agenten zusammenarbeiten und auf welche codeg-eigenen Werkzeuge sie innerhalb einer Unterhaltung zugreifen dürfen."
   },
   "LoginPage": {
     "documentTitle": "Anmelden - codeg",
@@ -2813,6 +2823,11 @@
       "linkedFolder": "Verknüpfter Ordner",
       "moreActions": "Weitere Aktionen",
       "copyPath": "Pfad kopieren",
+      "copy": "Kopieren",
+      "copyRelativePath": "Relativer Pfad",
+      "copyAbsolutePath": "Absoluter Pfad",
+      "copyFileItself": "Datei",
+      "copyDirectoryItself": "Ordner",
       "upload": "Dateien/Ordner hochladen",
       "download": "Datei herunterladen",
       "downloadAsZip": "Als ZIP herunterladen",
@@ -2850,7 +2865,9 @@
         "downloadFailed": "Herunterladen von {name} fehlgeschlagen",
         "downloadSaved": "{name} heruntergeladen",
         "pathCopied": "Pfad kopiert",
-        "copyPathFailed": "Pfad konnte nicht kopiert werden"
+        "copyPathFailed": "Pfad konnte nicht kopiert werden",
+        "fileCopied": "{name} kopiert",
+        "copyFileFailed": "{name} konnte nicht kopiert werden"
       },
       "createDialog": {
         "newFile": "Neue Datei",
@@ -3023,6 +3040,7 @@
           "turnFailedMaxTurnRequests": "{agent} hat die maximale Anzahl zulässiger Anfragen für diese Runde erreicht.",
           "turnFailedUnknown": "{agent} hat die Runde mit einem unbekannten Stoppgrund beendet.",
           "turnFailedAuthRequired": "{agent} benötigt eine erneute Anmeldung, bevor diese Runde ausgeführt werden kann. Melde dich in den Einstellungen an und sende die Nachricht erneut.",
+          "agentAuthRequired": "{agent} konnte keine Sitzung starten: Es sind keine verwendbaren Anmeldedaten vorhanden. Melde dich unter Einstellungen → Agenten → {agent} erneut an und öffne diese Unterhaltung neu.",
           "grokModelSwitchIncompatibleAgent": "{agent} kann in einer bestehenden Unterhaltung nicht zu diesem Modell wechseln. Starte eine neue Sitzung, um es zu verwenden.",
           "turnFailedEmpty": "{agent} hat die Runde ohne jegliche Antwort beendet.",
           "turnFailedEmptyProtocol": "{agent} hat eine Ausgabe erzeugt, die codeg nicht auswerten konnte — die Agent-Version passt möglicherweise nicht zum Protokoll.",
@@ -3504,6 +3522,7 @@
             "child_max_turn_requests": "Subagent: Anfragelimit",
             "child_empty": "Subagent ohne Ausgabe",
             "child_auth_required": "Subagent braucht Anmeldung",
+            "child_rejected": "Subagent lehnte Anfrage ab",
             "child_unknown": "Subagent: Fehler",
             "unknown": "unbekannte Aufgabe"
           }

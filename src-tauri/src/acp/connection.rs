@@ -26,13 +26,17 @@ use sacp::schema::{HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServer
 use sacp::util::MatchDispatch;
 use sacp::{
     on_receive_notification, on_receive_request, Agent, Client, ConnectionTo, Dispatch,
-    JsonRpcRequest, Responder, SessionMessage, UntypedMessage,
+    HandleDispatchFrom, Handled, JsonRpcRequest, Responder, Role, SessionMessage, UntypedMessage,
 };
 use sacp_tokio::AcpAgent;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::acp::agent_mentions::append_agent_routes;
 use crate::acp::background_watch;
+use crate::acp::cursor_ext::{
+    CursorAskQuestionRequest, CursorCreatePlanRequest, CursorGenerateImageRequest,
+    CursorTaskRequest, CursorUpdateTodosRequest,
+};
 use crate::acp::error::AcpError;
 use crate::acp::file_system_runtime::{
     FileSystemRuntime, FileSystemRuntimeError, FsAccessPolicy, FS_POLICY_ENV,
@@ -1240,6 +1244,33 @@ const INIT_TIMEOUT_SENTINEL: &str = "__codeg_init_timeout__";
 /// switch. Same trick as [`INIT_TIMEOUT_SENTINEL`] — the inner future is typed
 /// to `sacp::Error`, which has nowhere to carry a codeg error kind.
 const MCP_SUSPECT_SENTINEL: &str = "__codeg_mcp_suspect__";
+
+/// Sentinel appended to a `session/new` failure the agent answered with ACP's
+/// `authRequired`, so the outer `.map_err(...)` can raise
+/// `AcpError::AgentAuthRequired`. Same trick as [`INIT_TIMEOUT_SENTINEL`]: the
+/// typed error code does not survive the `sacp::Error` the inner future is
+/// typed to, and this is the one classification that has to be made while it
+/// is still there — the wire text alone is the agent's own wording, which for
+/// cursor-agent names a command that does not exist.
+const AUTH_REQUIRED_SENTINEL: &str = "__codeg_auth_required__";
+
+/// Classify a `session/new` failure while its typed code is still readable.
+///
+/// `authRequired` is checked first and returns on its own: it is a diagnosis
+/// (the agent says, in so many words, that it has no usable credential), where
+/// the MCP tag below is only a hint, and running both would leave a message
+/// carrying two markers and the weaker reading.
+fn tag_new_session_failure(
+    err: sacp::Error,
+    agent_type: AgentType,
+    mcp_servers: &[McpServer],
+) -> sacp::Error {
+    if matches!(err.code, sacp::schema::ErrorCode::AuthRequired) {
+        tracing::warn!("[ACP][{agent_type}] session/new refused with authRequired: {err}");
+        return sacp::util::internal_error(format!("{err}{AUTH_REQUIRED_SENTINEL}"));
+    }
+    tag_mcp_suspect(err, agent_type, mcp_servers)
+}
 
 /// Mark a `session/new` failure as possibly caused by the MCP servers codeg put
 /// on the wire.
@@ -5318,6 +5349,9 @@ async fn run_connection(
     Client
         .builder()
         .name("codeg")
+        // First in the chain on purpose: it has to claim a null-`sessionId`
+        // notification before sacp can park it for retry. See the type docs.
+        .with_handler(DropNullSessionIdNotifications)
         .on_receive_request(
             {
                 let emitter_inner = emitter_clone.clone();
@@ -5572,6 +5606,69 @@ async fn run_connection(
                     .await;
                     Ok(())
                 }
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let access = native_ask_access.clone();
+                let conn_id = grok_ask_conn_id.clone();
+                let card_state = Arc::clone(&grok_ask_state);
+                let card_emitter = grok_ask_emitter.clone();
+                async move |req: CursorAskQuestionRequest,
+                            responder: Responder<serde_json::Value>,
+                            _cx: ConnectionTo<Agent>| {
+                    handle_cursor_ask_question(
+                        &access,
+                        &conn_id,
+                        &card_state,
+                        &card_emitter,
+                        req,
+                        responder,
+                    )
+                    .await;
+                    Ok(())
+                }
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let access = grok_plan_access.clone();
+                let conn_id = grok_plan_conn_id.clone();
+                async move |req: CursorCreatePlanRequest,
+                            responder: Responder<serde_json::Value>,
+                            _cx: ConnectionTo<Agent>| {
+                    handle_cursor_create_plan(&access, &conn_id, req, responder).await;
+                    Ok(())
+                }
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |req: CursorUpdateTodosRequest,
+                        responder: Responder<serde_json::Value>,
+                        _cx: ConnectionTo<Agent>| {
+                handle_cursor_update_todos(req, responder);
+                Ok(())
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |req: CursorTaskRequest,
+                        responder: Responder<serde_json::Value>,
+                        _cx: ConnectionTo<Agent>| {
+                handle_cursor_task(req, responder);
+                Ok(())
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |req: CursorGenerateImageRequest,
+                        responder: Responder<serde_json::Value>,
+                        _cx: ConnectionTo<Agent>| {
+                handle_cursor_generate_image(req, responder);
+                Ok(())
             },
             on_receive_request!(),
         )
@@ -6289,7 +6386,7 @@ async fn run_connection(
                             build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
                         )
                         .await
-                        .map_err(|e| tag_mcp_suspect(e, agent_type, &mcp_servers))?;
+                        .map_err(|e| tag_new_session_failure(e, agent_type, &mcp_servers))?;
                         let fallback_sid = new_resp.session_id.0.to_string();
                         let initial_config_options = new_resp.config_options.clone();
                         let grok_meta = if agent_type == AgentType::Grok {
@@ -6389,7 +6486,7 @@ async fn run_connection(
                     build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
                 )
                 .await
-                .map_err(|e| tag_mcp_suspect(e, agent_type, &mcp_servers))?;
+                .map_err(|e| tag_new_session_failure(e, agent_type, &mcp_servers))?;
                 let sid = new_resp.session_id.0.to_string();
                 let initial_config_options = new_resp.config_options.clone();
                 let grok_meta = if agent_type == AgentType::Grok {
@@ -6471,6 +6568,8 @@ async fn run_connection(
             let raw = e.to_string();
             if raw.contains(INIT_TIMEOUT_SENTINEL) {
                 AcpError::InitializeTimeout
+            } else if raw.contains(AUTH_REQUIRED_SENTINEL) {
+                AcpError::agent_auth_required(raw.replace(AUTH_REQUIRED_SENTINEL, ""))
             } else if raw.contains(MCP_SUSPECT_SENTINEL) {
                 // Strip the marker so the user sees the agent's own words, then
                 // let the frontend append the `supports_mcp` suggestion.
@@ -6971,6 +7070,185 @@ async fn handle_grok_exit_plan_mode(
 /// never puts a completed tool_call on the stream, so — like the grok bridge —
 /// the question path synthesizes the answered result card itself once the user
 /// submits (keyed by the elicitation's tool_call_id).
+/// Bridge Cursor's blocking `cursor/ask_question` into the shared ask card.
+/// Same path as [`handle_grok_ask_user_question`]: register, wait off the
+/// dispatch loop, reply in Cursor's option-id envelope. Early returns use
+/// `skipped` so the agent continues instead of hanging on `-32601`.
+async fn handle_cursor_ask_question(
+    access: &Option<(
+        Arc<dyn crate::acp::question::SessionQuestionAccess>,
+        crate::acp::question::QuestionRuntimeConfig,
+    )>,
+    connection_id: &str,
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+    req: CursorAskQuestionRequest,
+    responder: Responder<serde_json::Value>,
+) {
+    tracing::info!(
+        "[cursor ask] received cursor/ask_question: keys={:?}",
+        crate::acp::cursor_ext::param_keys(&req.0)
+    );
+    // Every early return is `skipped` WITH a reason: cursor's own `skipped`
+    // doubles as "the user dismissed the card", and an agent that can't tell
+    // that apart from "this host never showed it" will proceed as if the user
+    // had a say. The reason text is structural — never any of the payload.
+    let Some((questions, ask_cfg)) = access else {
+        let _ = responder.respond(crate::acp::cursor_ext::cursor_ask_skip_response_with_reason(
+            "the host's question bridge is unavailable; the user was not asked",
+        ));
+        return;
+    };
+    if !ask_cfg.is_enabled().await {
+        let _ = responder.respond(crate::acp::cursor_ext::cursor_ask_skip_response_with_reason(
+            "the host's interactive question card is disabled; the user was not asked",
+        ));
+        return;
+    }
+    let parsed = match crate::acp::cursor_ext::parse_cursor_ask_questions(&req.0) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            tracing::warn!("[cursor ask] rejecting malformed ext request: {e}");
+            let _ = responder.respond(crate::acp::cursor_ext::cursor_ask_skip_response_with_reason(
+                &format!("the host could not render this ask: {e}"),
+            ));
+            return;
+        }
+    };
+    let tool_call_id = req
+        .0
+        .get("toolCallId")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let specs: Vec<_> = parsed.iter().map(|q| q.spec.clone()).collect();
+    let card_specs = specs.clone();
+    let Some(registered) = questions.register_question(connection_id, specs).await else {
+        let _ = responder.respond(crate::acp::cursor_ext::cursor_ask_skip_response_with_reason(
+            "the host could not open a question card (one is already pending, or the session is gone)",
+        ));
+        return;
+    };
+    let state = Arc::clone(state);
+    let emitter = emitter.clone();
+    tokio::spawn(async move {
+        match registered.answer_rx.await {
+            Ok(outcome) => {
+                if let Some(tool_call_id) = tool_call_id {
+                    emit_with_state(
+                        &state,
+                        &emitter,
+                        AcpEvent::ToolCall {
+                            tool_call_id,
+                            title: "ask_user_question".to_string(),
+                            kind: "other".to_string(),
+                            status: "completed".to_string(),
+                            content: None,
+                            raw_input: Some(
+                                crate::acp::question::grok_result_card_input(&card_specs)
+                                    .to_string(),
+                            ),
+                            raw_output: Some(
+                                crate::acp::question::grok_result_card_output(&outcome).to_string(),
+                            ),
+                            locations: None,
+                            meta: None,
+                            images: None,
+                        },
+                    )
+                    .await;
+                }
+                let _ = responder.respond(crate::acp::cursor_ext::build_cursor_ask_response(
+                    &parsed, &outcome,
+                ));
+            }
+            Err(_) => {
+                let _ = responder.respond(crate::acp::cursor_ext::cursor_ask_skip_response());
+            }
+        }
+    });
+}
+
+/// Bridge Cursor's blocking `cursor/create_plan` into the shared plan-approval
+/// card. Disconnect / malformed → `cancelled`, never a silent `accepted`.
+async fn handle_cursor_create_plan(
+    access: &Option<Arc<dyn crate::acp::plan_approval::SessionPlanApprovalAccess>>,
+    connection_id: &str,
+    req: CursorCreatePlanRequest,
+    responder: Responder<serde_json::Value>,
+) {
+    tracing::info!(
+        "[cursor plan] received cursor/create_plan: keys={:?}",
+        crate::acp::cursor_ext::param_keys(&req.0)
+    );
+    let Some(access) = access else {
+        let _ = responder.respond(crate::acp::cursor_ext::cursor_create_plan_disconnect_response());
+        return;
+    };
+    let (plan_markdown, tool_call_id) = match crate::acp::cursor_ext::parse_cursor_create_plan(&req.0)
+    {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            tracing::warn!("[cursor plan] rejecting malformed ext request: {e}");
+            let _ = responder.respond(crate::acp::cursor_ext::cursor_create_plan_disconnect_response());
+            return;
+        }
+    };
+    let Some(registered) = access
+        .register_plan_approval(connection_id, tool_call_id, plan_markdown)
+        .await
+    else {
+        let _ = responder.respond(crate::acp::cursor_ext::cursor_create_plan_disconnect_response());
+        return;
+    };
+    tokio::spawn(async move {
+        match registered.answer_rx.await {
+            Ok(answer) => {
+                let _ = responder.respond(
+                    crate::acp::cursor_ext::build_cursor_create_plan_response(&answer),
+                );
+            }
+            Err(_) => {
+                let _ = responder
+                    .respond(crate::acp::cursor_ext::cursor_create_plan_disconnect_response());
+            }
+        }
+    });
+}
+
+fn handle_cursor_update_todos(
+    req: CursorUpdateTodosRequest,
+    responder: Responder<serde_json::Value>,
+) {
+    tracing::debug!(
+        "[cursor todos] cursor/update_todos keys={:?}",
+        crate::acp::cursor_ext::param_keys(&req.0)
+    );
+    let _ = responder.respond(crate::acp::cursor_ext::build_cursor_update_todos_response(
+        &req.0,
+    ));
+}
+
+fn handle_cursor_task(req: CursorTaskRequest, responder: Responder<serde_json::Value>) {
+    tracing::debug!(
+        "[cursor task] cursor/task keys={:?}",
+        crate::acp::cursor_ext::param_keys(&req.0)
+    );
+    let _ = responder.respond(crate::acp::cursor_ext::build_cursor_task_response(&req.0));
+}
+
+fn handle_cursor_generate_image(
+    req: CursorGenerateImageRequest,
+    responder: Responder<serde_json::Value>,
+) {
+    tracing::debug!(
+        "[cursor image] cursor/generate_image keys={:?}",
+        crate::acp::cursor_ext::param_keys(&req.0)
+    );
+    let _ = responder.respond(crate::acp::cursor_ext::build_cursor_generate_image_response(
+        &req.0,
+    ));
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_elicitation_request(
     access: &Option<(
@@ -8495,7 +8773,12 @@ fn normalize_grok_image_blocks(blocks: Vec<PromptInputBlock>) -> Vec<PromptInput
         .collect()
 }
 
-fn map_prompt_blocks(blocks: Vec<PromptInputBlock>) -> Vec<ContentBlock> {
+/// `pub(crate)` for one reader beyond this module: the ACP-native history
+/// parser's parity test, which needs the EXACT wire bytes `record_prompt`
+/// writes in order to assert its projection equals the live one
+/// ([`crate::acp::types::user_blocks_from_prompt`]). Rebuilding those bytes by
+/// hand in the test would let the two drift without failing anything.
+pub(crate) fn map_prompt_blocks(blocks: Vec<PromptInputBlock>) -> Vec<ContentBlock> {
     blocks
         .into_iter()
         .map(|block| match block {
@@ -8918,16 +9201,76 @@ fn classify_session_load_failure(
     if message.contains("already has an active writer") {
         return Some("session_busy");
     }
-    // Upstream signals for an unrecoverable session (claude-agent-acp 0.58.1):
-    //  - "process exited"    → "Claude Code process exited with code 1",
-    //                          "The Claude Agent process exited unexpectedly…"
-    //  - "session has ended" → SESSION_ENDED_MESSAGE
-    //  - "Session not found" → a plain Error rethrown as an Internal error
-    const UNRECOVERABLE: &[&str] = &["process exited", "session has ended", "Session not found"];
-    if UNRECOVERABLE.iter().any(|s| message.contains(s)) {
+    if SESSION_GONE_MARKERS.iter().any(|s| message.contains(s)) {
         return Some("session_unavailable");
     }
     None
+}
+
+/// Wire-message markers for "the session behind this request no longer exists"
+/// (claude-agent-acp 0.58.1):
+///  - "process exited" → "Claude Code process exited with code 1", "The Claude
+///    Agent process exited unexpectedly…"
+///  - "session has ended" → SESSION_ENDED_MESSAGE
+///  - "Session not found" → a plain Error rethrown as an Internal error
+///
+/// Matched on the message because the code that carries them is a generic
+/// -32603. Shared by the two places that must agree on the verdict:
+/// [`classify_session_load_failure`] (a `session/load` that can't be retried)
+/// and [`prompt_rejection_is_terminal`] (a `session/prompt` rejection that no
+/// later prompt on this connection could survive either).
+const SESSION_GONE_MARKERS: &[&str] =
+    &["process exited", "session has ended", "Session not found"];
+
+/// Whether a `session/prompt` rejection means the CONNECTION is dead, or only
+/// this turn.
+///
+/// This is the difference between the two exits in the prompt-response arm of
+/// [`run_conversation_loop`]: `true` propagates the error, which unwinds
+/// `run_connection` into a terminal `Error` → `Disconnected` (and the lifecycle
+/// worker flips the conversation row to `Cancelled`); `false` ends the TURN and
+/// leaves the session addressable, so the composer stays usable and the next
+/// prompt just works.
+///
+/// Turn-scoped is the DEFAULT, because an agent that answered at all is an
+/// agent that is still there. Every ACP agent codeg drives rejects some prompts
+/// it is perfectly healthy to keep talking to: qwen-code answers -32603
+/// `Slash command not supported in ACP integration: …` for a `/mcp` its ACP
+/// surface doesn't implement (issue #797) and keeps the session in its map;
+/// opencode wraps any provider-side turn error (rate limit, quota, invalid
+/// request) into -32603 and its very next prompt ends with `end_turn` (issue
+/// #659). Tearing the agent down for those is pure self-harm — the user waits
+/// out a full respawn for a turn that merely failed.
+///
+/// Only three families stay terminal:
+///  - `ResourceNotFound` — the agent has no record of the session id codeg
+///    just prompted on, so the handle this connection holds is void.
+///  - [`SESSION_GONE_MARKERS`] — the agent answered to say its session or
+///    process is gone. Keeping the connection would leave an entry whose every
+///    future prompt fails the same way.
+///  - sacp's own synthesized "response to … never received" — the response
+///    channel was dropped (`SentRequest::block_task`), i.e. no answer arrived
+///    at all and the transport actor, not the turn, is what died.
+///
+/// `AuthRequired` short-circuits ahead of all of them: it was unconditionally
+/// turn-scoped before this classifier existed, and the message checks below
+/// read an agent-controlled string (`Display` renders `data` too), so without
+/// the early return a sign-out prompt that happened to quote one of the markers
+/// would start tearing connections down.
+fn prompt_rejection_is_terminal(e: &sacp::Error) -> bool {
+    if matches!(e.code, sacp::schema::ErrorCode::AuthRequired) {
+        return false;
+    }
+    if matches!(e.code, sacp::schema::ErrorCode::ResourceNotFound) {
+        return true;
+    }
+    let text = e.to_string();
+    // Both halves of sacp's own sentence, so an agent quoting "never received"
+    // about its own upstream doesn't read as a dead transport.
+    if text.contains("response to ") && text.contains("never received") {
+        return true;
+    }
+    SESSION_GONE_MARKERS.iter().any(|s| text.contains(s))
 }
 
 /// Whether codeg can absorb a "the agent forgot this session" load failure by
@@ -9970,43 +10313,58 @@ async fn run_conversation_loop<'a>(
                             }
                         }
                         prompt_result = &mut prompt_response => {
-                            // ACP defines the `authRequired` rejection as the
-                            // signal that the CLIENT should run its auth flow
-                            // and come back — the session survives it, so this
-                            // one error code must not unwind the connection the
-                            // way `?` unwinds every other prompt failure
-                            // (terminal `Error` → `Disconnected`, and the
-                            // lifecycle worker flips the conversation row to
-                            // Cancelled). It is a TURN failure, so it takes the
-                            // turn-failure exit instead and the loop goes back
-                            // to idle with the session intact.
+                            // A rejected prompt is a TURN failure, not a dead
+                            // connection: the agent answered, so it is still
+                            // there, and the session it answered about is still
+                            // addressable. Propagating the error instead (`?`)
+                            // unwinds `run_connection` into a terminal `Error` →
+                            // `Disconnected`, which kills the agent process,
+                            // greys out the composer until a full respawn
+                            // finishes, and has the lifecycle worker flip the
+                            // conversation row to Cancelled — for a turn that
+                            // merely failed. Only the three families
+                            // `prompt_rejection_is_terminal` names (see there)
+                            // still take that exit.
                             //
-                            // claude-agent-acp 0.74.0 made this reachable in the
-                            // ordinary case: through 0.73.0 a mid-session
-                            // sign-out settled an AIR client's turn with a
-                            // disguised `end_turn` carrying the failure record,
-                            // and 0.74.0 publishes that record on the update
-                            // channel and rejects the prompt as well. The
-                            // adapter deliberately keeps the session addressable
-                            // across the refusal ("the client can sign in and
-                            // retry on the same session"), which is only true if
-                            // the client keeps its end too. Agent-agnostic on
-                            // purpose: every agent that answers -32000 here is
-                            // asking for credentials, not reporting a dead
-                            // process — which is why `session/load` already
-                            // treats "Authentication required" as an expected
-                            // outcome rather than an error to surface.
+                            // ACP's `authRequired` is the rejection with a
+                            // client-side answer, so it keeps its own stop
+                            // reason and its own localized message: the client
+                            // is expected to run its auth flow and come back on
+                            // the SAME session. claude-agent-acp 0.74.0 made it
+                            // reachable in the ordinary case (through 0.73.0 a
+                            // mid-session sign-out settled an AIR client's turn
+                            // with a disguised `end_turn` carrying the failure
+                            // record; 0.74.0 publishes that record on the update
+                            // channel and rejects the prompt as well).
+                            // Agent-agnostic on purpose: every agent that answers
+                            // -32000 here is asking for credentials, not
+                            // reporting a dead process — which is why
+                            // `session/load` already treats "Authentication
+                            // required" as an expected outcome rather than an
+                            // error to surface.
+                            //
+                            // Every other turn-scoped rejection reports the
+                            // agent's OWN words, because they are the actionable
+                            // part ("The command \"/mcp\" is not supported in
+                            // this mode.") and codeg has no vocabulary for them.
                             let response = match prompt_result {
                                 Ok(response) => response,
-                                Err(e)
-                                    if matches!(
+                                Err(e) if !prompt_rejection_is_terminal(&e) => {
+                                    let auth_required = matches!(
                                         e.code,
                                         sacp::schema::ErrorCode::AuthRequired
-                                    ) =>
-                                {
+                                    );
+                                    // Synthesized like `empty`: no `StopReason`
+                                    // ever arrives for a rejected prompt, so the
+                                    // turn needs a reason of its own.
+                                    let reason_str = if auth_required {
+                                        "auth_required"
+                                    } else {
+                                        "rejected"
+                                    };
                                     tracing::warn!(
-                                        "[ACP] session/prompt refused with authRequired ({e}); \
-                                         ending the turn and keeping the session"
+                                        "[ACP] session/prompt rejected ({e}); ending the turn \
+                                         as {reason_str} and keeping the session"
                                     );
                                     if !tracked_terminal_tool_calls.is_empty() {
                                         poll_tracked_terminal_tool_calls(
@@ -10018,20 +10376,41 @@ async fn run_conversation_loop<'a>(
                                         )
                                         .await;
                                     }
-                                    // Synthesized like `empty`: no `StopReason`
-                                    // ever arrives for a rejected prompt, so the
-                                    // turn needs a reason of its own. AIR-capable
-                                    // agents ALSO publish an `access` failure
-                                    // record with a `login` action, which the
-                                    // banner renders — the two are complementary
-                                    // (a transient alert plus a persistent strip
-                                    // with the way back in), and this Error is
-                                    // the only surface for agents with no AIR.
-                                    if let Some(err_event) = turn_failure_error_event(
-                                        "auth_required",
-                                        agent_type,
-                                        None,
-                                    ) {
+                                    // AIR-capable agents ALSO publish an `access`
+                                    // failure record with a `login` action, which
+                                    // the banner renders — the two are
+                                    // complementary (a transient alert plus a
+                                    // persistent strip with the way back in), and
+                                    // this Error is the only surface for agents
+                                    // with no AIR.
+                                    let err_event = if auth_required {
+                                        turn_failure_error_event(
+                                            reason_str,
+                                            agent_type,
+                                            None,
+                                        )
+                                    } else {
+                                        Some(AcpEvent::Error {
+                                            // Through `AcpError::protocol` for
+                                            // its sanitizer: an agent's rejection
+                                            // can quote a local path, and this
+                                            // string is rendered in the UI and
+                                            // pushed over the WebSocket.
+                                            message: AcpError::protocol(e.to_string())
+                                                .to_string(),
+                                            agent_type: agent_type.to_string(),
+                                            // No stable code: the payload IS the
+                                            // agent's message, so the frontend's
+                                            // fallback arm (show it verbatim) is
+                                            // the right renderer.
+                                            code: None,
+                                            details: None,
+                                            // The whole point: the connection
+                                            // outlives this turn.
+                                            terminal: false,
+                                        })
+                                    };
+                                    if let Some(err_event) = err_event {
                                         emit_with_state(state, emitter, err_event).await;
                                     }
                                     // Not journaled (that is `end_turn` only),
@@ -10042,7 +10421,7 @@ async fn run_conversation_loop<'a>(
                                     record_turn_end(
                                         agent_type,
                                         &sid.0,
-                                        "auth_required",
+                                        reason_str,
                                         turn_started_at_ms,
                                         current_session_model_id(state).await,
                                     )
@@ -10057,7 +10436,7 @@ async fn run_conversation_loop<'a>(
                                         emitter,
                                         AcpEvent::TurnComplete {
                                             session_id: sid.0.to_string(),
-                                            stop_reason: "auth_required".into(),
+                                            stop_reason: reason_str.into(),
                                             agent_type: agent_type.to_string(),
                                         },
                                     )
@@ -13619,6 +13998,75 @@ fn grok_ext_notification_is_alert(dispatch: &Dispatch, agent_type: AgentType) ->
         ),
         _ => false,
     }
+}
+
+/// Claims — and drops — an agent notification whose `sessionId` is present but
+/// `null`, before sacp's session router can choke on it.
+///
+/// sacp routes an inbound message to the session it names, and decides a
+/// message is session-bound by FIELD PRESENCE alone (`Dispatch::has_session_id`
+/// → `params.get("sessionId").is_some()`). A `"sessionId": null` therefore
+/// looks session-bound, gets parked in the retry queue, and is replayed into
+/// `ActiveSessionHandler` the moment `attach_session` registers it — where
+/// `Dispatch::get_session_id` deserializes it into a `SessionId` and fails with
+/// `invalid type: null, expected a string`. A handler `Err` brings the whole
+/// connection down, so the user sees `ACP protocol error: Invalid params:
+/// "invalid type: null, expected a string"` instead of a session (issue #794).
+///
+/// grok 1.0.40 is what made this reachable: it narrates `session/new` progress
+/// on `_x.ai/session/setup`, and its first five phases (`auth`,
+/// `resolve_workspace`, `folder_trust`, `plugin_registry`, `mcp_merge`) run
+/// BEFORE the session id exists, so they carry `null`. 1.0.34 (the previous
+/// pin) sent no such notification at all. The guard is deliberately NOT gated
+/// on grok: no ACP notification legitimately carries a null session id, and
+/// every agent's connection dies the same way if one does.
+///
+/// This has to sit in the BUILDER chain, not among the session handlers: the
+/// static chain is the only thing that runs before a message can be parked for
+/// retry, and a parked message is replayed straight into the newly added
+/// dynamic handler without passing through this chain again.
+///
+/// Notifications only. A null session id means "not about a session yet", and
+/// nothing codeg renders rides on these. A REQUEST shaped this way would be the
+/// same protocol violation, but dropping one would leave the agent blocked on a
+/// reply that never comes — so it keeps the existing unhandled-request path.
+struct DropNullSessionIdNotifications;
+
+impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for DropNullSessionIdNotifications {
+    async fn handle_dispatch_from(
+        &mut self,
+        message: Dispatch,
+        _connection: ConnectionTo<Counterpart>,
+    ) -> Result<Handled<Dispatch>, sacp::Error> {
+        if let Dispatch::Notification(notification) = &message {
+            if has_null_session_id(notification) {
+                tracing::debug!(
+                    method = %notification.method(),
+                    "[ACP] dropping notification with a null sessionId"
+                );
+                return Ok(Handled::Yes);
+            }
+        }
+        Ok(Handled::No {
+            message,
+            retry: false,
+        })
+    }
+
+    fn describe_chain(&self) -> impl std::fmt::Debug {
+        "DropNullSessionIdNotifications"
+    }
+}
+
+/// True when `params.sessionId` exists and is JSON `null` — the one shape
+/// [`DropNullSessionIdNotifications`] exists for. A MISSING `sessionId` is a
+/// perfectly ordinary connection-level notification (`_auth/status_update`,
+/// grok's `_x.ai/settings/update`) and must keep flowing.
+fn has_null_session_id(notification: &UntypedMessage) -> bool {
+    notification
+        .params()
+        .get("sessionId")
+        .is_some_and(serde_json::Value::is_null)
 }
 
 /// `_auth/status_update` — the agent reporting which identity IT is logged in
@@ -17990,6 +18438,68 @@ mod tests {
         assert!(map_claude_sdk_ext_notification(&missing_fields).is_none());
     }
 
+    /// The five `_x.ai/session/setup` frames grok 1.0.40 emits BEFORE the
+    /// session id exists, captured verbatim off `grok agent stdio` during
+    /// `session/new`. Each carries `"sessionId": null`, which is what killed the
+    /// connection in #794 — sacp treats the present-but-null field as
+    /// session-bound and then fails to parse it into a `SessionId`.
+    #[test]
+    fn null_session_id_is_recognized_on_grok_setup_frames() {
+        for phase in [
+            "auth",
+            "resolve_workspace",
+            "folder_trust",
+            "plugin_registry",
+            "mcp_merge",
+        ] {
+            let raw = UntypedMessage::new(
+                "_x.ai/session/setup",
+                serde_json::json!({
+                    "method": "session/new",
+                    "phase": phase,
+                    "sessionId": serde_json::Value::Null
+                }),
+            )
+            .unwrap();
+            assert!(
+                has_null_session_id(&raw),
+                "phase {phase} should be recognized as a null sessionId"
+            );
+        }
+    }
+
+    /// The two shapes that must keep flowing: the LATER `_x.ai/session/setup`
+    /// phases, which carry a real session id and belong to the session channel,
+    /// and connection-level pushes that have no `sessionId` field at all
+    /// (`_auth/status_update`, grok's `_x.ai/settings/update`).
+    #[test]
+    fn null_session_id_leaves_real_and_absent_session_ids_alone() {
+        let with_id = UntypedMessage::new(
+            "_x.ai/session/setup",
+            serde_json::json!({
+                "method": "session/new",
+                "phase": "persistence_init",
+                "sessionId": "01a0c4fa-c78f-7bf1-9cc3-5c9f4e3e919a"
+            }),
+        )
+        .unwrap();
+        assert!(!has_null_session_id(&with_id));
+
+        let no_id = UntypedMessage::new(
+            "_auth/status_update",
+            serde_json::json!({"authStatus": {"kind": "authenticated"}}),
+        )
+        .unwrap();
+        assert!(!has_null_session_id(&no_id));
+
+        let settings = UntypedMessage::new(
+            "_x.ai/settings/update",
+            serde_json::json!({"sharing_enabled": false, "session_picker_grouped": null}),
+        )
+        .unwrap();
+        assert!(!has_null_session_id(&settings));
+    }
+
     /// The exact `_x.ai/session_notification` envelope captured from grok 0.2.111
     /// running `/compact` — `auto_compact_completed` under `params.update`, with
     /// the token delta and an `_meta.eventId`.
@@ -19548,6 +20058,72 @@ mod tests {
         assert!(!text.contains("Authentication required"), "{text}");
     }
 
+    /// Issue #797, verbatim off the wire: qwen-code's ACP surface throws
+    /// `Slash command not supported in ACP integration: …` for a `/mcp` it does
+    /// not implement, and its SDK answers -32603 with the text under
+    /// `data.details`. The session stays in the agent's map — so this must
+    /// cost the user a turn, not the whole connection (which greyed out the
+    /// composer until a full agent respawn finished).
+    #[test]
+    fn an_unsupported_slash_command_costs_the_turn_not_the_connection() {
+        let e = sacp::Error::internal_error().data(serde_json::json!({
+            "details": "Slash command not supported in ACP integration: \
+                        The command \"/mcp\" is not supported in this mode.",
+        }));
+        assert!(!prompt_rejection_is_terminal(&e));
+        // What the user reads is the agent's own sentence, sanitized — the
+        // banner is the only place the reason exists.
+        let rendered = AcpError::protocol(e.to_string()).to_string();
+        assert!(rendered.contains("/mcp"), "{rendered}");
+    }
+
+    /// The other turn-scoped shapes that used to kill a healthy connection:
+    /// an adapter wrapping a provider-side turn error as -32603 (opencode,
+    /// issue #659) and ACP's own `authRequired` (which additionally keeps its
+    /// dedicated stop reason).
+    #[test]
+    fn an_agent_that_answers_at_all_keeps_its_connection() {
+        for e in [
+            sacp::Error::internal_error().data(serde_json::json!({
+                "service": "session",
+                "errorName": "APIError",
+            })),
+            sacp::Error::auth_required().data("Please sign in"),
+            sacp::Error::invalid_params().data("unknown model"),
+            // The message checks read an agent-controlled string, so a
+            // rejection that merely QUOTES one of the terminal markers about
+            // something else must not be mistaken for a dead session.
+            sacp::Error::auth_required()
+                .data("the helper process exited; sign in again to restart it"),
+            sacp::Error::internal_error()
+                .data("upstream response never received by the provider, retry"),
+        ] {
+            assert!(!prompt_rejection_is_terminal(&e), "{e}");
+        }
+    }
+
+    /// The three families that stay terminal. Anything looser here would leave
+    /// a connection whose every later prompt fails exactly the same way — the
+    /// user would sit on a dead session with no teardown to recover from.
+    #[test]
+    fn a_rejection_that_reports_a_dead_session_still_tears_the_connection_down() {
+        // The agent has no record of the id codeg just prompted on.
+        assert!(prompt_rejection_is_terminal(
+            &sacp::Error::resource_not_found(None)
+        ));
+        // The agent answered to say its session/process is gone.
+        for marker in SESSION_GONE_MARKERS {
+            let e = sacp::Error::internal_error().data(format!("Claude Code {marker} — sorry"));
+            assert!(prompt_rejection_is_terminal(&e), "{e}");
+        }
+        // sacp's own synthesized error: the response channel was dropped, so
+        // no answer ever arrived and the transport is what died.
+        let dropped = sacp::util::internal_error(
+            "response to `session/prompt` never received: channel closed",
+        );
+        assert!(prompt_rejection_is_terminal(&dropped), "{dropped}");
+    }
+
     #[test]
     fn the_model_selector_is_the_model_recorded_on_a_turn() {
         let select = |id: &str, category: &str, current: &str| SessionConfigOptionInfo {
@@ -19869,6 +20445,57 @@ mod tests {
             !shown.contains(MCP_SUSPECT_SENTINEL),
             "the sentinel must never reach the user: {shown}"
         );
+    }
+
+    // The reported cursor-agent failure: `session/new` answered -32000 with
+    // `Please run 'agent login' first` — advice the user cannot take, since
+    // `agent` is not a command and codeg's managed `cursor-agent` is not on
+    // PATH. The typed code is the only place that reading is available, so it
+    // has to be classified here and not from the wire text.
+    #[test]
+    fn auth_required_beats_the_mcp_hint_and_carries_its_own_code() {
+        // The shape cursor-agent really answers with (wire capture from the
+        // report): code -32000, with its advice in `data`.
+        let refusal = sacp::Error::auth_required().data(serde_json::json!({
+            "message": "Authentication required. Please run 'agent login' first, \
+                        then call authenticate() with methodId 'cursor_login'."
+        }));
+        // A custom agent WITH servers attached is exactly the case the MCP hint
+        // fires on; the credential diagnosis has to win it.
+        let tagged = tag_new_session_failure(
+            refusal,
+            AgentType::Custom("my-agent"),
+            &[stdio_server("codeg")],
+        )
+        .to_string();
+        assert!(tagged.contains(AUTH_REQUIRED_SENTINEL));
+        assert!(
+            !tagged.contains(MCP_SUSPECT_SENTINEL),
+            "the weaker MCP reading must not ride along: {tagged}"
+        );
+
+        // Mirrors the `.map_err` in `run_connection`, which a unit test cannot
+        // call directly.
+        let err = AcpError::agent_auth_required(tagged.replace(AUTH_REQUIRED_SENTINEL, ""));
+        assert_eq!(err.code(), Some("agent_auth_required"));
+        assert!(
+            !err.to_string().contains(AUTH_REQUIRED_SENTINEL),
+            "the sentinel must never reach the user: {err}"
+        );
+    }
+
+    // Every other refusal keeps the behaviour it had: the auth branch must not
+    // swallow unrelated `session/new` failures.
+    #[test]
+    fn a_non_auth_refusal_still_takes_the_mcp_path() {
+        let tagged = tag_new_session_failure(
+            sacp::util::internal_error("session/new failed: unknown field `mcpServers`"),
+            AgentType::Custom("my-agent"),
+            &[stdio_server("codeg")],
+        )
+        .to_string();
+        assert!(tagged.contains(MCP_SUSPECT_SENTINEL));
+        assert!(!tagged.contains(AUTH_REQUIRED_SENTINEL));
     }
 
     #[test]

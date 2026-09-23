@@ -1,18 +1,23 @@
 "use client"
 
 /**
- * Built-in browser settings: where links open by default (per source), what
+ * The `/settings/browser` page: where links open by default (per source), what
  * happens when a server started in a terminal announces its address, whether
  * browser tabs get the web inspector, which native surface hosts them, whether
  * background tabs are unloaded after a while, where downloads land, the
  * browser profiles (create, clear, delete; which one new tabs open in) and the
  * sign-in user-agent switch.
  *
+ * It used to be one folded block at the bottom of `/settings/general` — five
+ * pickers tall is what made it fold, and a page of its own is what made the
+ * fold unnecessary.
+ *
  * Preferences live in localStorage (`browser-prefs.ts`): written immediately,
  * mirrored across windows through the storage event, so there is no Save
  * button. The inspector and surface choices are read when a tab is created,
  * which is why their hints say "from now on". Desktop only — in web mode every
- * link goes to the system browser and none of this exists.
+ * link goes to the system browser and none of this exists, which is also why
+ * the settings nav drops this entry there.
  */
 
 import { useEffect, useState } from "react"
@@ -24,7 +29,6 @@ import {
   Download,
   Eraser,
   FileCode2,
-  Globe,
   KeyRound,
   Link2,
   ListFilter,
@@ -41,7 +45,6 @@ import {
 import { toast } from "sonner"
 
 import { SettingCard, SettingRow } from "@/components/shared/setting-card"
-import { SettingsSection } from "@/components/shared/settings-section"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -54,6 +57,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
@@ -495,12 +499,9 @@ function ProfilesEditor({
   )
 }
 
-export function BrowserSettingsSection() {
+export function BrowserSettings() {
   const t = useTranslations("BrowserSettings")
   const prefs = useBrowserPrefs()
-  // Folded on arrival like its neighbours: the General tab is a stack of
-  // sections, and this one is five pickers tall.
-  const [expanded, setExpanded] = useState(false)
   // Which profile the clear / delete dialog is about (null = closed). Ids,
   // not rows: the row is derived from the current list on every render, so
   // a profile another window deletes while the dialog is open closes it
@@ -516,7 +517,7 @@ export function BrowserSettingsSection() {
   // preview switch is inert where there is none to switch to.
   const [docGuest, setDocGuest] = useState<boolean | null>(null)
   // Whether more than the default profile can exist here (macOS 14+,
-  // Windows, Linux). Until known, or where not, the section shows the one
+  // Windows, Linux). Until known, or where not, the page shows the one
   // "clear browsing data" row instead of the profile list.
   const [profilesSupported, setProfilesSupported] = useState<boolean | null>(
     null
@@ -526,10 +527,16 @@ export function BrowserSettingsSection() {
     null
   )
 
-  // Fetched when the section opens (not once per app run): the answer follows
-  // the proxy setting, which lives on another settings page.
+  // Fetched every time the page is opened (not once per app run): the answer
+  // follows the proxy setting, which lives on another settings page.
+  //
+  // The desktop check repeats the early return below rather than moving above
+  // it — a hook cannot be skipped — and it earns its keep: the nav hides this
+  // page in web mode, but the route is still statically exported, so a typed-in
+  // URL would otherwise ask a backend that has no browser for its capabilities
+  // and throw the answer away.
   useEffect(() => {
-    if (!expanded) return
+    if (!isDesktop()) return
     let cancelled = false
     browserCapabilitiesNow()
       .then((caps) => {
@@ -553,7 +560,7 @@ export function BrowserSettingsSection() {
     return () => {
       cancelled = true
     }
-  }, [expanded])
+  }, [])
 
   if (!isDesktop()) return null
 
@@ -605,349 +612,135 @@ export function BrowserSettingsSection() {
   }
 
   return (
-    <SettingsSection
-      icon={Globe}
-      title={t("title")}
-      description={t("description")}
-      collapsible
-      open={expanded}
-      onOpenChange={setExpanded}
-    >
-      {policy && !policy.enabled ? (
-        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-foreground">
-          {t("managedDisabled")}
-        </p>
-      ) : null}
-      <SettingCard>
-        {/* One setting with five values, so one row whose control is the
-            list — not five rows repeating the same explanation. */}
-        <SettingRow
-          icon={Link2}
-          title={t("defaultTargetTitle")}
-          description={t("defaultTargetHint")}
-        >
-          <div className="space-y-1.5">
-            {LINK_SOURCES.map((source) => {
-              const label = t(SOURCE_LABEL_KEYS[source])
-              return (
-                <div
-                  key={source}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-background px-3 py-2"
-                >
-                  <span className="min-w-0 truncate text-sm">{label}</span>
-                  <Select
-                    value={prefs.defaultTarget[source]}
-                    onValueChange={(value) =>
-                      setDefaultLinkTarget(source, value as LinkTarget)
-                    }
-                  >
-                    <SelectTrigger
-                      size="sm"
-                      className="w-44 bg-background text-xs"
-                      aria-label={label}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent align="end">
-                      {TARGETS.map((target) => (
-                        <SelectItem key={target} value={target}>
-                          {t(TARGET_LABEL_KEYS[target])}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )
-            })}
-          </div>
-        </SettingRow>
-      </SettingCard>
+    <ScrollArea className="h-full">
+      <div className="w-full space-y-4 p-3 md:p-4">
+        <section className="space-y-1">
+          <h1 className="text-sm font-semibold">{t("title")}</h1>
+          <p className="text-xs text-muted-foreground">{t("description")}</p>
+        </section>
 
-      <SettingCard>
-        <SettingRow
-          icon={ListFilter}
-          title={t("rulesTitle")}
-          description={t("rulesHint")}
-        >
-          <HostRulesEditor
-            rules={prefs.hostRules}
-            managed={policy?.managedRules ?? []}
-          />
-        </SettingRow>
-        {/* What a browser tab hands to agents on every site it arrives at,
-            without being asked. The page's own control still says so and takes
-            it back per site; "share nothing" puts that control back in charge
-            of every decision, which is how the browser behaved before this
-            setting existed. */}
-        <SettingRow
-          icon={Bot}
-          title={t("agentGrantTitle")}
-          description={t("agentGrantHint")}
-          control={
-            <Select
-              value={prefs.defaultAgentGrant}
-              onValueChange={(value) =>
-                setBrowserDefaultAgentGrant(value as DefaultAgentGrant)
-              }
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-44 bg-background text-xs"
-                aria-label={t("agentGrantTitle")}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                {AGENT_GRANTS.map((level) => (
-                  <SelectItem key={level} value={level}>
-                    {t(AGENT_GRANT_LABEL_KEYS[level])}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          }
-        />
-        {/* Whether the one act that is not a member of the set a `control`
-            share describes — the agent's own code — is put in front of the
-            person each time. It is not, unless they say so here: the decision
-            lives on the `browser_eval` switch, which ships off. Two named
-            answers rather than a switch, because this is a setting to read
-            rather than to toggle on a guess about what "on" means. */}
-        <SettingRow
-          icon={Code2}
-          title={t("evalApprovalTitle")}
-          description={t("evalApprovalHint")}
-          control={
-            <Select
-              value={prefs.evalApproval}
-              onValueChange={(value) =>
-                setBrowserEvalApproval(value as BrowserEvalApproval)
-              }
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-44 bg-background text-xs"
-                aria-label={t("evalApprovalTitle")}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                {BROWSER_EVAL_APPROVALS.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {t(EVAL_APPROVAL_LABEL_KEYS[value])}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          }
-        />
-      </SettingCard>
-
-      <SettingCard>
-        {/* Both rows are about the terminal: one is what a click on a link
-            does, the other what a server starting in it does. */}
-        <SettingRow
-          icon={ServerCog}
-          title={t("serviceOpenTitle")}
-          description={t("serviceOpenHint")}
-          control={
-            <Select
-              value={prefs.serviceAutoOpen}
-              onValueChange={(value) =>
-                setBrowserServiceAutoOpen(value as ServiceAutoOpen)
-              }
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-44 bg-background text-xs"
-                aria-label={t("serviceOpenTitle")}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                {SERVICE_AUTO_OPEN_MODES.map((mode) => (
-                  <SelectItem key={mode} value={mode}>
-                    {t(SERVICE_AUTO_OPEN_LABEL_KEYS[mode])}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          }
-        />
-        <SettingRow
-          icon={MousePointerClick}
-          title={t("terminalMenuTitle")}
-          description={t("terminalMenuHint")}
-          htmlFor="browser-terminal-menu"
-          control={
-            <Switch
-              id="browser-terminal-menu"
-              checked={prefs.terminalClickMenu}
-              onCheckedChange={(enabled) =>
-                setBrowserTerminalClickMenu(enabled)
-              }
-            />
-          }
-        />
-        <SettingRow
-          icon={FileCode2}
-          title={t("htmlPreviewTitle")}
-          description={t("htmlPreviewHint")}
-          htmlFor="browser-html-preview"
-          control={
-            <Switch
-              id="browser-html-preview"
-              checked={prefs.htmlPreviewEngine === "guest"}
-              disabled={docGuest === false}
-              onCheckedChange={(enabled) =>
-                setBrowserHtmlPreviewEngine(enabled ? "guest" : "inline")
-              }
-            />
-          }
-        />
-        <SettingRow
-          icon={Wrench}
-          title={t("devtoolsTitle")}
-          description={t("devtoolsHint")}
-          htmlFor="browser-devtools"
-          control={
-            <Switch
-              id="browser-devtools"
-              checked={prefs.devtools}
-              onCheckedChange={(enabled) => setBrowserDevtools(enabled)}
-            />
-          }
-        />
-        <SettingRow
-          icon={AppWindow}
-          title={t("surfaceTitle")}
-          description={t("surfaceHint")}
-          control={
-            <Select
-              value={prefs.surfaceOverride}
-              onValueChange={(value) =>
-                setBrowserSurfaceOverride(value as SurfaceOverride)
-              }
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-44 bg-background text-xs"
-                aria-label={t("surfaceTitle")}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                {SURFACES.map((surface) => (
-                  <SelectItem key={surface} value={surface}>
-                    {t(SURFACE_LABEL_KEYS[surface])}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          }
-        />
-        <SettingRow
-          icon={MoonStar}
-          title={t("suspendTitle")}
-          description={t("suspendHint")}
-          htmlFor="browser-suspend"
-          control={
-            <Switch
-              id="browser-suspend"
-              checked={prefs.suspendBackgroundTabs}
-              onCheckedChange={(enabled) =>
-                setBrowserSuspendBackgroundTabs(enabled)
-              }
-            />
-          }
-        />
-        <SettingRow
-          icon={Network}
-          title={t("proxyTitle")}
-          description={t("proxyHint")}
-        >
-          <div className="space-y-0.5 text-xs text-muted-foreground">
-            {proxyStatusLines(t, proxy).map((line) => (
-              <p key={line} className="break-all">
-                {line}
-              </p>
-            ))}
-          </div>
-        </SettingRow>
-        <SettingRow
-          icon={Download}
-          title={t("downloadsTitle")}
-          description={t("downloadsHint", { dir: downloadsDir ?? "…" })}
-        />
-        {signInUaSupported ? (
-          <SettingRow
-            icon={KeyRound}
-            title={t("signInUaTitle")}
-            description={t("signInUaHint")}
-            htmlFor="browser-sign-in-ua"
-            control={
-              <Switch
-                id="browser-sign-in-ua"
-                checked={prefs.signInUserAgent}
-                onCheckedChange={(enabled) =>
-                  setBrowserSignInUserAgent(enabled)
-                }
-              />
-            }
-          />
+        {policy && !policy.enabled ? (
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-foreground">
+            {t("managedDisabled")}
+          </p>
         ) : null}
-        {profilesSupported ? null : (
+        <SettingCard>
+          {/* One setting with five values, so one row whose control is the
+              list — not five rows repeating the same explanation. */}
           <SettingRow
-            icon={Eraser}
-            title={t("clearTitle")}
-            description={t("clearHint")}
-            control={
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="bg-background"
-                onClick={() => setConfirmClearId(profileRows[0].id)}
-              >
-                {t("clearAction")}
-              </Button>
-            }
-          />
-        )}
-      </SettingCard>
+            icon={Link2}
+            title={t("defaultTargetTitle")}
+            description={t("defaultTargetHint")}
+          >
+            <div className="space-y-1.5">
+              {LINK_SOURCES.map((source) => {
+                const label = t(SOURCE_LABEL_KEYS[source])
+                return (
+                  <div
+                    key={source}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-background px-3 py-2"
+                  >
+                    <span className="min-w-0 truncate text-sm">{label}</span>
+                    <Select
+                      value={prefs.defaultTarget[source]}
+                      onValueChange={(value) =>
+                        setDefaultLinkTarget(source, value as LinkTarget)
+                      }
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        className="w-44 bg-background text-xs"
+                        aria-label={label}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent align="end">
+                        {TARGETS.map((target) => (
+                          <SelectItem key={target} value={target}>
+                            {t(TARGET_LABEL_KEYS[target])}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )
+              })}
+            </div>
+          </SettingRow>
+        </SettingCard>
 
-      {profilesSupported ? (
         <SettingCard>
           <SettingRow
-            icon={UserRound}
-            title={t("profilesTitle")}
-            description={t("profilesHint")}
+            icon={ListFilter}
+            title={t("rulesTitle")}
+            description={t("rulesHint")}
           >
-            <ProfilesEditor
-              rows={profileRows}
-              onClear={(row) => setConfirmClearId(row.id)}
-              onDelete={(row) => setConfirmDeleteId(row.id)}
+            <HostRulesEditor
+              rules={prefs.hostRules}
+              managed={policy?.managedRules ?? []}
             />
           </SettingRow>
+          {/* What a browser tab hands to agents on every site it arrives at,
+              without being asked. The page's own control still says so and takes
+              it back per site; "share nothing" puts that control back in charge
+              of every decision, which is how the browser behaved before this
+              setting existed. */}
           <SettingRow
-            icon={Plus}
-            title={t("profileNewTabsTitle")}
+            icon={Bot}
+            title={t("agentGrantTitle")}
+            description={t("agentGrantHint")}
             control={
               <Select
-                value={prefs.newTabProfile}
-                onValueChange={(value) => setBrowserNewTabProfile(value)}
+                value={prefs.defaultAgentGrant}
+                onValueChange={(value) =>
+                  setBrowserDefaultAgentGrant(value as DefaultAgentGrant)
+                }
               >
                 <SelectTrigger
                   size="sm"
                   className="w-44 bg-background text-xs"
-                  aria-label={t("profileNewTabsTitle")}
+                  aria-label={t("agentGrantTitle")}
                 >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
-                  {profileRows.map((row) => (
-                    <SelectItem key={row.id} value={row.id}>
-                      {row.name}
+                  {AGENT_GRANTS.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      {t(AGENT_GRANT_LABEL_KEYS[level])}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+          {/* Whether the one act that is not a member of the set a `control`
+              share describes — the agent's own code — is put in front of the
+              person each time. It is not, unless they say so here: the decision
+              lives on the `browser_eval` switch, which ships off. Two named
+              answers rather than a switch, because this is a setting to read
+              rather than to toggle on a guess about what "on" means. */}
+          <SettingRow
+            icon={Code2}
+            title={t("evalApprovalTitle")}
+            description={t("evalApprovalHint")}
+            control={
+              <Select
+                value={prefs.evalApproval}
+                onValueChange={(value) =>
+                  setBrowserEvalApproval(value as BrowserEvalApproval)
+                }
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-44 bg-background text-xs"
+                  aria-label={t("evalApprovalTitle")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  {BROWSER_EVAL_APPROVALS.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {t(EVAL_APPROVAL_LABEL_KEYS[value])}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -955,77 +748,291 @@ export function BrowserSettingsSection() {
             }
           />
         </SettingCard>
-      ) : null}
 
-      <AlertDialog
-        open={confirmClear !== null}
-        onOpenChange={(open) => {
-          if (!clearing && !open) setConfirmClearId(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("clearConfirmTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {profilesSupported
-                ? t("clearConfirmDescriptionProfile", {
-                    name: confirmClear?.name ?? "",
-                  })
-                : t("clearConfirmDescription")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={clearing}>
-              {t("cancel")}
-            </AlertDialogCancel>
-            {/* Stays open until the backend answers, so a failure toast has
-                the dialog it belongs to still on screen. */}
-            <AlertDialogAction
-              disabled={clearing}
-              onClick={(event) => {
-                event.preventDefault()
-                if (confirmClear) void clear(confirmClear)
-              }}
-            >
-              {t("clearConfirmAction")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        <SettingCard>
+          {/* Both rows are about the terminal: one is what a click on a link
+              does, the other what a server starting in it does. */}
+          <SettingRow
+            icon={ServerCog}
+            title={t("serviceOpenTitle")}
+            description={t("serviceOpenHint")}
+            control={
+              <Select
+                value={prefs.serviceAutoOpen}
+                onValueChange={(value) =>
+                  setBrowserServiceAutoOpen(value as ServiceAutoOpen)
+                }
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-44 bg-background text-xs"
+                  aria-label={t("serviceOpenTitle")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  {SERVICE_AUTO_OPEN_MODES.map((mode) => (
+                    <SelectItem key={mode} value={mode}>
+                      {t(SERVICE_AUTO_OPEN_LABEL_KEYS[mode])}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+          <SettingRow
+            icon={MousePointerClick}
+            title={t("terminalMenuTitle")}
+            description={t("terminalMenuHint")}
+            htmlFor="browser-terminal-menu"
+            control={
+              <Switch
+                id="browser-terminal-menu"
+                checked={prefs.terminalClickMenu}
+                onCheckedChange={(enabled) =>
+                  setBrowserTerminalClickMenu(enabled)
+                }
+              />
+            }
+          />
+          <SettingRow
+            icon={FileCode2}
+            title={t("htmlPreviewTitle")}
+            description={t("htmlPreviewHint")}
+            htmlFor="browser-html-preview"
+            control={
+              <Switch
+                id="browser-html-preview"
+                checked={prefs.htmlPreviewEngine === "guest"}
+                disabled={docGuest === false}
+                onCheckedChange={(enabled) =>
+                  setBrowserHtmlPreviewEngine(enabled ? "guest" : "inline")
+                }
+              />
+            }
+          />
+          <SettingRow
+            icon={Wrench}
+            title={t("devtoolsTitle")}
+            description={t("devtoolsHint")}
+            htmlFor="browser-devtools"
+            control={
+              <Switch
+                id="browser-devtools"
+                checked={prefs.devtools}
+                onCheckedChange={(enabled) => setBrowserDevtools(enabled)}
+              />
+            }
+          />
+          <SettingRow
+            icon={AppWindow}
+            title={t("surfaceTitle")}
+            description={t("surfaceHint")}
+            control={
+              <Select
+                value={prefs.surfaceOverride}
+                onValueChange={(value) =>
+                  setBrowserSurfaceOverride(value as SurfaceOverride)
+                }
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-44 bg-background text-xs"
+                  aria-label={t("surfaceTitle")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  {SURFACES.map((surface) => (
+                    <SelectItem key={surface} value={surface}>
+                      {t(SURFACE_LABEL_KEYS[surface])}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+          <SettingRow
+            icon={MoonStar}
+            title={t("suspendTitle")}
+            description={t("suspendHint")}
+            htmlFor="browser-suspend"
+            control={
+              <Switch
+                id="browser-suspend"
+                checked={prefs.suspendBackgroundTabs}
+                onCheckedChange={(enabled) =>
+                  setBrowserSuspendBackgroundTabs(enabled)
+                }
+              />
+            }
+          />
+          <SettingRow
+            icon={Network}
+            title={t("proxyTitle")}
+            description={t("proxyHint")}
+          >
+            <div className="space-y-0.5 text-xs text-muted-foreground">
+              {proxyStatusLines(t, proxy).map((line) => (
+                <p key={line} className="break-all">
+                  {line}
+                </p>
+              ))}
+            </div>
+          </SettingRow>
+          <SettingRow
+            icon={Download}
+            title={t("downloadsTitle")}
+            description={t("downloadsHint", { dir: downloadsDir ?? "…" })}
+          />
+          {signInUaSupported ? (
+            <SettingRow
+              icon={KeyRound}
+              title={t("signInUaTitle")}
+              description={t("signInUaHint")}
+              htmlFor="browser-sign-in-ua"
+              control={
+                <Switch
+                  id="browser-sign-in-ua"
+                  checked={prefs.signInUserAgent}
+                  onCheckedChange={(enabled) =>
+                    setBrowserSignInUserAgent(enabled)
+                  }
+                />
+              }
+            />
+          ) : null}
+          {profilesSupported ? null : (
+            <SettingRow
+              icon={Eraser}
+              title={t("clearTitle")}
+              description={t("clearHint")}
+              control={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="bg-background"
+                  onClick={() => setConfirmClearId(profileRows[0].id)}
+                >
+                  {t("clearAction")}
+                </Button>
+              }
+            />
+          )}
+        </SettingCard>
 
-      <AlertDialog
-        open={confirmDelete !== null}
-        onOpenChange={(open) => {
-          if (!deleting && !open) setConfirmDeleteId(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("profileDeleteConfirmTitle", {
-                name: confirmDelete?.name ?? "",
-              })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("profileDeleteConfirmDescription")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>
-              {t("cancel")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={deleting}
-              onClick={(event) => {
-                event.preventDefault()
-                if (confirmDelete) void remove(confirmDelete)
-              }}
+        {profilesSupported ? (
+          <SettingCard>
+            <SettingRow
+              icon={UserRound}
+              title={t("profilesTitle")}
+              description={t("profilesHint")}
             >
-              {t("profileDeleteConfirmAction")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </SettingsSection>
+              <ProfilesEditor
+                rows={profileRows}
+                onClear={(row) => setConfirmClearId(row.id)}
+                onDelete={(row) => setConfirmDeleteId(row.id)}
+              />
+            </SettingRow>
+            <SettingRow
+              icon={Plus}
+              title={t("profileNewTabsTitle")}
+              control={
+                <Select
+                  value={prefs.newTabProfile}
+                  onValueChange={(value) => setBrowserNewTabProfile(value)}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="w-44 bg-background text-xs"
+                    aria-label={t("profileNewTabsTitle")}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="end">
+                    {profileRows.map((row) => (
+                      <SelectItem key={row.id} value={row.id}>
+                        {row.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              }
+            />
+          </SettingCard>
+        ) : null}
+
+        <AlertDialog
+          open={confirmClear !== null}
+          onOpenChange={(open) => {
+            if (!clearing && !open) setConfirmClearId(null)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("clearConfirmTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {profilesSupported
+                  ? t("clearConfirmDescriptionProfile", {
+                      name: confirmClear?.name ?? "",
+                    })
+                  : t("clearConfirmDescription")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={clearing}>
+                {t("cancel")}
+              </AlertDialogCancel>
+              {/* Stays open until the backend answers, so a failure toast has
+                  the dialog it belongs to still on screen. */}
+              <AlertDialogAction
+                disabled={clearing}
+                onClick={(event) => {
+                  event.preventDefault()
+                  if (confirmClear) void clear(confirmClear)
+                }}
+              >
+                {t("clearConfirmAction")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog
+          open={confirmDelete !== null}
+          onOpenChange={(open) => {
+            if (!deleting && !open) setConfirmDeleteId(null)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t("profileDeleteConfirmTitle", {
+                  name: confirmDelete?.name ?? "",
+                })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("profileDeleteConfirmDescription")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>
+                {t("cancel")}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={deleting}
+                onClick={(event) => {
+                  event.preventDefault()
+                  if (confirmDelete) void remove(confirmDelete)
+                }}
+              >
+                {t("profileDeleteConfirmAction")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </ScrollArea>
   )
 }
