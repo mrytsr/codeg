@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
   browserClearData: vi.fn(),
   browserRemoveProfile: vi.fn(),
   browserCapabilitiesNow: vi.fn(),
+  /** Which runtime the page thinks it is in; a box so the mock reads it at
+   *  call time rather than closing over the value it had when hoisted. */
+  desktop: { value: true },
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
@@ -14,7 +17,7 @@ vi.mock("@/lib/browser/browser-api", () => ({
   browserRemoveProfile: mocks.browserRemoveProfile,
   browserCapabilitiesNow: mocks.browserCapabilitiesNow,
 }))
-vi.mock("@/lib/platform", () => ({ isDesktop: () => true }))
+vi.mock("@/lib/platform", () => ({ isDesktop: () => mocks.desktop.value }))
 vi.mock("sonner", () => ({ toast: mocks.toast }))
 
 import { BrowserSettings } from "./browser-settings"
@@ -24,6 +27,7 @@ import {
   resetBrowserPrefsForTests,
   setBrowserDefaultAgentGrant,
   setBrowserEvalApproval,
+  setBrowserHostRules,
   setBrowserNewTabProfile,
   setBrowserProfiles,
   setBrowserServiceAutoOpen,
@@ -80,6 +84,7 @@ function capabilitiesWithoutProfiles() {
 
 beforeEach(() => {
   resetBrowserPrefsForTests()
+  mocks.desktop.value = true
   mocks.browserClearData.mockReset()
   mocks.browserRemoveProfile.mockReset()
   mocks.browserCapabilitiesNow.mockReset()
@@ -539,5 +544,88 @@ describe("BrowserSettings", () => {
     expect(
       screen.getByRole("heading", { name: "Clear browsing data?" })
     ).toBeInTheDocument()
+  })
+})
+
+/**
+ * The workbench in a browser has no browser engine to embed, so almost all of
+ * this page is the desktop's. Three settings are not: they decide something
+ * there too and this page is the only place they can be set — which is why it
+ * renders in both runtimes instead of being dropped in one.
+ */
+describe("BrowserSettings in a browser session", () => {
+  beforeEach(() => {
+    mocks.desktop.value = false
+  })
+
+  it("keeps the three settings that still decide something there", async () => {
+    await renderSection()
+    // A server started in a terminal still announces itself, and this picker
+    // is the only way to stop it: the notice was unturnoffable while the page
+    // was dropped.
+    expect(
+      screen.getByRole("combobox", { name: "Local servers" })
+    ).toHaveTextContent("Notify me")
+    expect(screen.getByLabelText("Terminal link menu")).toBeInTheDocument()
+    expect(
+      screen.getByRole("textbox", { name: "Site pattern" })
+    ).toBeInTheDocument()
+  })
+
+  it("drops every row that describes a browser engine, and asks for no capabilities", async () => {
+    await renderSection()
+    for (const source of ["Conversation messages", "Terminal"]) {
+      expect(screen.queryByRole("combobox", { name: source })).toBeNull()
+    }
+    expect(screen.queryByLabelText("Web inspector")).toBeNull()
+    expect(screen.queryByRole("combobox", { name: "Tab surface" })).toBeNull()
+    expect(screen.queryByLabelText("Unload background tabs")).toBeNull()
+    expect(screen.queryByLabelText("HTML file previews")).toBeNull()
+    expect(
+      screen.queryByRole("combobox", { name: "Default sharing level" })
+    ).toBeNull()
+    expect(
+      screen.queryByRole("combobox", { name: "Running code on a page" })
+    ).toBeNull()
+    // Nothing on the page needs the answer, and the backend behind a browser
+    // session has no browser to describe.
+    expect(mocks.browserCapabilitiesNow).not.toHaveBeenCalled()
+  })
+
+  it("still writes the local-server preference", async () => {
+    await renderSection()
+    act(() => setBrowserServiceAutoOpen("off"))
+    expect(
+      screen.getByRole("combobox", { name: "Local servers" })
+    ).toHaveTextContent("Do nothing")
+    expect(getBrowserPrefs().serviceAutoOpen).toBe("off")
+  })
+
+  it("offers blocking and nothing else, because nothing else would be carried out", async () => {
+    await renderSection()
+    // The picker beside the new-rule field, and so the action a rule added
+    // here is written with.
+    expect(screen.getByRole("combobox", { name: "Action" })).toHaveTextContent(
+      "Block"
+    )
+    fireEvent.change(screen.getByRole("textbox", { name: "Site pattern" }), {
+      target: { value: "ads.example" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    expect(getBrowserPrefs().hostRules).toEqual([
+      { pattern: "ads.example", action: "block" },
+    ])
+  })
+
+  it("shows a rule's own answer even when this runtime does not offer it", async () => {
+    act(() =>
+      setBrowserHostRules([{ pattern: "docs.example", action: "system" }])
+    )
+    await renderSection()
+    // Hand-written, or written by a build that offered it: the row says what
+    // the rule says rather than rendering an empty picker.
+    expect(
+      screen.getByRole("combobox", { name: "Action for docs.example" })
+    ).toHaveTextContent("System browser")
   })
 })

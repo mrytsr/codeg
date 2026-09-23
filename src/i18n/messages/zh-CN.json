@@ -3847,6 +3847,7 @@
         "compacted": "上下文已压缩",
         "compactedTokens": "上下文已压缩 · {before} → {after} tokens",
         "failed": "上下文压缩失败",
+        "summary": "摘要",
         "triggerManual": "手动触发",
         "triggerAutomatic": "自动触发"
       },
@@ -5112,6 +5113,7 @@
   "BrowserSettings": {
     "title": "内置浏览器",
     "description": "从会话、工具结果和终端打开的网页可以作为标签页显示在文件旁边，而不必离开应用。",
+    "descriptionWeb": "在浏览器会话里，网页都在你正在用的浏览器中打开；例外是跑在 codeg 主机上的服务器，它会被转发成这里的一个标签页。以下是仍然生效的设置。",
     "defaultTargetTitle": "链接在哪里打开",
     "defaultTargetHint": "按来源分别设置。按住 ⌘/Ctrl 点击链接可临时使用另一种方式。",
     "sourceTranscript": "会话消息",
@@ -5151,6 +5153,7 @@
     "downloadsHint": "网页下载的文件保存在 {dir}。不会自动打开，也不会覆盖已有文件。",
     "rulesTitle": "站点规则",
     "rulesHint": "按站点设定：始终用内置浏览器、始终用系统浏览器，或阻止。模式可以是主机名、*.example.com 或 *，可选加 :端口；最具体的匹配生效。",
+    "rulesHintWeb": "按站点设定：阻止。在浏览器会话里，网页在哪里打开没有可选项。模式可以是主机名、*.example.com 或 *，可选加 :端口；最具体的匹配生效。",
     "serviceOpenTitle": "本机服务",
     "serviceOpenHint": "终端里启动的服务打印出地址时，在浏览器标签页中打开它。只认本机地址，且必须确认那个端口上真的有程序在监听。",
     "serviceOpenOff": "什么都不做",
@@ -6375,6 +6378,7 @@
       "copied": "已复制地址",
       "unreachableTitle": "无法访问端口桥",
       "unreachableHint": "codeg 服务器把这个页面放在 {origin}，但你的浏览器访问不到它。请开放该端口（见 CODEG_BRIDGE_PORTS）或设置 CODEG_BRIDGE_PUBLIC_HOST；如果 codeg 通过 HTTPS 提供服务，端口桥也需要 HTTPS。",
+      "unreachableHostHint": "codeg 服务端把这个页面放在了 {origin}，但你的浏览器访问不到。这个主机名需要解析到 codeg 服务端，并且能穿过前面的反向代理——也就是一条泛域名 DNS 记录加一个泛域名虚拟主机（见 CODEG_BRIDGE_HOST_PATTERN）。",
       "errorTitle": "无法在这里显示此页面"
     },
     "download": {

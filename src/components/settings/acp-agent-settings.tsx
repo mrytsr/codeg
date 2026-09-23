@@ -8720,7 +8720,7 @@ export function AcpAgentSettings() {
                                 )
                               }}
                               placeholder={`disable_response_storage = true
-model = "gpt-5"
+model = "gpt-6-astra"
 model_reasoning_effort = "high"
 model_provider = "codeg"
 
@@ -15032,7 +15032,7 @@ supports_websockets = true`}
                                   event.target.value
                                 )
                               }}
-                              placeholder="claude-opus-5"
+                              placeholder="claude-opus-5-5"
                             />
                           </div>
                           <div className="space-y-1.5">
@@ -15089,7 +15089,7 @@ supports_websockets = true`}
                                   event.target.value
                                 )
                               }}
-                              placeholder="claude-opus-5"
+                              placeholder="claude-opus-5-5"
                             />
                           </div>
                         </div>
@@ -15114,7 +15114,7 @@ supports_websockets = true`}
                                     event.target.value
                                   )
                                 }}
-                                placeholder="my-gateway/claude-opus-5"
+                                placeholder="my-gateway/claude-opus-5-5"
                               />
                             </div>
                             <div className="space-y-1.5">
@@ -15222,7 +15222,7 @@ supports_websockets = true`}
                                 event.target.value
                               )
                             }}
-                            placeholder="gpt-5 / claude-sonnet / gemini-2.5-pro"
+                            placeholder="gpt-6-astra / claude-sonnet-5 / gemini-3.1-pro-preview"
                           />
                         </div>
                       )
@@ -15240,7 +15240,7 @@ supports_websockets = true`}
                         placeholder={`{
   "apiBaseUrl": "https://api.example.com",
   "apiKey": "sk-...",
-  "model": "gpt-5",
+  "model": "gpt-6-astra",
   "env": {
     "CUSTOM_KEY": "VALUE"
   }

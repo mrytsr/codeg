@@ -3847,6 +3847,7 @@
         "compacted": "コンテキストを圧縮しました",
         "compactedTokens": "コンテキストを圧縮 · {before} → {after} トークン",
         "failed": "コンテキストの圧縮に失敗しました",
+        "summary": "要約",
         "triggerManual": "手動で実行",
         "triggerAutomatic": "自動で実行"
       },
@@ -5112,6 +5113,7 @@
   "BrowserSettings": {
     "title": "内蔵ブラウザ",
     "description": "会話、ツールの結果、ターミナルから開いたウェブページを、アプリを離れずにファイルの隣のタブとして表示できます。",
+    "descriptionWeb": "ブラウザセッションでは、ウェブページは今使っているブラウザで開きます。例外は codeg ホストで動いているサーバーで、ここのタブに転送されます。以下は、その場合でも効く設定です。",
     "defaultTargetTitle": "リンクを開く場所",
     "defaultTargetHint": "発生元ごとに設定します。⌘/Ctrl を押しながらクリックすると、その一回だけもう一方で開きます。",
     "sourceTranscript": "会話メッセージ",
@@ -5151,6 +5153,7 @@
     "downloadsHint": "ページからダウンロードしたファイルは {dir} に保存されます。自動的に開かれることはなく、既存のファイルを上書きしません。",
     "rulesTitle": "サイトルール",
     "rulesHint": "サイトごとに設定: 常に内蔵ブラウザ、常にシステムブラウザ、またはブロック。パターンはホスト名、*.example.com、* のいずれかで、:ポートを付けられます。最も具体的な一致が優先されます。",
+    "rulesHintWeb": "サイトごとに設定: ブロック。ブラウザセッションでは、リンクをどこで開くかは選べません。パターンはホスト名、*.example.com、* のいずれかで、:ポートを付けられます。最も具体的な一致が優先されます。",
     "serviceOpenTitle": "ローカルサーバー",
     "serviceOpenHint": "ターミナルで起動したサーバーがアドレスを表示したら、ブラウザータブで開きます。このマシン上のアドレスのみ、かつ実際に待ち受けている場合だけです。",
     "serviceOpenOff": "何もしない",
@@ -6375,6 +6378,7 @@
       "copied": "アドレスをコピーしました",
       "unreachableTitle": "ブリッジポートに到達できません",
       "unreachableHint": "codeg サーバーはこのページを {origin} で公開していますが、お使いのブラウザから到達できません。そのポートを公開する（CODEG_BRIDGE_PORTS を参照）か CODEG_BRIDGE_PUBLIC_HOST を設定してください。codeg を HTTPS で提供している場合は、ブリッジポートにも HTTPS が必要です。",
+      "unreachableHostHint": "codeg のサーバーはこのページを {origin} に置きましたが、ブラウザから到達できません。そのホスト名が codeg サーバーに解決され、前段のプロキシを通り抜ける必要があります。ワイルドカードの DNS レコードとワイルドカードの vhost を用意してください（CODEG_BRIDGE_HOST_PATTERN を参照）。",
       "errorTitle": "このページはここに表示できません"
     },
     "download": {
