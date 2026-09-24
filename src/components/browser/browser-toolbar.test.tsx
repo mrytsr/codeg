@@ -66,6 +66,7 @@ import { openUrl } from "@/lib/platform"
 import { BrowserToolbar } from "./browser-toolbar"
 
 const toolbarMocks = vi.hoisted(() => ({
+  remoteDesktop: false,
   openBrowserTab: vi.fn(() => "browser:new"),
   workspaceActions: null as null | {
     openBrowserTab: (...a: unknown[]) => unknown
@@ -92,6 +93,10 @@ vi.mock("@/lib/browser/browser-api", () => ({
   browserPickElement: vi.fn(),
 }))
 vi.mock("@/lib/platform", () => ({ openUrl: vi.fn() }))
+vi.mock(import("@/lib/transport"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  isRemoteDesktopMode: () => toolbarMocks.remoteDesktop,
+}))
 
 function tabIn(
   profile: string,
@@ -511,5 +516,86 @@ describe("BrowserToolbar and the agent activity record", () => {
     })
     expect(vi.mocked(browserNavigate)).not.toHaveBeenCalled()
     expect(record()).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A window bound to a remote codeg-server
+// ---------------------------------------------------------------------------
+
+describe("BrowserToolbar in a remote workspace window", () => {
+  beforeEach(() => {
+    resetBrowserPrefsForTests()
+    resetBrowserTabStoreForTests()
+    vi.mocked(browserNavigate).mockClear()
+    toolbarMocks.openBrowserTab.mockClear()
+    toolbarMocks.workspaceActions = {
+      openBrowserTab: toolbarMocks.openBrowserTab,
+    }
+    toolbarMocks.remoteDesktop = true
+  })
+  afterEach(() => {
+    toolbarMocks.remoteDesktop = false
+    resetBrowserTabStoreForTests()
+  })
+
+  function unsharedState(): BrowserTabState {
+    return { ...sharedState(), agentGrant: null }
+  }
+
+  // This tab is a page of THIS computer; typed here, `localhost:3000` would
+  // reach this machine instead of the host the workspace runs on.
+  it("opens a typed loopback address as a tab of the remote host", async () => {
+    renderToolbar("default", undefined, unsharedState())
+    const bar = screen.getByRole("textbox", { name: "Enter an address" })
+    await act(async () => {
+      fireEvent.change(bar, { target: { value: "localhost:3000/app" } })
+      fireEvent.keyDown(bar, { key: "Enter" })
+    })
+    expect(toolbarMocks.openBrowserTab).toHaveBeenCalledWith(
+      "http://localhost:3000/app",
+      { remote: true, openerTabId: "browser:abc" }
+    )
+    expect(vi.mocked(browserNavigate)).not.toHaveBeenCalled()
+    // The bar goes back to what this tab is showing.
+    expect(bar).toHaveValue("https://example.com/")
+  })
+
+  // With no tab strip to open a remote tab in, the address goes nowhere —
+  // never into this tab, where it would reach this computer.
+  it("refuses a typed loopback address when there is nowhere to open it", async () => {
+    toolbarMocks.workspaceActions = null
+    renderToolbar("default", undefined, unsharedState())
+    const bar = screen.getByRole("textbox", { name: "Enter an address" })
+    await act(async () => {
+      fireEvent.change(bar, { target: { value: "127.0.0.1:8080" } })
+      fireEvent.keyDown(bar, { key: "Enter" })
+    })
+    expect(vi.mocked(browserNavigate)).not.toHaveBeenCalled()
+  })
+
+  it("navigates a typed public address in place, as anywhere else", async () => {
+    renderToolbar("default", undefined, unsharedState())
+    const bar = screen.getByRole("textbox", { name: "Enter an address" })
+    await act(async () => {
+      fireEvent.change(bar, { target: { value: "example.com/next" } })
+      fireEvent.keyDown(bar, { key: "Enter" })
+    })
+    expect(vi.mocked(browserNavigate)).toHaveBeenCalledWith(
+      "abc",
+      "https://example.com/next"
+    )
+    expect(toolbarMocks.openBrowserTab).not.toHaveBeenCalled()
+  })
+
+  // Its agents run on the remote host and cannot reach this browser.
+  it("offers no sharing with agents, and says why", () => {
+    renderToolbar("default", undefined, unsharedState())
+    const share = screen.getByRole("button", { name: "Share with agents" })
+    expect(share).toBeDisabled()
+    expect(share).toHaveAttribute(
+      "title",
+      "Agents of a remote workspace run on its host and can't use this computer's browser"
+    )
   })
 })

@@ -300,6 +300,8 @@
     "rollbackSuccess": "Retour à la version précédente. Rechargement...",
     "rollbackFailed": "Échec du retour en arrière. Consultez les journaux du serveur.",
     "updateErrors": {
+      "permissionDenied": "Impossible d’écrire dans {path} : les mises à jour ne peuvent pas être installées sur place. Effectuez la mise à jour manuellement avec les droits d’administrateur ou vérifiez les autorisations d’installation.",
+      "targetWriteFailed": "Impossible d’écrire dans {path} : les mises à jour ne peuvent pas être installées sur place ({reason}).",
       "sourceUnavailable": "Impossible d’atteindre la source de mise à jour. Vérifiez votre réseau ou proxy et réessayez.",
       "network": "La connexion réseau a échoué. Vérifiez votre réseau ou proxy et réessayez.",
       "downloadFailed": "Impossible de télécharger le paquet de mise à jour. Veuillez réessayer plus tard.",
@@ -4231,7 +4233,7 @@
     "agentTypeRequired": "Le type d'agent est requis.",
     "agentTypeImmutableHint": "Le type d'agent ne peut pas être modifié après la création.",
     "model": "Modèle",
-    "modelPlaceholderCodex": "gpt-5.6-sol / gpt-5.5",
+    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "Modèle Principal",
     "claudeReasoningModel": "Modèle de Raisonnement (réflexion)",
@@ -6381,6 +6383,17 @@
       "unreachableHostHint": "Le serveur codeg a placé cette page sur {origin}, mais votre navigateur ne peut pas l'atteindre. Ce nom d'hôte doit pointer vers le serveur codeg et traverser le proxy placé devant : un enregistrement DNS générique et un vhost générique (voir CODEG_BRIDGE_HOST_PATTERN).",
       "errorTitle": "Cette page ne peut pas être affichée ici"
     },
+    "remote": {
+      "title": "Cette adresse se trouve sur {host}",
+      "titleUnnamed": "Cette adresse se trouve sur l'hôte distant",
+      "description": "Elle désigne la machine où tourne cet espace de travail, pas cet ordinateur ; elle ne peut donc pas encore s'ouvrir dans un onglet ici.",
+      "copyAddress": "Copier l'adresse",
+      "copied": "Adresse copiée",
+      "tryHost": "Essayer {host}",
+      "tryHostHint": "Ouvre {address} dans un onglet de cet ordinateur. Cela fonctionne si la page écoute sur toutes les interfaces réseau et si cet ordinateur peut joindre son port.",
+      "openHere": "Ouvrir sur cet ordinateur",
+      "openHereHint": "Ouvre l'adresse dans un onglet de cet ordinateur. Cela fonctionne si cet ordinateur est sur le même réseau."
+    },
     "download": {
       "started": "Téléchargement…",
       "completed": "Enregistré",
@@ -6436,6 +6449,7 @@
       "shareControl": "Lecture et actions",
       "levelDefault": "Par défaut",
       "notShareable": "Cette page n'a pas d'adresse web à partager avec les agents",
+      "remoteWindow": "Les agents d'un espace de travail distant s'exécutent sur son hôte et ne peuvent pas utiliser le navigateur de cet ordinateur",
       "shared": "Partagée",
       "sharedControl": "Partagée · peut agir",
       "sharedWith": "Les agents peuvent lire {origin}",
@@ -6529,6 +6543,7 @@
       "noConversation": "Ouvre une conversation à laquelle envoyer cette page",
       "pickElement": "Choisir un élément…",
       "screenshot": "Envoyer une capture",
+      "markUp": "Annoter une capture…",
       "consoleErrors": "Envoyer les erreurs de la console",
       "consoleClean": "Rien n'a échoué sur cette page",
       "picking": "Sélection…",
@@ -6539,9 +6554,20 @@
       "noConsoleErrors": "Cette page n'a affiché aucune erreur",
       "chipElement": "Élément de la page",
       "chipScreenshot": "Capture de la page",
+      "chipMarkedScreenshot": "Capture annotée",
       "chipConsole": "{count, plural, one {# erreur de console} other {# erreurs de console}}",
       "gone": "Cette conversation n'est plus ouverte",
-      "consoleErrorsCount": "{count, plural, one {Envoyer la # erreur de console} other {Envoyer les # erreurs de console}}"
+      "consoleErrorsCount": "{count, plural, one {Envoyer la # erreur de console} other {Envoyer les # erreurs de console}}",
+      "markupTitle": "Annoter la capture",
+      "markupTools": "Outil de dessin",
+      "markupBox": "Cadre",
+      "markupArrow": "Flèche",
+      "markupUndo": "Défaire",
+      "markupClear": "Effacer",
+      "markupHint": "Faites glisser sur l'image pour dessiner. Chaque marque porte un numéro auquel votre message peut faire référence.",
+      "markupCount": "{count, plural, one {# marque} other {# marques}}",
+      "markupCancel": "Annuler",
+      "markupSend": "Ajouter à la conversation"
     }
   },
   "browser": {

@@ -131,14 +131,19 @@ beforeEach(() => {
   localStorage.clear()
 })
 
-// A new server reporting an available update + rollback + the live-progress
-// protocol, parameterized by the app_update_state snapshot the provider sees.
-function liveServerCalls(snapshot: unknown) {
+// A new server reporting rollback + the live-progress protocol, parameterized
+// by the app_update_state snapshot the provider sees and, optionally, a release
+// on offer and what its status says stands in the way of installing it (the
+// check never reports that).
+function liveServerCalls(
+  snapshot: unknown,
+  server: { update?: unknown; selfUpdateBlocker?: unknown } = {}
+) {
   return async (endpoint: string) => {
     if (endpoint === "check_app_update") {
       return {
         currentVersion: "0.16.0",
-        update: null,
+        update: server.update ?? null,
         selfUpdateSupported: true,
         capability: "supervised",
         runtime: "standalone",
@@ -156,6 +161,7 @@ function liveServerCalls(snapshot: unknown) {
         restartDelayMs: 2000,
         rollbackAvailable: true,
         liveProgress: true,
+        selfUpdateBlocker: server.selfUpdateBlocker,
       }
     }
     if (endpoint === "health") return { version: "0.16.0" }
@@ -163,6 +169,162 @@ function liveServerCalls(snapshot: unknown) {
     throw new Error(`unexpected endpoint: ${endpoint}`)
   }
 }
+
+// What the server reports for an install directory it can't write.
+const UNWRITABLE_BIN = {
+  code: "permission_denied",
+  message: "Update target is not writable: /usr/local/bin",
+  detail: "Permission denied (os error 13)",
+  i18n_key: "SystemSettings.updateErrors.permissionDenied",
+  i18n_params: { path: "/usr/local/bin" },
+}
+const UNWRITABLE_BIN_TEXT =
+  "Cannot write to /usr/local/bin, so updates can't be installed in place. Update manually with administrator privileges or check installation permissions."
+// The same probe failing for want of space rather than permission.
+const FULL_DISK = {
+  code: "io_error",
+  message: "Update target is not writable: /usr/local/bin",
+  detail: "No space left on device (os error 28)",
+  i18n_key: "SystemSettings.updateErrors.targetWriteFailed",
+  i18n_params: {
+    path: "/usr/local/bin",
+    reason: "No space left on device (os error 28)",
+  },
+}
+
+describe("SystemNetworkSettings — install the server can't write", () => {
+  it("offers the release page and says why before anyone clicks", async () => {
+    mockGetProxy.mockResolvedValue({ enabled: false, proxy_url: null })
+    call.mockImplementation(
+      liveServerCalls(
+        { seq: 1, status: "idle" },
+        {
+          update: { version: "0.17.0", body: "", date: null },
+          selfUpdateBlocker: UNWRITABLE_BIN,
+        }
+      )
+    )
+
+    renderWithIntl()
+
+    expect(await screen.findByText(UNWRITABLE_BIN_TEXT)).toBeVisible()
+    expect(
+      await screen.findByRole("button", { name: "View v0.17.0 release" })
+    ).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: "Upgrade to v0.17.0" })
+    ).not.toBeInTheDocument()
+    // A rollback writes to the same directories, so it can't work either.
+    expect(
+      screen.queryByRole("button", { name: "Roll back" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("reports a failed update by the directory the server named, once", async () => {
+    mockGetProxy.mockResolvedValue({ enabled: false, proxy_url: null })
+    call.mockImplementation(
+      liveServerCalls(
+        {
+          seq: 2,
+          status: "error",
+          error: UNWRITABLE_BIN.message,
+          errorInfo: UNWRITABLE_BIN,
+        },
+        { selfUpdateBlocker: UNWRITABLE_BIN }
+      )
+    )
+
+    renderWithIntl()
+
+    expect(
+      await screen.findByText(`Update error: ${UNWRITABLE_BIN_TEXT}`)
+    ).toBeVisible()
+    expect(
+      screen.getAllByText(/Cannot write to \/usr\/local\/bin/)
+    ).toHaveLength(1)
+    expect(screen.queryByText(/close the app and try again/)).toBeNull()
+  })
+
+  it("still says what blocks the update when a failed check takes the banner", async () => {
+    mockGetProxy.mockResolvedValue({ enabled: false, proxy_url: null })
+    const server = liveServerCalls(
+      {
+        seq: 2,
+        status: "error",
+        error: UNWRITABLE_BIN.message,
+        errorInfo: UNWRITABLE_BIN,
+      },
+      { selfUpdateBlocker: UNWRITABLE_BIN }
+    )
+    call.mockImplementation(async (endpoint: string) => {
+      if (endpoint === "check_app_update") {
+        throw new Error("error sending request for url")
+      }
+      return server(endpoint)
+    })
+
+    renderWithIntl()
+
+    expect(
+      await screen.findByText(
+        "Update error: Network connection failed. Check your network or proxy and try again."
+      )
+    ).toBeVisible()
+    expect(await screen.findByText(UNWRITABLE_BIN_TEXT)).toBeVisible()
+  })
+
+  it("keeps the rollback when the probe only ran out of space", async () => {
+    // A rollback renames what is already there, which a full disk doesn't
+    // stop — only a refused write does.
+    mockGetProxy.mockResolvedValue({ enabled: false, proxy_url: null })
+    call.mockImplementation(
+      liveServerCalls(
+        { seq: 1, status: "idle" },
+        {
+          update: { version: "0.17.0", body: "", date: null },
+          selfUpdateBlocker: FULL_DISK,
+        }
+      )
+    )
+
+    renderWithIntl()
+
+    expect(
+      await screen.findByText(
+        "Cannot write to /usr/local/bin, so updates can't be installed in place: No space left on device (os error 28)"
+      )
+    ).toBeVisible()
+    expect(
+      await screen.findByRole("button", { name: "Roll back" })
+    ).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "View v0.17.0 release" })
+    ).toBeVisible()
+  })
+
+  it("looks again when the operator checks for updates after fixing it", async () => {
+    mockGetProxy.mockResolvedValue({ enabled: false, proxy_url: null })
+    let blocked = true
+    const server = liveServerCalls({ seq: 1, status: "idle" })
+    call.mockImplementation(async (endpoint: string) => {
+      const reply = await server(endpoint)
+      return endpoint === "app_update_status" && blocked
+        ? { ...(reply as object), selfUpdateBlocker: UNWRITABLE_BIN }
+        : reply
+    })
+
+    renderWithIntl()
+
+    expect(await screen.findByText(UNWRITABLE_BIN_TEXT)).toBeVisible()
+    blocked = false
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Check for updates" })
+    )
+    await waitFor(() =>
+      expect(screen.queryByText(UNWRITABLE_BIN_TEXT)).not.toBeInTheDocument()
+    )
+  })
+})
 
 describe("SystemNetworkSettings — update source outage", () => {
   it("loads proxy settings and exposes rollback when the manifest is unreachable", async () => {

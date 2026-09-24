@@ -47,6 +47,7 @@ import {
 } from "@/lib/browser/browser-prefs"
 import { clearBrowserAgentActivity } from "@/lib/browser/browser-tab-store"
 import { isBlankPageUrl } from "@/lib/browser/browser-url"
+import { isRemoteHostAddress } from "@/lib/browser/remote-host"
 import type { BrowserTabState } from "@/lib/browser/types"
 import { browserTabBackendId } from "@/lib/file-tab-id"
 import { openUrl } from "@/lib/platform"
@@ -184,6 +185,7 @@ export function BrowserToolbar({
   // English message the error already carries.
   const tRoot = useTranslations()
   const inspectorEnabled = useBrowserPrefs().devtools
+  const openBrowserTab = useOptionalWorkspaceActions()?.openBrowserTab ?? null
   const backendId = browserTabBackendId(tab.id)
   const currentUrl = state?.url || state?.requestedUrl || tab.browser.initialUrl
   // The blank page is the absence of an address, so the bar shows its
@@ -246,6 +248,16 @@ export function BrowserToolbar({
     }
     setEditing(false)
     inputRef.current?.blur()
+    // Seen from a window bound to a remote codeg-server, a loopback or
+    // private address is that host's — and this tab is a page of THIS
+    // computer, where the same address reaches this machine instead. It opens
+    // as a tab of the remote host beside this one, the way a link to it does;
+    // with nowhere to open one, it goes nowhere rather than here.
+    if (isRemoteHostAddress(url)) {
+      setDraft(address)
+      openBrowserTab?.(url, { remote: true, openerTabId: tab.id })
+      return
+    }
     const asOf = Date.now()
     void browserNavigate(backendId, url).then(
       // Asking for a page starts the record of what agents did to it again —

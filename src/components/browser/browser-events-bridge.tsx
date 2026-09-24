@@ -27,6 +27,7 @@ import {
 } from "@/lib/browser/browser-downloads-store"
 import {
   browserWorkspaceTabId,
+  getBrowserTabState,
   recordBrowserAgentActivity,
   removeBrowserTabState,
   requestBrowserFind,
@@ -63,7 +64,7 @@ import {
   type BrowserTabState,
   type DocGuestState,
 } from "@/lib/browser/types"
-import { getTransport, isDesktop } from "@/lib/transport"
+import { getShellTransport, isDesktop } from "@/lib/transport"
 import { bridgeStatus } from "@/lib/browser/browser-bridge"
 import { getCurrentWindowLabel } from "@/lib/browser/window-label"
 import { browserTabBackendId } from "@/lib/file-tab-id"
@@ -185,7 +186,8 @@ export function BrowserEventsBridge() {
         /* no downloads to show */
       }
       if (cancelled) return
-      const transport = getTransport()
+      // This app's own backend, as for the commands (see `browser-api.ts`).
+      const transport = getShellTransport()
       const subs = await Promise.all([
         transport.subscribe<BrowserTabState>(BROWSER_STATE_EVENT, (state) => {
           setBrowserTabState(state)
@@ -206,6 +208,18 @@ export function BrowserEventsBridge() {
               return
             }
             if (!popup.tabId) return
+            // Every window hears every popup; only the one its opener lives
+            // in takes it in, or each workspace window would grow the tab.
+            // The popup's own state, sent just before this event, names that
+            // window (the one it inherited from its opener); failing that,
+            // the opener's own state does. Only with neither in hand is the
+            // popup taken in as it always was.
+            const owner =
+              getBrowserTabState(browserWorkspaceTabId(popup.tabId))
+                ?.ownerWindow ??
+              getBrowserTabState(browserWorkspaceTabId(popup.openerTabId))
+                ?.ownerWindow
+            if (owner && owner !== getCurrentWindowLabel()) return
             adoptBrowserTab({
               backendTabId: popup.tabId,
               url: popup.url,

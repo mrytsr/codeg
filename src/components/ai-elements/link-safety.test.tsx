@@ -57,6 +57,7 @@ vi.mock("@/lib/transport", () => ({
   // A desktop window bound to a remote server — mirrors the real helper.
   isRemoteDesktopMode: () =>
     mocks.isDesktop() && mocks.getActiveRemoteConnectionId() !== null,
+  getServerBaseUrl: () => "https://dev.example.com",
 }))
 
 vi.mock("@/contexts/active-folder-context", () => ({

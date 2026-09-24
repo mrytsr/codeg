@@ -87,6 +87,7 @@ import {
   getBrowserPrefs,
   subscribeBrowserPrefs,
 } from "@/lib/browser/browser-prefs"
+import { isRemoteHostAddress } from "@/lib/browser/remote-host"
 import { randomUUID } from "@/lib/utils"
 
 export type WorkspaceMode = "conversation" | "fusion"
@@ -123,6 +124,12 @@ export interface BrowserTabSeed {
   /** The browser profile the tab lives in (its cookie jar and storage).
    *  Fixed for the tab's life: the surface is built in it. */
   profile: string
+  /** The address lives on the codeg host this window is bound to — a
+   *  loopback or private address seen from a remote-workspace window. Such a
+   *  tab never loads in a profile of this computer: there it would reach this
+   *  machine's `localhost`, not the one the address was printed on. Absent on
+   *  every other tab. */
+  remote?: true
 }
 
 interface FileWorkspaceTabBase {
@@ -307,6 +314,9 @@ interface WorkspaceActionsValue {
   // which should show its page without pulling anyone out of a conversation);
   // `false` leaves the selection alone, claiming it only when nothing holds
   // it, so the strip never carries a tab with an empty column beside it.
+  //
+  // `remote` opens the address as one on the remote codeg host (see
+  // `BrowserTabSeed.remote`); a tab opened from a remote tab is remote too.
   openBrowserTab: (
     url: string,
     options?: {
@@ -315,6 +325,7 @@ interface WorkspaceActionsValue {
       openerTabId?: string
       index?: number
       profile?: string
+      remote?: boolean
     }
   ) => string | null
   // Register a tab for a webview the BACKEND already created — a popup the
@@ -347,6 +358,8 @@ export interface RestorableBrowserTab {
   folderId: number | null
   /** A profile that exists (the restorer maps deleted ones to the default). */
   profile: string
+  /** See `BrowserTabSeed.remote`. */
+  remote?: boolean
 }
 
 interface WorkspaceViewValue {
@@ -906,7 +919,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       folderId: number | null,
       openerTabId: string | null,
       profile: string,
-      title?: string | null
+      title?: string | null,
+      remote?: boolean
     ): BrowserWorkspaceTab => ({
       id: buildFileTabId({ kind: "browser", id: backendTabId }),
       kind: "browser",
@@ -924,7 +938,12 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       content: "",
       loading: true,
       readonly: true,
-      browser: { initialUrl: url, openerTabId, profile },
+      browser: {
+        initialUrl: url,
+        openerTabId,
+        profile,
+        ...(remote ? { remote: true as const } : {}),
+      },
     }),
     []
   )
@@ -938,6 +957,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         openerTabId?: string
         index?: number
         profile?: string
+        remote?: boolean
       }
     ) => {
       const normalized = normalizeUrlForDedupe(url)
@@ -946,20 +966,33 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       const opener = options?.openerTabId
         ? fileTabsRef.current.find((tab) => tab.id === options.openerTabId)
         : undefined
+      // A caller that says settles it — "open it on this computer" is a
+      // person's decision. Otherwise a tab opened from a remote tab is
+      // remote, and so is any address of the remote host however it came to
+      // be opened (a page's ⌘-click, a refused pop-up opened anyway): in a
+      // profile of this computer it would reach this machine instead.
+      const remote =
+        options?.remote ??
+        ((opener?.kind === "browser" && opener.browser.remote === true) ||
+          isRemoteHostAddress(url))
       // A tab opened from another tab (⌘-click, a popup) belongs with it:
       // same cookies, same signed-in state. Otherwise the preference. A
       // profile that no longer exists (a reopened tab of a deleted one, a
-      // stale record) is not recreated on the backend: default instead.
+      // stale record) is not recreated on the backend: default instead. A
+      // remote address is not in any profile of this computer, so it takes
+      // no part in the choice.
       const prefs = getBrowserPrefs()
       const wanted =
         options?.profile ??
         (opener?.kind === "browser" ? opener.browser.profile : undefined) ??
         prefs.newTabProfile
-      const profile = browserProfileExists(prefs, wanted)
-        ? wanted
-        : DEFAULT_BROWSER_PROFILE_ID
+      const profile =
+        !remote && browserProfileExists(prefs, wanted)
+          ? wanted
+          : DEFAULT_BROWSER_PROFILE_ID
       // One tab per page AND profile: the same page in two profiles is two
-      // different sessions, and both are worth a tab.
+      // different sessions, and both are worth a tab. A remote tab is its own
+      // kind of session: never the same tab as a local one on that address.
       //
       // The blank page is exempt: it is an empty tab, not a page, so two of
       // them are two tabs. Dedupe would also misfire once one is used — a
@@ -973,6 +1006,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
               (tab) =>
                 tab.kind === "browser" &&
                 tab.browser.profile === profile &&
+                (tab.browser.remote === true) === remote &&
                 normalizeUrlForDedupe(tab.browser.initialUrl) === normalized
             )
       if (existing) {
@@ -988,7 +1022,9 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           activeFolderRef.current?.id ??
           null,
         opener?.id ?? null,
-        profile
+        profile,
+        null,
+        remote
       )
       const insert = (prev: FileWorkspaceTab[]) => {
         if (prev.some((tab) => tab.id === record.id)) return prev
@@ -1051,7 +1087,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         params.profile ??
           (opener?.kind === "browser"
             ? opener.browser.profile
-            : getBrowserPrefs().newTabProfile)
+            : getBrowserPrefs().newTabProfile),
+        null,
+        // A popup lives where its opener's traffic goes.
+        opener?.kind === "browser" && opener.browser.remote === true
       )
       setFileTabs((prev) => {
         if (prev.some((tab) => tab.id === record.id)) return prev
@@ -1082,7 +1121,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           prev.flatMap((tab) =>
             tab.kind === "browser"
               ? [
-                  `${tab.browser.profile} ${normalizeUrlForDedupe(tab.browser.initialUrl) ?? ""}`,
+                  `${tab.browser.remote === true ? "remote" : tab.browser.profile} ${normalizeUrlForDedupe(tab.browser.initialUrl) ?? ""}`,
                 ]
               : []
           )
@@ -1092,10 +1131,15 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         for (const entry of entries) {
           const normalized = normalizeUrlForDedupe(entry.url)
           if (!normalized) continue
-          const profile = browserProfileExists(prefs, entry.profile)
-            ? entry.profile
-            : DEFAULT_BROWSER_PROFILE_ID
-          const key = `${profile} ${normalized}`
+          // An address of the remote host comes back as a remote tab even
+          // if its record did not say so (a page that walked there on its
+          // own): never as a page of this computer.
+          const remote = entry.remote === true || isRemoteHostAddress(entry.url)
+          const profile =
+            !remote && browserProfileExists(prefs, entry.profile)
+              ? entry.profile
+              : DEFAULT_BROWSER_PROFILE_ID
+          const key = `${remote ? "remote" : profile} ${normalized}`
           if (open.has(key)) continue
           open.add(key)
           records.push(
@@ -1105,7 +1149,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
               entry.folderId,
               null,
               profile,
-              entry.title
+              entry.title,
+              remote
             )
           )
         }
@@ -1140,9 +1185,12 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
             getBrowserTabState(tab.id) === null &&
             !hasSurfaceClaim(browserTabBackendId(tab.id) ?? "")
           if (!prev.some(dormantOrphan)) return prev
+          // A remote tab is not a page of the default profile, whatever id it
+          // carries: never the tab that makes a local one a duplicate.
           const inDefault = new Set(
             prev.flatMap((tab) =>
               tab.kind === "browser" &&
+              tab.browser.remote !== true &&
               tab.browser.profile === DEFAULT_BROWSER_PROFILE_ID
                 ? [normalizeUrlForDedupe(tab.browser.initialUrl) ?? ""]
                 : []
@@ -1206,6 +1254,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           (t) =>
             t.kind === "browser" &&
             t.id !== tabId &&
+            t.browser.remote !== true &&
             t.browser.profile === profile &&
             normalizeUrlForDedupe(t.browser.initialUrl) === normalized
         )

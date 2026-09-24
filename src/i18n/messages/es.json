@@ -300,6 +300,8 @@
     "rollbackSuccess": "Se revirtió a la versión anterior. Recargando...",
     "rollbackFailed": "Error al revertir. Revisa los registros del servidor.",
     "updateErrors": {
+      "permissionDenied": "No se puede escribir en {path}, así que las actualizaciones no pueden instalarse en el lugar. Actualiza manualmente con permisos de administrador o revisa los permisos de instalación.",
+      "targetWriteFailed": "No se puede escribir en {path}, así que las actualizaciones no pueden instalarse en el lugar: {reason}",
       "sourceUnavailable": "No se puede acceder al origen de actualización. Revisa tu red o proxy e inténtalo de nuevo.",
       "network": "Falló la conexión de red. Revisa tu red o proxy e inténtalo de nuevo.",
       "downloadFailed": "No se pudo descargar el paquete de actualización. Inténtalo más tarde.",
@@ -4231,7 +4233,7 @@
     "agentTypeRequired": "El tipo de agente es obligatorio.",
     "agentTypeImmutableHint": "El tipo de agente no se puede cambiar después de la creación.",
     "model": "Modelo",
-    "modelPlaceholderCodex": "gpt-5.6-sol / gpt-5.5",
+    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "Modelo Principal",
     "claudeReasoningModel": "Modelo de Razonamiento (pensamiento)",
@@ -6381,6 +6383,17 @@
       "unreachableHostHint": "El servidor de codeg puso esta página en {origin}, pero tu navegador no puede acceder a ella. Ese nombre de host tiene que resolverse al servidor de codeg y atravesar el proxy que haya delante: un registro DNS comodín y un vhost comodín (consulta CODEG_BRIDGE_HOST_PATTERN).",
       "errorTitle": "Esta página no se puede mostrar aquí"
     },
+    "remote": {
+      "title": "Esta dirección está en {host}",
+      "titleUnnamed": "Esta dirección está en el host remoto",
+      "description": "Apunta a la máquina donde se ejecuta este espacio de trabajo, no a este equipo, así que todavía no se puede abrir en una pestaña aquí.",
+      "copyAddress": "Copiar dirección",
+      "copied": "Dirección copiada",
+      "tryHost": "Probar {host}",
+      "tryHostHint": "Abre {address} en una pestaña de este equipo. Funciona si la página escucha en todas las interfaces de red y este equipo llega a su puerto.",
+      "openHere": "Abrir en este equipo",
+      "openHereHint": "Abre la dirección en una pestaña de este equipo. Funciona si este equipo está en la misma red."
+    },
     "download": {
       "started": "Descargando…",
       "completed": "Guardado",
@@ -6436,6 +6449,7 @@
       "shareControl": "Leer y actuar",
       "levelDefault": "Predeterminado",
       "notShareable": "Esta página no tiene una dirección web que compartir con los agentes",
+      "remoteWindow": "Los agentes de un espacio de trabajo remoto se ejecutan en su host y no pueden usar el navegador de este equipo",
       "shared": "Compartida",
       "sharedControl": "Compartida · puede actuar",
       "sharedWith": "Los agentes pueden leer {origin}",
@@ -6529,6 +6543,7 @@
       "noConversation": "Abre una conversación a la que enviar esta página",
       "pickElement": "Elegir un elemento…",
       "screenshot": "Enviar una captura",
+      "markUp": "Marcar una captura…",
       "consoleErrors": "Enviar los errores de la consola",
       "consoleClean": "Nada ha fallado en esta página",
       "picking": "Eligiendo…",
@@ -6539,9 +6554,20 @@
       "noConsoleErrors": "Esta página no ha mostrado ningún error",
       "chipElement": "Elemento de la página",
       "chipScreenshot": "Captura de la página",
+      "chipMarkedScreenshot": "Captura marcada",
       "chipConsole": "{count, plural, one {# error de consola} other {# errores de consola}}",
       "gone": "Esa conversación ya no está abierta",
-      "consoleErrorsCount": "{count, plural, one {Enviar el # error de consola} other {Enviar los # errores de consola}}"
+      "consoleErrorsCount": "{count, plural, one {Enviar el # error de consola} other {Enviar los # errores de consola}}",
+      "markupTitle": "Marcar la captura",
+      "markupTools": "Herramienta de dibujo",
+      "markupBox": "Recuadro",
+      "markupArrow": "Flecha",
+      "markupUndo": "Deshacer",
+      "markupClear": "Borrar",
+      "markupHint": "Arrastra sobre la imagen para dibujar. Cada marca lleva un número al que tu mensaje puede referirse.",
+      "markupCount": "{count, plural, one {# marca} other {# marcas}}",
+      "markupCancel": "Cancelar",
+      "markupSend": "Añadir al chat"
     }
   },
   "browser": {

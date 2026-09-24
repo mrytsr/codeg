@@ -15,6 +15,7 @@ import { isDesktop } from "@/lib/transport"
 
 import { BrowserBridgeView } from "./browser-bridge-view"
 import { BrowserFindBar } from "./browser-find-bar"
+import { BrowserRemoteTabView } from "./browser-remote-tab-view"
 import {
   BrowserDownloadBar,
   BrowserErrorPage,
@@ -32,6 +33,8 @@ import { BrowserToolbar } from "./browser-toolbar"
  */
 export function BrowserTabView({ tab }: { tab: BrowserWorkspaceTab }) {
   if (!isDesktop()) return <BrowserBridgeView tab={tab} />
+  // An address of the remote codeg host: never a surface of this computer.
+  if (tab.browser.remote) return <BrowserRemoteTabView tab={tab} />
   return <NativeBrowserTabView tab={tab} />
 }
 

@@ -300,6 +300,8 @@
     "rollbackSuccess": "已回滚到上一个版本，正在重新加载……",
     "rollbackFailed": "回滚失败，请检查服务器日志。",
     "updateErrors": {
+      "permissionDenied": "无法写入 {path}，因此无法就地安装更新。请以管理员权限手动更新，或检查安装目录权限。",
+      "targetWriteFailed": "无法写入 {path}，因此无法就地安装更新：{reason}",
       "sourceUnavailable": "无法连接更新源，请检查网络或代理设置后重试。",
       "network": "网络连接异常，请检查网络或代理设置后重试。",
       "downloadFailed": "下载更新包失败，请稍后重试。",
@@ -4250,7 +4252,7 @@
     "agentTypeRequired": "请选择智能体类型。",
     "agentTypeImmutableHint": "智能体类型创建后不可修改。",
     "model": "模型",
-    "modelPlaceholderCodex": "gpt-5.6-sol / gpt-5.5",
+    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "主模型",
     "claudeReasoningModel": "推理模型（思考）",
@@ -6381,6 +6383,17 @@
       "unreachableHostHint": "codeg 服务端把这个页面放在了 {origin}，但你的浏览器访问不到。这个主机名需要解析到 codeg 服务端，并且能穿过前面的反向代理——也就是一条泛域名 DNS 记录加一个泛域名虚拟主机（见 CODEG_BRIDGE_HOST_PATTERN）。",
       "errorTitle": "无法在这里显示此页面"
     },
+    "remote": {
+      "title": "该地址在 {host} 上",
+      "titleUnnamed": "该地址在远端主机上",
+      "description": "它指向这个工作区所在的机器，而不是这台电脑，所以暂时无法在这里的标签页中打开。",
+      "copyAddress": "复制地址",
+      "copied": "已复制地址",
+      "tryHost": "尝试 {host}",
+      "tryHostHint": "在这台电脑的标签页中打开 {address}。前提是那边的页面监听了所有网络接口，并且这台电脑能访问该端口。",
+      "openHere": "在这台电脑上打开",
+      "openHereHint": "在这台电脑的标签页中打开该地址。前提是这台电脑也在同一个网络里。"
+    },
     "download": {
       "started": "正在下载…",
       "completed": "已保存",
@@ -6436,6 +6449,7 @@
       "shareControl": "读取并操作权限",
       "levelDefault": "默认",
       "notShareable": "此页面没有可共享给智能体的网址",
+      "remoteWindow": "远程工作区的智能体运行在它的主机上，无法使用这台电脑的浏览器",
       "shared": "已共享",
       "sharedControl": "已共享 · 可操作",
       "sharedWith": "智能体可读取 {origin}",
@@ -6529,6 +6543,7 @@
       "noConversation": "先打开一个对话，才能把页面发过去",
       "pickElement": "选择一个元素…",
       "screenshot": "发送一张截图",
+      "markUp": "标注一张截图…",
       "consoleErrors": "发送控制台报错",
       "consoleClean": "这个页面没有出错",
       "picking": "选择中…",
@@ -6539,9 +6554,20 @@
       "noConsoleErrors": "这个页面没有打印过报错",
       "chipElement": "页面元素",
       "chipScreenshot": "页面截图",
+      "chipMarkedScreenshot": "带标注的截图",
       "chipConsole": "{count, plural, other {# 条控制台报错}}",
       "gone": "那个对话已经关掉了",
-      "consoleErrorsCount": "{count, plural, other {发送 # 条控制台报错}}"
+      "consoleErrorsCount": "{count, plural, other {发送 # 条控制台报错}}",
+      "markupTitle": "标注截图",
+      "markupTools": "绘制工具",
+      "markupBox": "方框",
+      "markupArrow": "箭头",
+      "markupUndo": "撤销",
+      "markupClear": "清除",
+      "markupHint": "在图上拖动来画。每个标注都带编号，消息里可以直接用编号指代。",
+      "markupCount": "{count, plural, other {# 个标注}}",
+      "markupCancel": "取消",
+      "markupSend": "加入对话"
     }
   },
   "browser": {

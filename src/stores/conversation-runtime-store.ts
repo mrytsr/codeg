@@ -3198,7 +3198,7 @@ function computeTimelinePrefix(
     liveStartedAt: session.liveMessage?.startedAt ?? null,
     // Content, not identity: the set is rebuilt on every streaming batch, and
     // an ordinary turn's `""` keeps the cache hitting exactly as before.
-    steeredCopyKey: steeredCopyIds ? [...steeredCopyIds].join(" ") : "",
+    steeredCopyKey: steeredCopyIds ? [...steeredCopyIds].join("\x00") : "",
     liveStreamedRoundStart,
   }
   if (detail) {

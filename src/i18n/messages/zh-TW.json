@@ -300,6 +300,8 @@
     "rollbackSuccess": "已復原到上一個版本，正在重新載入……",
     "rollbackFailed": "復原失敗，請檢查伺服器日誌。",
     "updateErrors": {
+      "permissionDenied": "無法寫入 {path}，因此無法就地安裝更新。請以管理員權限手動更新，或檢查安裝目錄權限。",
+      "targetWriteFailed": "無法寫入 {path}，因此無法就地安裝更新：{reason}",
       "sourceUnavailable": "無法連線更新來源，請檢查網路或代理設定後重試。",
       "network": "網路連線異常，請檢查網路或代理設定後重試。",
       "downloadFailed": "下載更新包失敗，請稍後再試。",
@@ -4231,7 +4233,7 @@
     "agentTypeRequired": "請選擇智能體類型。",
     "agentTypeImmutableHint": "智能體類型建立後不可修改。",
     "model": "模型",
-    "modelPlaceholderCodex": "gpt-5.6-sol / gpt-5.5",
+    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "主要模型",
     "claudeReasoningModel": "推理模型（思考）",
@@ -6381,6 +6383,17 @@
       "unreachableHostHint": "codeg 伺服器把這個頁面放在了 {origin}，但你的瀏覽器連不到。這個主機名稱必須解析到 codeg 伺服器，並且能穿過前方的反向代理——也就是一筆萬用字元 DNS 記錄加一個萬用字元虛擬主機（見 CODEG_BRIDGE_HOST_PATTERN）。",
       "errorTitle": "無法在這裡顯示此頁面"
     },
+    "remote": {
+      "title": "此網址在 {host} 上",
+      "titleUnnamed": "此網址在遠端主機上",
+      "description": "它指向這個工作區所在的機器，而不是這台電腦，所以暫時無法在這裡的分頁中開啟。",
+      "copyAddress": "複製網址",
+      "copied": "已複製網址",
+      "tryHost": "嘗試 {host}",
+      "tryHostHint": "在這台電腦的分頁中開啟 {address}。前提是那邊的頁面監聽了所有網路介面，且這台電腦能連到該連接埠。",
+      "openHere": "在這台電腦上開啟",
+      "openHereHint": "在這台電腦的分頁中開啟此網址。前提是這台電腦也在同一個網路中。"
+    },
     "download": {
       "started": "正在下載…",
       "completed": "已儲存",
@@ -6436,6 +6449,7 @@
       "shareControl": "讀取並操作權限",
       "levelDefault": "預設",
       "notShareable": "此頁面沒有可分享給智慧代理的網址",
+      "remoteWindow": "遠端工作區的智慧代理在它的主機上執行，無法使用這台電腦的瀏覽器",
       "shared": "已分享",
       "sharedControl": "已共享 · 可操作",
       "sharedWith": "智慧代理可讀取 {origin}",
@@ -6529,6 +6543,7 @@
       "noConversation": "先開啟一個對話，才能把頁面傳過去",
       "pickElement": "選擇一個元素…",
       "screenshot": "傳送一張截圖",
+      "markUp": "標註一張截圖…",
       "consoleErrors": "傳送主控台錯誤",
       "consoleClean": "這個頁面沒有出錯",
       "picking": "選擇中…",
@@ -6539,9 +6554,20 @@
       "noConsoleErrors": "這個頁面沒有印出過錯誤",
       "chipElement": "頁面元素",
       "chipScreenshot": "頁面截圖",
+      "chipMarkedScreenshot": "含標註的截圖",
       "chipConsole": "{count, plural, other {# 條主控台錯誤}}",
       "gone": "那個對話已經關掉了",
-      "consoleErrorsCount": "{count, plural, other {傳送 # 條主控台錯誤}}"
+      "consoleErrorsCount": "{count, plural, other {傳送 # 條主控台錯誤}}",
+      "markupTitle": "標註截圖",
+      "markupTools": "繪製工具",
+      "markupBox": "方框",
+      "markupArrow": "箭頭",
+      "markupUndo": "復原",
+      "markupClear": "清除",
+      "markupHint": "在圖上拖曳來畫。每個標註都有編號，訊息裡可以直接用編號指稱。",
+      "markupCount": "{count, plural, other {# 個標註}}",
+      "markupCancel": "取消",
+      "markupSend": "加入對話"
     }
   },
   "browser": {

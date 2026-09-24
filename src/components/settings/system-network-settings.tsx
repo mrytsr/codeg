@@ -48,14 +48,11 @@ import {
 import { isLocalDesktop, openUrl } from "@/lib/platform"
 import type { AppLocale } from "@/lib/types"
 import { readLastCheck } from "@/lib/update-check-storage"
-import {
-  appUpdateErrorMessageKey,
-  normalizeAppUpdateError,
-  usesTauriUpdater,
-} from "@/lib/updater"
+import { describeAppUpdateError, usesTauriUpdater } from "@/lib/updater"
 import { useAppUpdate } from "@/components/providers/update-provider"
 import { APP_LOCALES } from "@/lib/i18n"
 import { toErrorMessage } from "@/lib/app-error"
+import type { AppCommandError } from "@/lib/types"
 
 function GithubMarkIcon({ className }: { className?: string }) {
   return (
@@ -138,6 +135,7 @@ export function SystemNetworkSettings() {
     liveProgress: serverLiveProgress,
     runtime: serverRuntime,
     rollbackAvailable: serverRollbackAvailable,
+    selfUpdateBlocker,
     canInstallInPlace,
     checkNow,
     refreshLocalStatus,
@@ -151,10 +149,14 @@ export function SystemNetworkSettings() {
   // "Restart to update" prompt). For a server that speaks the live-progress
   // protocol, wait for the authoritative snapshot to hydrate before trusting
   // the status (the default is a placeholder `idle`); older servers don't
-  // hydrate, so they're allowed through on their reported availability.
+  // hydrate, so they're allowed through on their reported availability. A
+  // rollback renames within the same directories as an update: one the server
+  // refuses to write rules it out, while a full disk (which only stops the
+  // update from creating files) does not.
   const canRollback =
     serverSelfUpdate &&
     serverRollbackAvailable &&
+    selfUpdateBlocker?.code !== "permission_denied" &&
     !usesTauriUpdater() &&
     (updateState.status === "idle" || updateState.status === "error") &&
     (updateHydrated || !serverLiveProgress)
@@ -349,12 +351,19 @@ export function SystemNetworkSettings() {
   )
 
   const formatUpdateError = useCallback(
-    (error: unknown, action: UpdateAction): string => {
-      const { kind, rawMessage } = normalizeAppUpdateError(error)
-      if (kind === "unknown" && action === "check") {
-        console.error("[Settings] updater unknown error:", rawMessage)
+    (
+      error: unknown,
+      action: UpdateAction,
+      info?: AppCommandError | null
+    ): string => {
+      const { key, values } = describeAppUpdateError(error, action, info)
+      if (key === "updateErrors.unknown") {
+        console.error(
+          "[Settings] updater unknown error:",
+          toErrorMessage(error)
+        )
       }
-      return t(appUpdateErrorMessageKey(kind, action))
+      return t(key, values)
     },
     [t]
   )
@@ -364,17 +373,28 @@ export function SystemNetworkSettings() {
   // same way as a check error — and it stays visible after navigating back.
   const lifecycleError =
     updateState.status === "error" && updateState.error
-      ? formatUpdateError(updateState.error, "install")
+      ? formatUpdateError(updateState.error, "install", updateState.errorInfo)
       : null
 
   // The shared check records the raw failure; classify it for display here.
   const updateError = checkError ? formatUpdateError(checkError, "check") : null
+  // The banner shows one of the two; a failed check takes precedence.
+  const bannerError = updateError || lifecycleError
+
+  // What keeps this server from updating in place, said up front rather than
+  // after a click that is certain to fail — unless the banner already says it.
+  const blockerMessage = selfUpdateBlocker
+    ? formatUpdateError(selfUpdateBlocker.message, "install", selfUpdateBlocker)
+    : null
+  const blockerHint = blockerMessage !== bannerError ? blockerMessage : null
 
   // A user-initiated check, so failures toast (the provider's own periodic
-  // checks stay silent).
+  // checks stay silent). Re-reads the local status too: that is where a
+  // blocker the operator has since fixed gets cleared.
   const checkForUpdates = useCallback(() => {
+    void refreshLocalStatus()
     void checkNow({ silent: false })
-  }, [checkNow])
+  }, [checkNow, refreshLocalStatus])
 
   // Close a stale rollback confirm dialog if the lifecycle leaves a
   // rollback-able state — e.g. another window staged an update while the dialog
@@ -594,8 +614,13 @@ export function SystemNetworkSettings() {
               </div>
             )}
 
+            {blockerHint && (
+              <p className="text-2xs leading-5 text-amber-500">{blockerHint}</p>
+            )}
+
             {availableUpdate &&
               serverSelfUpdate &&
+              !selfUpdateBlocker &&
               serverRuntime === "docker" && (
                 <p className="text-muted-foreground/80 text-2xs leading-5">
                   {t("dockerUpgradeHint")}
@@ -623,11 +648,9 @@ export function SystemNetworkSettings() {
             )}
           </div>
 
-          {(updateError || lifecycleError) && (
+          {bannerError && (
             <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
-              {t("updateError", {
-                message: updateError || lifecycleError || "",
-              })}
+              {t("updateError", { message: bannerError })}
             </div>
           )}
         </section>

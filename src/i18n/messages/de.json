@@ -300,6 +300,8 @@
     "rollbackSuccess": "Auf die vorherige Version zurückgesetzt. Wird neu geladen...",
     "rollbackFailed": "Zurücksetzen fehlgeschlagen. Prüfe die Serverprotokolle.",
     "updateErrors": {
+      "permissionDenied": "In {path} kann nicht geschrieben werden, daher lassen sich Updates nicht direkt installieren. Aktualisiere manuell mit Administratorrechten oder prüfe die Berechtigungen der Installation.",
+      "targetWriteFailed": "In {path} kann nicht geschrieben werden, daher lassen sich Updates nicht direkt installieren: {reason}",
       "sourceUnavailable": "Die Update-Quelle ist nicht erreichbar. Prüfe Netzwerk oder Proxy und versuche es erneut.",
       "network": "Netzwerkverbindung fehlgeschlagen. Prüfe Netzwerk oder Proxy und versuche es erneut.",
       "downloadFailed": "Das Update-Paket konnte nicht heruntergeladen werden. Bitte später erneut versuchen.",
@@ -4231,7 +4233,7 @@
     "agentTypeRequired": "Agententyp ist erforderlich.",
     "agentTypeImmutableHint": "Der Agententyp kann nach der Erstellung nicht mehr geändert werden.",
     "model": "Modell",
-    "modelPlaceholderCodex": "gpt-5.6-sol / gpt-5.5",
+    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "Hauptmodell",
     "claudeReasoningModel": "Reasoning-Modell (Thinking)",
@@ -6381,6 +6383,17 @@
       "unreachableHostHint": "Der codeg-Server hat diese Seite unter {origin} bereitgestellt, aber dein Browser erreicht sie nicht. Dieser Hostname muss auf den codeg-Server auflösen und den davorliegenden Proxy passieren – ein Wildcard-DNS-Eintrag und ein Wildcard-vhost (siehe CODEG_BRIDGE_HOST_PATTERN).",
       "errorTitle": "Diese Seite kann hier nicht angezeigt werden"
     },
+    "remote": {
+      "title": "Diese Adresse liegt auf {host}",
+      "titleUnnamed": "Diese Adresse liegt auf dem entfernten Host",
+      "description": "Sie zeigt auf die Maschine, auf der dieser Arbeitsbereich läuft, nicht auf diesen Rechner – daher lässt sie sich hier noch nicht in einem Tab öffnen.",
+      "copyAddress": "Adresse kopieren",
+      "copied": "Adresse kopiert",
+      "tryHost": "{host} versuchen",
+      "tryHostHint": "Öffnet {address} in einem Tab auf diesem Rechner. Das funktioniert, wenn die Seite dort auf allen Netzwerkschnittstellen lauscht und dieser Rechner ihren Port erreicht.",
+      "openHere": "Auf diesem Rechner öffnen",
+      "openHereHint": "Öffnet die Adresse in einem Tab auf diesem Rechner. Das funktioniert, wenn dieser Rechner im selben Netzwerk ist."
+    },
     "download": {
       "started": "Wird geladen…",
       "completed": "Gespeichert",
@@ -6436,6 +6449,7 @@
       "shareControl": "Lesen und bedienen",
       "levelDefault": "Standard",
       "notShareable": "Diese Seite hat keine Webadresse, die für Agenten freigegeben werden könnte",
+      "remoteWindow": "Agenten eines entfernten Arbeitsbereichs laufen auf dessen Host und können den Browser dieses Rechners nicht verwenden",
       "shared": "Freigegeben",
       "sharedControl": "Geteilt · darf bedienen",
       "sharedWith": "Agenten können {origin} lesen",
@@ -6529,6 +6543,7 @@
       "noConversation": "Öffne eine Unterhaltung, an die die Seite gehen soll",
       "pickElement": "Ein Element auswählen…",
       "screenshot": "Einen Screenshot senden",
+      "markUp": "Screenshot markieren…",
       "consoleErrors": "Die Konsolenfehler senden",
       "consoleClean": "Auf dieser Seite ist nichts schiefgegangen",
       "picking": "Auswahl läuft…",
@@ -6539,9 +6554,20 @@
       "noConsoleErrors": "Diese Seite hat keine Fehler ausgegeben",
       "chipElement": "Seitenelement",
       "chipScreenshot": "Screenshot der Seite",
+      "chipMarkedScreenshot": "Markierter Screenshot",
       "chipConsole": "{count, plural, one {# Konsolenfehler} other {# Konsolenfehler}}",
       "gone": "Diese Unterhaltung ist nicht mehr offen",
-      "consoleErrorsCount": "{count, plural, one {# Konsolenfehler senden} other {# Konsolenfehler senden}}"
+      "consoleErrorsCount": "{count, plural, one {# Konsolenfehler senden} other {# Konsolenfehler senden}}",
+      "markupTitle": "Screenshot markieren",
+      "markupTools": "Zeichenwerkzeug",
+      "markupBox": "Rahmen",
+      "markupArrow": "Pfeil",
+      "markupUndo": "Rückgängig",
+      "markupClear": "Leeren",
+      "markupHint": "Zieh über das Bild, um zu zeichnen. Jede Markierung bekommt eine Nummer, auf die sich deine Nachricht beziehen kann.",
+      "markupCount": "{count, plural, one {# Markierung} other {# Markierungen}}",
+      "markupCancel": "Abbrechen",
+      "markupSend": "Zum Chat hinzufügen"
     }
   },
   "browser": {

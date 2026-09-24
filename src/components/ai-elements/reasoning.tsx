@@ -20,13 +20,18 @@ import {
   useMemo,
   useRef,
 } from "react"
-import { Streamdown, defaultRemarkPlugins } from "streamdown"
+import {
+  Streamdown,
+  defaultRehypePlugins,
+  defaultRemarkPlugins,
+} from "streamdown"
 
 import { Shimmer } from "./shimmer"
 import { markdownLinkComponents } from "./markdown-link"
 import { mermaidComponents } from "./mermaid-block"
 import { normalizeMathDelimiters } from "./message"
 import { remarkTrimCjkAutolinkTail } from "./remark-cjk-autolink-tail"
+import { withRelativeFileLinks } from "./rehype-relative-file-links"
 import { remarkRewriteFileUriLinks } from "./remark-file-uri-links"
 import { remarkRestoreWindowsPaths } from "./remark-windows-paths"
 import { useStreamdownPlugins } from "./streamdown-plugins"
@@ -208,6 +213,11 @@ const remarkPlugins = [
   remarkTrimCjkAutolinkTail,
 ]
 
+// Relative local links keep their href through harden, as in MessageResponse:
+// without this `./a.md` would leave harden as `/a.md` and a bare `a.md` would
+// be blocked. See rehype-relative-file-links.
+const rehypePlugins = Object.values(withRelativeFileLinks(defaultRehypePlugins))
+
 const reasoningComponents = { ...markdownLinkComponents, ...mermaidComponents }
 
 export const ReasoningContent = memo(
@@ -239,6 +249,7 @@ export const ReasoningContent = memo(
         <Streamdown
           plugins={plugins}
           remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
           {...props}
           mode={isStreaming ? "streaming" : "static"}
           parseIncompleteMarkdown={isStreaming}

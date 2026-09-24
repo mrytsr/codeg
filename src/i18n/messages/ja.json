@@ -300,6 +300,8 @@
     "rollbackSuccess": "以前のバージョンにロールバックしました。再読み込みしています...",
     "rollbackFailed": "ロールバックに失敗しました。サーバーのログを確認してください。",
     "updateErrors": {
+      "permissionDenied": "{path} に書き込めないため、その場で更新をインストールできません。管理者権限で手動更新するか、インストール先の権限を確認してください。",
+      "targetWriteFailed": "{path} に書き込めないため、その場で更新をインストールできません: {reason}",
       "sourceUnavailable": "更新ソースに接続できません。ネットワークまたはプロキシを確認して再試行してください。",
       "network": "ネットワーク接続に失敗しました。ネットワークまたはプロキシを確認して再試行してください。",
       "downloadFailed": "更新パッケージのダウンロードに失敗しました。しばらくしてから再試行してください。",
@@ -4231,7 +4233,7 @@
     "agentTypeRequired": "エージェントタイプを選択してください。",
     "agentTypeImmutableHint": "エージェントタイプは作成後に変更できません。",
     "model": "モデル",
-    "modelPlaceholderCodex": "gpt-5.6-sol / gpt-5.5",
+    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "メインモデル",
     "claudeReasoningModel": "推論モデル（思考）",
@@ -6381,6 +6383,17 @@
       "unreachableHostHint": "codeg のサーバーはこのページを {origin} に置きましたが、ブラウザから到達できません。そのホスト名が codeg サーバーに解決され、前段のプロキシを通り抜ける必要があります。ワイルドカードの DNS レコードとワイルドカードの vhost を用意してください（CODEG_BRIDGE_HOST_PATTERN を参照）。",
       "errorTitle": "このページはここに表示できません"
     },
+    "remote": {
+      "title": "このアドレスは {host} 上にあります",
+      "titleUnnamed": "このアドレスはリモートホスト上にあります",
+      "description": "このコンピューターではなく、このワークスペースが動いているマシンを指しているため、まだここのタブでは開けません。",
+      "copyAddress": "アドレスをコピー",
+      "copied": "アドレスをコピーしました",
+      "tryHost": "{host} を試す",
+      "tryHostHint": "{address} をこのコンピューターのタブで開きます。向こうのページがすべてのネットワークインターフェースで待ち受けていて、このコンピューターからそのポートに届く場合に使えます。",
+      "openHere": "このコンピューターで開く",
+      "openHereHint": "このアドレスをこのコンピューターのタブで開きます。このコンピューターが同じネットワークにある場合に使えます。"
+    },
     "download": {
       "started": "ダウンロード中…",
       "completed": "保存しました",
@@ -6436,6 +6449,7 @@
       "shareControl": "閲覧と操作",
       "levelDefault": "既定",
       "notShareable": "このページには共有できるウェブアドレスがありません",
+      "remoteWindow": "リモートワークスペースのエージェントはそのホスト上で動いており、このコンピューターのブラウザーは使えません",
       "shared": "共有中",
       "sharedControl": "共有中 · 操作可",
       "sharedWith": "エージェントは {origin} を読み取れます",
@@ -6529,6 +6543,7 @@
       "noConversation": "送り先の会話を開いてください",
       "pickElement": "要素を選ぶ…",
       "screenshot": "スクリーンショットを送る",
+      "markUp": "スクリーンショットに書き込む…",
       "consoleErrors": "コンソールのエラーを送る",
       "consoleClean": "このページでエラーは起きていません",
       "picking": "選択中…",
@@ -6539,9 +6554,20 @@
       "noConsoleErrors": "このページはエラーを出力していません",
       "chipElement": "ページ要素",
       "chipScreenshot": "ページのスクリーンショット",
+      "chipMarkedScreenshot": "書き込み入りのスクリーンショット",
       "chipConsole": "{count, plural, other {コンソールエラー # 件}}",
       "gone": "その会話はもう開いていません",
-      "consoleErrorsCount": "{count, plural, other {コンソールのエラー # 件を送る}}"
+      "consoleErrorsCount": "{count, plural, other {コンソールのエラー # 件を送る}}",
+      "markupTitle": "スクリーンショットに書き込む",
+      "markupTools": "描画ツール",
+      "markupBox": "枠",
+      "markupArrow": "矢印",
+      "markupUndo": "元に戻す",
+      "markupClear": "消去",
+      "markupHint": "画像の上をドラッグして描きます。マークには番号が付くので、メッセージではその番号で指し示せます。",
+      "markupCount": "{count, plural, other {マーク # 個}}",
+      "markupCancel": "キャンセル",
+      "markupSend": "チャットに追加"
     }
   },
   "browser": {
