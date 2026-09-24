@@ -63,6 +63,7 @@ const AVAILABLE = {
   profiles: false,
   signInUserAgent: false,
   ownedWindowControls: false,
+  remoteEgress: false,
   policy: { enabled: true, managedRules: [], managedSource: null },
 }
 

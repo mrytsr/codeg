@@ -241,6 +241,8 @@
     "enableProxy": "시스템 프록시 활성화",
     "proxyAddress": "프록시 주소",
     "proxyHint": "http(s)/socks5 지원, 예: {example}. 시스템 프록시를 활성화한 경우에만 적용됩니다.",
+    "proxyBypass": "프록시를 거치지 않을 주소",
+    "proxyBypassHint": "여러 주소는 공백 없이 쉼표(<code>,</code>)로 구분합니다. 예: <code>{example}</code>. <code>example.com</code>은 해당 도메인과, <code>.example.com</code>은 모든 하위 도메인과 일치하며, IP 주소도 입력할 수 있습니다. 로컬 주소 <code>localhost,127.0.0.1,::1</code>은 항상 직접 연결되므로 입력할 필요가 없습니다. 이 목록은 환경 변수 NO_PROXY로 적용됩니다.",
     "save": "저장",
     "saving": "저장 중...",
     "proxyRequired": "프록시를 활성화하면 프록시 URL이 필요합니다",
@@ -3018,8 +3020,6 @@
           "openAgentsSettings": "에이전트 설정 열기",
           "retry": "다시 시도"
         },
-        "agentsSetupHint": "설정 > 에이전트를 열어 설치를 관리하세요.",
-        "withSetupHint": "{message}\n{hint}",
         "blocked": {
           "missingConfig": "현재 에이전트 구성을 읽을 수 없습니다.",
           "disabled": "{agent}은(는) 에이전트 설정에서 비활성화되어 있습니다. 연결 전에 활성화하세요.",
@@ -3044,15 +3044,18 @@
           "turnFailedAuthRequired": "{agent}이(가) 이번 턴을 실행하려면 다시 로그인해야 합니다. 설정에서 로그인한 뒤 메시지를 다시 보내세요.",
           "agentAuthRequired": "{agent}이(가) 세션을 시작하지 못했습니다. 사용할 수 있는 자격 증명이 없습니다. 설정 → 에이전트 → {agent}에서 다시 로그인한 뒤 이 대화를 다시 열어 주세요.",
           "grokModelSwitchIncompatibleAgent": "{agent}은(는) 기존 대화에서는 해당 모델로 전환할 수 없습니다. 새 세션을 시작하여 사용하세요.",
+          "setModeFailed": "{agent}에서 모드를 전환하지 못했습니다.",
+          "setConfigOptionFailed": "{agent}에서 해당 설정을 적용하지 못했습니다.",
+          "goalControlFailed": "{agent}에서 목표를 업데이트하지 못했습니다.",
+          "imageDropped": "첨부한 이미지 중 하나가 {agent}에 전달되지 않았습니다.",
+          "sessionLoadFallback": "{agent}에서 이전 세션을 복원하지 못해 새 세션을 시작했습니다. 이전 컨텍스트는 이어지지 않습니다.",
           "turnFailedEmpty": "{agent}이(가) 어떤 응답도 생성하지 않고 턴을 종료했습니다.",
           "turnFailedEmptyProtocol": "{agent}의 출력을 codeg가 구문 분석할 수 없습니다. 에이전트 버전이 프로토콜과 맞지 않을 수 있습니다.",
-          "turnFailedEmptyMetadata": "{agent}이(가) 이번 턴에 상태 업데이트(계획 / 모드 / 사용량)만 보내고 응답은 없었습니다.",
-          "detailsInAlerts": "상태 표시줄의 알림을 열고 세부 정보를 펼치면 에이전트 출력을 확인할 수 있습니다."
+          "turnFailedEmptyMetadata": "{agent}이(가) 이번 턴에 상태 업데이트(계획 / 모드 / 사용량)만 보내고 응답은 없었습니다."
         },
         "unableReadAgentConfig": "에이전트 구성을 읽을 수 없습니다: {message}",
         "connectFailedTitle": "{agent} 연결 실패",
         "toolFallbackTitle": "도구",
-        "eventErrorTitle": "에이전트 오류",
         "notificationTurnComplete": "{agent} 응답이 완료되었습니다",
         "notificationError": "{agent} 오류: {message}",
         "notificationQuestion": "{agent}이(가) 답변을 기다리고 있습니다",
@@ -3069,7 +3072,8 @@
           "lineNoErrorWithDelay": "{retry}, {delay}",
           "httpStatus": " (HTTP {status})"
         },
-        "configOptionAdjusted": "{agent}이(가) {option}을(를) {requested} 대신 {actual}(으)로 설정했습니다"
+        "configOptionAdjusted": "{agent}이(가) {option}을(를) {requested} 대신 {actual}(으)로 설정했습니다",
+        "noticeTitle": "{agent}: {title}"
       },
       "connectionLifecycle": {
         "tasks": {
@@ -3795,7 +3799,6 @@
         "reconnecting": "다시 연결하는 중…",
         "reconnectDisabledDuringTurn": "현재 턴이 끝나면 다시 연결할 수 있습니다",
         "dismiss": "닫기",
-        "reconnectFailed": "세션 다시 연결 실패",
         "applied": "새 설정이 적용되었습니다"
       },
       "piProjectTrust": {
@@ -6347,6 +6350,7 @@
       "ownedWindow": "이 페이지는 별도의 창에 표시됩니다.",
       "ownedWindowShow": "창 표시",
       "remoteBanner": "{host}을(를) 통해 열림",
+      "remoteBannerDown": "{host}와(과)의 연결이 끊겼습니다. 다음 요청 때 다시 연결합니다.",
       "navigationBlocked": "이동이 차단됨: {host}",
       "navigationBlockedRule": "사이트 규칙으로 차단됨",
       "navigationBlockedScheme": "이 종류의 주소는 여기서 열 수 없습니다",
@@ -6360,7 +6364,17 @@
       "agentGrantLost": "공유가 끝났습니다: 페이지가 {origin}을(를) 벗어났습니다",
       "agentGrantLostShare": "{origin}도 공유",
       "agentGrantReplaced": "공유가 끝났습니다: 이제 {origin}에는 다른 프로그램이 응답합니다",
-      "agentGrantReplacedShare": "그래도 공유"
+      "agentGrantReplacedShare": "그래도 공유",
+      "errorRemoteRefused": "원격 호스트의 이 주소에서 수신 대기 중인 것이 없습니다",
+      "errorRemoteRefusedHint": "{host}이(가) 연결을 거부했습니다. 이 주소의 서버가 그곳에서 실행 중인지 확인하세요.",
+      "errorRemoteUnreachable": "원격 호스트가 이 주소에 도달할 수 없습니다",
+      "errorRemoteUnreachableHint": "{host}에서 보면 이 이름을 확인할 수 없거나 그곳으로 가는 경로가 없습니다.",
+      "errorRemoteNotAllowed": "원격 서버가 이 주소를 브라우저에 열어 주지 않습니다",
+      "errorRemoteNotAllowedHint": "{host}의 codeg-server는 브라우저 터널이 사설 주소에만 연결하도록 허용합니다(CODEG_BROWSER_TUNNEL=private).",
+      "errorRemoteTimeout": "원격 호스트의 연결 시간이 초과되었습니다",
+      "errorRemoteTimeoutHint": "{host}이(가) 제시간에 이 주소의 응답을 받지 못했습니다. 그쪽 서버가 바쁘거나 방화벽 뒤에 있을 수 있습니다.",
+      "errorTunnelDown": "원격 호스트와의 연결이 끊겼습니다",
+      "errorTunnelDownHint": "{host}(으)로 가는 터널이 지금은 아무것도 전달하지 못합니다. 다시 연결되면 재시도하세요."
     },
     "tab": {
       "untitled": "새 탭"
@@ -6386,13 +6400,16 @@
     "remote": {
       "title": "이 주소는 {host}에 있습니다",
       "titleUnnamed": "이 주소는 원격 호스트에 있습니다",
-      "description": "이 컴퓨터가 아니라 이 워크스페이스가 실행 중인 머신을 가리키므로, 아직 여기 탭에서는 열 수 없습니다.",
+      "description": "이 주소는 이 작업 공간이 실행되는 머신을 가리키며, 이 컴퓨터가 아닙니다.",
       "copyAddress": "주소 복사",
       "copied": "주소를 복사했습니다",
       "tryHost": "{host} 시도",
       "tryHostHint": "{address}을(를) 이 컴퓨터의 탭에서 엽니다. 그쪽 페이지가 모든 네트워크 인터페이스에서 수신하고 이 컴퓨터가 해당 포트에 접근할 수 있을 때 동작합니다.",
       "openHere": "이 컴퓨터에서 열기",
-      "openHereHint": "이 주소를 이 컴퓨터의 탭에서 엽니다. 이 컴퓨터가 같은 네트워크에 있을 때 동작합니다."
+      "openHereHint": "이 주소를 이 컴퓨터의 탭에서 엽니다. 이 컴퓨터가 같은 네트워크에 있을 때 동작합니다.",
+      "retry": "다시 시도",
+      "connecting": "{host}을(를) 통해 연결하는 중…",
+      "connectingUnnamed": "원격 호스트를 통해 연결하는 중…"
     },
     "download": {
       "started": "내려받는 중…",
@@ -6579,6 +6596,16 @@
     "inspector": {
       "error": {
         "switchedOff": "이 탭은 웹 검사기가 꺼진 상태에서 열렸습니다. 브라우저 설정에서 켠 다음 페이지를 다시 여세요."
+      }
+    },
+    "remote": {
+      "error": {
+        "unavailable": "원격 호스트의 주소를 내장 브라우저에서 열려면 macOS 14 이상이 필요합니다.",
+        "unsupported": "원격 codeg-server가 오래되어 브라우저 트래픽을 전달할 수 없습니다. 여기에서 주소를 열려면 업데이트하세요.",
+        "disabled": "원격 codeg-server의 브라우저 터널이 꺼져 있습니다(CODEG_BROWSER_TUNNEL).",
+        "unreachable": "원격 codeg-server의 브라우저 터널에 연결할 수 없습니다({reason}).",
+        "bypassed": "이 컴퓨터의 브라우저 엔진이 일부 주소를 터널을 거치지 않고 보내므로, 이 컴퓨터에서 불러오지 않도록 원격 호스트의 페이지는 열리지 않습니다.",
+        "probeFailed": "내장 브라우저가 터널을 통해 원격 호스트에 도달하는지 확인할 수 없습니다. 잠시 후 다시 시도하세요."
       }
     }
   }

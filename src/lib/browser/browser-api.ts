@@ -46,6 +46,7 @@ const UNAVAILABLE: BrowserCapabilities = {
   profiles: false,
   signInUserAgent: false,
   ownedWindowControls: false,
+  remoteEgress: false,
 }
 
 let capabilitiesPromise: Promise<BrowserCapabilities> | null = null
@@ -121,6 +122,10 @@ export interface OpenBrowserTabParams {
   devtools?: boolean
   /** The browser profile to open in (`default` when omitted). */
   profile?: string
+  /** A remote connection's id: the tab is one of the remote host's, opened in
+   *  that connection's own profile once its egress is ready (the profile
+   *  above is then ignored). Rejects with the reason when it cannot be. */
+  egress?: number | null
 }
 
 export function browserOpenTab(
@@ -135,6 +140,7 @@ export function browserOpenTab(
     folderId: params.folderId ?? null,
     devtools: params.devtools ?? false,
     profile: params.profile ?? "default",
+    egress: params.egress ?? null,
   })
 }
 

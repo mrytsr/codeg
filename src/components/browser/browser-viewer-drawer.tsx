@@ -23,6 +23,7 @@ import {
   useBrowserPrefs,
 } from "@/lib/browser/browser-prefs"
 
+import { NativeSurfaceBesideRoute } from "./browser-surface-host"
 import { BrowserTabView } from "./browser-tab-view"
 
 /**
@@ -185,7 +186,12 @@ function BrowserViewerBody({
       </div>
       <div className="min-h-0 flex-1">
         {tab?.kind === "browser" ? (
-          <BrowserTabView key={tab.id} tab={tab} />
+          // Over whatever route is up: the page shows here even when the
+          // file column it would otherwise live in is hidden under a
+          // full-page route.
+          <NativeSurfaceBesideRoute.Provider value={true}>
+            <BrowserTabView key={tab.id} tab={tab} />
+          </NativeSurfaceBesideRoute.Provider>
         ) : (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
             {t("cannotOpen")}

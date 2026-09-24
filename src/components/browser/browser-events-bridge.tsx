@@ -25,6 +25,7 @@ import {
   hydrateBrowserDownloads,
   setBrowserDownload,
 } from "@/lib/browser/browser-downloads-store"
+import { setBrowserEgressStatus } from "@/lib/browser/browser-egress-store"
 import {
   browserWorkspaceTabId,
   getBrowserTabState,
@@ -46,6 +47,7 @@ import {
   BROWSER_DEVTOOLS_CLOSED_EVENT,
   BROWSER_DOC_STATE_EVENT,
   BROWSER_DOWNLOAD_EVENT,
+  BROWSER_EGRESS_EVENT,
   BROWSER_NAVIGATION_BLOCKED_EVENT,
   BROWSER_OPEN_REQUEST_EVENT,
   BROWSER_POPUP_EVENT,
@@ -57,6 +59,7 @@ import {
   type BrowserConsoleErrorsPayload,
   type BrowserDevtoolsClosedPayload,
   type BrowserDownload,
+  type BrowserEgressPayload,
   type BrowserNavigationBlockedPayload,
   type BrowserOpenRequestPayload,
   type BrowserPopupPayload,
@@ -94,6 +97,8 @@ import { browserTabBackendId } from "@/lib/file-tab-id"
  * - `browser://console-errors` → the mark on the "send to chat" control of a
  *   tab whose page has printed an error, and its removal when a new document
  *   commits
+ * - `browser://egress` → whether a remote connection's tunnel still carries
+ *   its tabs (the banner over a remote tab turns red when it does not)
  *
  * It also carries two preferences the other way: the user's site rules (the
  * backend enforces `block` on every navigation a tab attempts) and the
@@ -340,6 +345,14 @@ export function BrowserEventsBridge() {
               browserWorkspaceTabId(payload.tabId),
               payload.errors
             )
+          }
+        ),
+        // Every connection's: a window only looks up the one its remote
+        // tabs go through.
+        transport.subscribe<BrowserEgressPayload>(
+          BROWSER_EGRESS_EVENT,
+          (payload) => {
+            setBrowserEgressStatus(payload.connectionId, payload.status)
           }
         ),
         transport.subscribe<BrowserOpenRequestPayload>(

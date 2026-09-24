@@ -210,6 +210,7 @@ fn merge_agent_env_with_color(
     for (key, value) in proxy::current_proxy_env_vars() {
         merged.insert(key, value);
     }
+    proxy::add_no_proxy_to_launch_env(&mut merged, &proxy::current_no_proxy_env_vars());
 
     // Ensure agent-invoked `officecli …` (from an enabled office skill) resolves
     // even when codeg installed the binary outside the user's shell PATH — the
@@ -3478,6 +3479,23 @@ const GROK_EFFORT_OPTION_ID: &str = "reasoning_effort";
 /// type (see `is_grok_incompatible_agent_switch`). Recoverable, not terminal.
 const GROK_INCOMPATIBLE_AGENT_ERROR_CODE: &str = "grok_model_switch_incompatible_agent";
 
+/// Stable `AcpEvent::Error` codes for the other recoverable failures, so the
+/// frontend can localize them and treat each as what it is (see
+/// `lib/acp-error-presentation.ts`): the verdict on something the user just
+/// did — a mode, option or goal change, an attached image — is a notification
+/// and nothing more, not the session's standing error until the next prompt;
+/// and a session restored as a NEW one is a warning, not an error.
+/// The English `message` is unchanged: it stays the fallback for a client that
+/// doesn't know the code, and it is what the chat channels forward.
+const SESSION_LOAD_FALLBACK_ERROR_CODE: &str = "session_load_fallback";
+const SET_MODE_FAILED_ERROR_CODE: &str = "set_mode_failed";
+const SET_CONFIG_OPTION_FAILED_ERROR_CODE: &str = "set_config_option_failed";
+const GOAL_CONTROL_FAILED_ERROR_CODE: &str = "goal_control_failed";
+const IMAGE_DROPPED_ERROR_CODE: &str = "image_dropped";
+/// Accompanies a grok FAILED compaction card (see `compaction_failure_error`).
+/// The frontend draws nothing for it — the card already shows the failure.
+const COMPACTION_FAILED_ERROR_CODE: &str = "compaction_failed";
+
 /// Grok partitions its models by `agentType` (e.g. `grok-4.5` → `grok-build-plan`,
 /// `grok-composer-2.5-fast` → `cursor`). A session may switch models freely until
 /// its first turn, after which it is locked to the agent type it started with;
@@ -4702,9 +4720,8 @@ fn build_client_capabilities(
     // * `notices` outranks the AIR advisory lane (claude publishes its model
     //   fallback advisory only `if (!supportsNotices &&
     //   supportsAirSessionFailures)`; codex's readme-dev states the same
-    //   precedence). The consumer mirrors `warning`/`error` notices back into
-    //   `SessionFailureRecord` so the banner is unchanged — see
-    //   `session_notice`.
+    //   precedence). The consumer shows notices as notifications — see
+    //   `session_notice` and the frontend's `lib/session-notices.ts`.
     // * `compaction` makes both adapters STOP sending the
     //   `_meta.contextCompaction` synthetic tool call that
     //   `<ContextCompactionCard>` renders from. The consumer translates
@@ -6483,17 +6500,17 @@ async fn run_connection(
                                 .otherwise(async |dispatch| {
                                     // Historical replay: throwaway state,
                                     // mirroring the sibling closure above.
-                                    // An ext notification that raises an
-                                    // ALERT is skipped, though — a
-                                    // compaction failure or a dropped image
-                                    // recorded in a past session is not
-                                    // happening now, and that path also
-                                    // fires an OS notification. The typed
-                                    // closure above draws the same line by
-                                    // forwarding only AvailableCommands.
+                                    // grok's own ext outcomes are skipped,
+                                    // though — a dropped image recorded in a
+                                    // past session is not happening now, and
+                                    // a compaction card would linger in the
+                                    // live state as in-flight content (see
+                                    // `grok_ext_notification_skipped_on_replay`).
+                                    // The typed closure above draws the same
+                                    // line by forwarding only AvailableCommands.
                                     let mut replay_cb_state =
                                         CodeBuddyLiveState::default();
-                                    if !grok_ext_notification_is_alert(&dispatch, agent_type) {
+                                    if !grok_ext_notification_skipped_on_replay(&dispatch, agent_type) {
                                         maybe_emit_ext_notification(&st, &h, agent_type, dispatch, &mut replay_cb_state).await;
                                     }
                                     Ok(())
@@ -6651,7 +6668,7 @@ async fn run_connection(
                                 AcpEvent::Error {
                                     message: format!("Failed to load session, starting new: {e}"),
                                     agent_type: agent_type.to_string(),
-                                    code: None,
+                                    code: Some(SESSION_LOAD_FALLBACK_ERROR_CODE.to_string()),
                                     details: None,
                                     // Recoverable: we fall through to `session/new`
                                     // below. Connection stays alive.
@@ -10645,12 +10662,11 @@ async fn run_conversation_loop(
                                         .await;
                                     }
                                     // AIR-capable agents ALSO publish an `access`
-                                    // failure record with a `login` action, which
-                                    // the banner renders — the two are
-                                    // complementary (a transient alert plus a
-                                    // persistent strip with the way back in), and
-                                    // this Error is the only surface for agents
-                                    // with no AIR.
+                                    // failure record with a `login` action. The
+                                    // frontend tells the two as ONE notification,
+                                    // the record's, which carries the Sign in
+                                    // button; this Error is the only report for
+                                    // agents with no AIR.
                                     let err_event = if auth_required {
                                         turn_failure_error_event(
                                             reason_str,
@@ -10890,7 +10906,9 @@ async fn run_conversation_loop(
                                                 AcpEvent::Error {
                                                     message: format!("Failed to set mode: {e}"),
                                                     agent_type: agent_type.to_string(),
-                                                    code: None,
+                                                    code: Some(
+                                                        SET_MODE_FAILED_ERROR_CODE.to_string(),
+                                                    ),
                                                     details: None,
                                                     // Recoverable: just a failed mode toggle.
                                                     terminal: false,
@@ -10922,7 +10940,9 @@ async fn run_conversation_loop(
                                             AcpEvent::Error {
                                                 message: format!("Failed to set config option: {e}"),
                                                 agent_type: agent_type.to_string(),
-                                                code: None,
+                                                code: Some(
+                                                    SET_CONFIG_OPTION_FAILED_ERROR_CODE.to_string(),
+                                                ),
                                                 details: None,
                                                 // Recoverable: just a failed config-option toggle.
                                                 terminal: false,
@@ -10945,7 +10965,10 @@ async fn run_conversation_loop(
                                                             "Failed to control goal: {e}"
                                                         ),
                                                         agent_type: agent_type.to_string(),
-                                                        code: None,
+                                                        code: Some(
+                                                            GOAL_CONTROL_FAILED_ERROR_CODE
+                                                                .to_string(),
+                                                        ),
                                                         details: None,
                                                         // Recoverable: the goal
                                                         // is unchanged and the
@@ -11184,7 +11207,7 @@ async fn run_conversation_loop(
                         AcpEvent::Error {
                             message: format!("Failed to set mode: {e}"),
                             agent_type: agent_type.to_string(),
-                            code: None,
+                            code: Some(SET_MODE_FAILED_ERROR_CODE.to_string()),
                             details: None,
                             // Recoverable: idle SetMode failure leaves the
                             // connection alive — same rationale as the
@@ -11213,7 +11236,7 @@ async fn run_conversation_loop(
                         AcpEvent::Error {
                             message: format!("Failed to set config option: {e}"),
                             agent_type: agent_type.to_string(),
-                            code: None,
+                            code: Some(SET_CONFIG_OPTION_FAILED_ERROR_CODE.to_string()),
                             details: None,
                             // Recoverable: idle SetConfigOption failure leaves
                             // the connection alive.
@@ -11236,7 +11259,7 @@ async fn run_conversation_loop(
                             AcpEvent::Error {
                                 message: format!("Failed to control goal: {e}"),
                                 agent_type: agent_type.to_string(),
-                                code: None,
+                                code: Some(GOAL_CONTROL_FAILED_ERROR_CODE.to_string()),
                                 details: None,
                                 // Recoverable: an idle pause/clear failure leaves the
                                 // connection alive.
@@ -13518,7 +13541,8 @@ fn claude_chunk_parent_tool_use_id(
 }
 
 /// `json_value_to_text` for a tool call's `rawInput`, with Claude Code's
-/// file-tool argument aliases settled first.
+/// file-tool argument aliases settled first, and Antigravity's MCP input
+/// folded back into its history shape ([`fold_antigravity_mcp_raw_input`]).
 ///
 /// claude-agent-acp forwards the model's `tool_use.input` verbatim as
 /// `rawInput`, so a Write the model spelled `{path, file_text}` — which CLI
@@ -13552,7 +13576,69 @@ fn tool_call_raw_input_text(
             return json_value_to_text(&canonical);
         }
     }
+    if agent_type == AgentType::Antigravity {
+        let folded = fold_antigravity_mcp_raw_input(meta, raw_input.as_ref());
+        if folded.is_some() {
+            return json_value_to_text(&folded);
+        }
+    }
     json_value_to_text(raw_input)
+}
+
+/// Antigravity 1.2's live MCP `rawInput`, folded back into the shape its
+/// history takes.
+///
+/// The server rewrites every MCP dispatch before a client sees it
+/// (`tools.py::unwrap_mcp_tool_call`). Through 1.1 that produced
+/// `{"arguments": {…}, "prompt": "<sentence>"}`, and `parsers::antigravity`
+/// emits exactly that for history. 1.2 ALSO copies each argument onto the top
+/// level — for clients that read `rawInput` without knowing about MCP — and
+/// moves the sentence into `_meta.prompt`. The dedicated cards peel
+/// `arguments` either way, but the generic card lists every top-level key, so
+/// each argument would render twice, once flat and once in the `arguments`
+/// tree, and the live card would stop matching its history twin. History
+/// cannot take the new shape instead: the copy doubles every input against the
+/// parser's `TOOL_INPUT_CAP`, and an input cut there is one no card can parse.
+///
+/// Folds only an EXACT copy — every key beside `arguments` equal to the same
+/// key inside it, none missing — on a call whose `_meta` marks it as MCP.
+/// Anything else passes through: a 1.1 input is already in this shape, and a
+/// tool whose own argument is named `arguments` overwrites the wrapper
+/// upstream, leaving no nested copy to fold into.
+fn fold_antigravity_mcp_raw_input(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+    raw_input: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let meta = meta?;
+    if meta.get("is_mcp_tool_call") != Some(&serde_json::Value::Bool(true)) {
+        return None;
+    }
+    let input = raw_input?.as_object()?;
+    let arguments = input.get("arguments")?.as_object()?;
+    let flattened_copy = input.len() - 1 == arguments.len()
+        && arguments
+            .iter()
+            .all(|(key, value)| input.get(key) == Some(value));
+    if !flattened_copy {
+        return None;
+    }
+    let mut folded = serde_json::Map::new();
+    folded.insert(
+        "arguments".to_string(),
+        serde_json::Value::Object(arguments.clone()),
+    );
+    let prompt = meta
+        .get("prompt")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty());
+    if let Some(prompt) = prompt {
+        folded.insert(
+            "prompt".to_string(),
+            serde_json::Value::String(prompt.to_string()),
+        );
+    }
+    Some(serde_json::Value::Object(folded))
 }
 
 /// Maintain the set of OPEN CodeBuddy sub-agent tool calls (`open`). `is_agent`
@@ -14062,31 +14148,53 @@ fn map_grok_ext_notification(
             Some(AcpEvent::Error {
                 message,
                 agent_type: agent_type.to_string(),
-                code: None,
+                code: Some(IMAGE_DROPPED_ERROR_CODE.to_string()),
                 details: None,
                 terminal: false,
             })
         }
         // Compaction itself blew up (e.g. the summarizer model call failed) while
-        // the turn still ended cleanly — surface a non-terminal error so the
-        // result isn't a silent blank.
-        "auto_compact_failed" => Some(AcpEvent::Error {
-            message: format!(
-                "Context compaction failed{}",
-                update
-                    .get("reason")
-                    .or_else(|| update.get("message"))
-                    .and_then(|v| v.as_str())
-                    .map(|d| format!(": {d}"))
-                    .unwrap_or_default()
-            ),
-            agent_type: agent_type.to_string(),
-            code: None,
-            details: None,
-            terminal: false,
+        // the turn still ended cleanly. It lands where every other compaction
+        // outcome does — the shared context-compaction card, here in its FAILED
+        // state with the reason as the card's hover text — rather than as a
+        // session error under the composer. That is also how a failed
+        // compaction reads on codex and claude (`session_compaction_event`), and
+        // the history parser synthesizes the same card from the log. The coded
+        // `Error` readers other than the app still need is emitted beside it by
+        // the caller (`compaction_failure_error`), keeping this mapper 1:1.
+        "auto_compact_failed" => Some(AcpEvent::ToolCall {
+            tool_call_id: grok_ext_event_id(params),
+            title: "Context compaction".to_string(),
+            kind: "other".to_string(),
+            status: "failed".to_string(),
+            content: None,
+            raw_input: None,
+            raw_output: None,
+            locations: None,
+            meta: Some(grok_failed_compaction_meta(update)),
+            images: None,
         }),
         _ => None,
     }
+}
+
+/// `_meta` for a failed grok auto-compaction: the versioned
+/// `contextCompaction` payload (`{version: 1, error?}`), whose `error` the
+/// compaction card shows as the reason. Shared by the live mapper and the
+/// history parser so a reopened conversation renders the same card.
+pub(crate) fn grok_failed_compaction_meta(update: &serde_json::Value) -> serde_json::Value {
+    let mut compaction = serde_json::Map::new();
+    compaction.insert("version".to_string(), 1.into());
+    if let Some(reason) = update
+        .get("reason")
+        .or_else(|| update.get("message"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+    {
+        compaction.insert("error".to_string(), reason.into());
+    }
+    serde_json::json!({ "contextCompaction": compaction })
 }
 
 /// Map grok's sub-agent lifecycle notifications (`_x.ai/session/update` with
@@ -14392,23 +14500,58 @@ fn grok_ext_notification_is_turn_output(dispatch: &Dispatch, agent_type: AgentTy
     }
 }
 
-/// Whether a grok ext notification would raise a user-facing ALERT (status-bar
-/// entry + OS notification), as opposed to rendering a card in the turn.
+/// Whether the historical `session/load` replay drops a grok ext notification:
+/// every variant [`map_grok_ext_notification`] handles, so none of them reach
+/// the live `SessionState` or the clients.
 ///
-/// Only the historical `session/load` replay asks: those notifications describe
-/// a PAST session, so re-raising their alerts would report a compaction failure
-/// or a dropped image as if it were happening now, for a session the user is
-/// merely opening. Reuses the mapper for the same reason
-/// [`grok_ext_notification_is_turn_output`] does — the alerting set cannot drift
+/// Those notifications describe a PAST session. An alert (a dropped image)
+/// would report something as happening now, for a session the user is merely
+/// opening. A compaction card, completed or failed, would anchor into
+/// `live_message` — the replay runs outside any turn, and no `TurnComplete`
+/// follows to clear it — so every later snapshot would carry a historical card
+/// as in-flight content. Nothing is lost by dropping them: grok's transcript,
+/// compaction cards included, comes from its own session log
+/// (`parsers::grok`), not from this replay. Reuses the mapper for the same
+/// reason [`grok_ext_notification_is_turn_output`] does — the set cannot drift
 /// away from what actually emits.
-fn grok_ext_notification_is_alert(dispatch: &Dispatch, agent_type: AgentType) -> bool {
+fn grok_ext_notification_skipped_on_replay(dispatch: &Dispatch, agent_type: AgentType) -> bool {
     match dispatch {
-        Dispatch::Notification(notification) => matches!(
-            map_grok_ext_notification(notification, agent_type),
-            Some(AcpEvent::Error { .. })
-        ),
+        Dispatch::Notification(notification) => {
+            map_grok_ext_notification(notification, agent_type).is_some()
+        }
         _ => false,
     }
+}
+
+/// The `Error` that accompanies a FAILED compaction card from
+/// [`map_grok_ext_notification`] (see `auto_compact_failed` there), or `None`.
+///
+/// The card is where the failure is shown in the app. This coded, non-terminal
+/// `Error` is for everything that reads errors off the event stream rather
+/// than cards — the chat-channel bridges (a remote user sees no transcript),
+/// `SessionState::last_error`, the pet's error state — exactly as before the
+/// card existed. The frontend knows the code and draws nothing for it (the
+/// card already says it), so the app still shows the failure once.
+fn compaction_failure_error(event: &AcpEvent, agent_type: AgentType) -> Option<AcpEvent> {
+    let AcpEvent::ToolCall { status, meta, .. } = event else {
+        return None;
+    };
+    if status != "failed" {
+        return None;
+    }
+    let compaction = meta.as_ref()?.get("contextCompaction")?;
+    let reason = compaction.get("error").and_then(|v| v.as_str());
+    Some(AcpEvent::Error {
+        message: match reason {
+            Some(reason) => format!("Context compaction failed: {reason}"),
+            None => "Context compaction failed".to_string(),
+        },
+        agent_type: agent_type.to_string(),
+        code: Some(COMPACTION_FAILED_ERROR_CODE.to_string()),
+        details: None,
+        // Recoverable: the turn goes on uncompacted.
+        terminal: false,
+    })
 }
 
 /// Claims an agent message whose `sessionId` is present but `null`, before the
@@ -14670,7 +14813,11 @@ async fn maybe_emit_ext_notification(
     } else if let Some(event) = map_claude_sdk_ext_notification(&notification)
         .or_else(|| map_grok_ext_notification(&notification, agent_type))
     {
+        let companion = compaction_failure_error(&event, agent_type);
         emit_with_state(state, emitter, event).await;
+        if let Some(error) = companion {
+            emit_with_state(state, emitter, error).await;
+        }
     } else if !is_known_ext_method(notification.method()) {
         // The gap #409's second point was reaching for: an agent emitting an ext
         // method codeg has never heard of was previously indistinguishable from
@@ -19765,8 +19912,15 @@ mod tests {
         .unwrap();
         match map_grok_ext_notification(&raw, AgentType::Grok) {
             Some(AcpEvent::Error {
-                message, terminal, ..
+                message,
+                terminal,
+                code,
+                ..
             }) => {
+                // The stable code is what lets the frontend treat this as the
+                // answer to a click (the user just attached this image) rather
+                // than as the session's standing error.
+                assert_eq!(code.as_deref(), Some(IMAGE_DROPPED_ERROR_CODE));
                 assert!(
                     message.contains("too small"),
                     "error should carry grok's drop reason; got: {message}"
@@ -20002,27 +20156,57 @@ mod tests {
         }
     }
 
+    /// A failed auto-compaction renders the shared compaction card in its
+    /// failed state — where every other compaction outcome shows — not a
+    /// session error under the composer.
     #[test]
-    fn map_grok_ext_notification_auto_compact_failed_surfaces_error() {
+    fn map_grok_ext_notification_auto_compact_failed_renders_failed_compaction_card() {
         let raw = UntypedMessage::new(
             "_x.ai/session_notification",
             serde_json::json!({
                 "sessionId": "s",
-                "update": { "sessionUpdate": "auto_compact_failed", "reason": "API error (status 503)" }
+                "update": { "sessionUpdate": "auto_compact_failed", "reason": " API error (status 503) " },
+                "_meta": { "eventId": "ev-compact-failed" }
             }),
         )
         .unwrap();
         match map_grok_ext_notification(&raw, AgentType::Grok) {
-            Some(AcpEvent::Error {
-                message, terminal, ..
+            Some(AcpEvent::ToolCall {
+                tool_call_id,
+                status,
+                meta,
+                ..
             }) => {
-                assert!(
-                    message.contains("503"),
-                    "error should carry the reason; got: {message}"
+                assert_eq!(tool_call_id, "ev-compact-failed");
+                assert_eq!(status, "failed");
+                assert_eq!(
+                    meta,
+                    Some(serde_json::json!({
+                        "contextCompaction": { "version": 1, "error": "API error (status 503)" }
+                    }))
                 );
-                assert!(!terminal, "compaction failure must not kill the connection");
             }
-            other => panic!("expected non-terminal Error, got {other:?}"),
+            other => panic!("expected a failed compaction card, got {other:?}"),
+        }
+
+        // No reason: still a failed card, just without hover text.
+        let bare = UntypedMessage::new(
+            "_x.ai/session_notification",
+            serde_json::json!({
+                "sessionId": "s",
+                "update": { "sessionUpdate": "auto_compact_failed", "reason": "  " }
+            }),
+        )
+        .unwrap();
+        match map_grok_ext_notification(&bare, AgentType::Grok) {
+            Some(AcpEvent::ToolCall { status, meta, .. }) => {
+                assert_eq!(status, "failed");
+                assert_eq!(
+                    meta,
+                    Some(serde_json::json!({ "contextCompaction": { "version": 1 } }))
+                );
+            }
+            other => panic!("expected a failed compaction card, got {other:?}"),
         }
     }
 
@@ -20955,12 +21139,13 @@ mod tests {
         assert!(delta.usage.is_none());
     }
 
-    /// The `session/load` replay drains a PAST session, so anything that would
-    /// raise an alert (status-bar entry + OS notification) has to be recognised
-    /// and skipped there — otherwise opening an old conversation reports its
-    /// historical failures as if they were happening now.
+    /// The `session/load` replay drains a PAST session. Every grok ext outcome
+    /// is skipped there: an alert would report a historical failure as if it
+    /// were happening now, and a compaction card would linger in the live state
+    /// as in-flight content (grok's transcript gets its cards from the history
+    /// parser instead).
     #[test]
-    fn grok_ext_notification_is_alert_matches_only_the_error_outcomes() {
+    fn grok_ext_notification_skipped_on_replay_covers_every_mapped_outcome() {
         let notif = |variant: &str| {
             Dispatch::Notification(
                 UntypedMessage::new(
@@ -20977,30 +21162,76 @@ mod tests {
                 .unwrap(),
             )
         };
-        // Both map to a non-terminal Error, so both alert.
-        assert!(grok_ext_notification_is_alert(
-            &notif("image_dropped"),
-            AgentType::Grok
-        ));
-        assert!(grok_ext_notification_is_alert(
-            &notif("auto_compact_failed"),
-            AgentType::Grok
-        ));
-        // A successful compaction renders a CARD, not an alert — it stays
-        // replayable, so the loaded transcript still shows what happened.
-        assert!(!grok_ext_notification_is_alert(
-            &notif("auto_compact_completed"),
-            AgentType::Grok
-        ));
-        // Unmapped variants and non-grok agents never alert.
-        assert!(!grok_ext_notification_is_alert(
+        for variant in ["image_dropped", "auto_compact_completed", "auto_compact_failed"] {
+            assert!(
+                grok_ext_notification_skipped_on_replay(&notif(variant), AgentType::Grok),
+                "{variant} must not replay into the live state"
+            );
+        }
+        // Unmapped variants and non-grok agents are left to the normal path.
+        assert!(!grok_ext_notification_skipped_on_replay(
             &notif("turn_completed"),
             AgentType::Grok
         ));
-        assert!(!grok_ext_notification_is_alert(
+        assert!(!grok_ext_notification_skipped_on_replay(
             &notif("image_dropped"),
             AgentType::Codex
         ));
+    }
+
+    /// A failed compaction card travels with a coded `Error`, so the readers of
+    /// the error stream (chat-channel bridges, `last_error`, the pet) still hear
+    /// about it; a completed card, or any other event, gets none.
+    #[test]
+    fn compaction_failure_error_accompanies_only_a_failed_compaction_card() {
+        let raw = UntypedMessage::new(
+            "_x.ai/session_notification",
+            serde_json::json!({
+                "sessionId": "s",
+                "update": { "sessionUpdate": "auto_compact_failed", "reason": "API error (status 503)" }
+            }),
+        )
+        .unwrap();
+        let card = map_grok_ext_notification(&raw, AgentType::Grok).expect("failed card");
+        match compaction_failure_error(&card, AgentType::Grok) {
+            Some(AcpEvent::Error {
+                message,
+                code,
+                terminal,
+                ..
+            }) => {
+                assert_eq!(message, "Context compaction failed: API error (status 503)");
+                assert_eq!(code.as_deref(), Some(COMPACTION_FAILED_ERROR_CODE));
+                assert!(!terminal, "a failed compaction must not kill the connection");
+            }
+            other => panic!("expected the companion Error, got {other:?}"),
+        }
+
+        let bare = UntypedMessage::new(
+            "_x.ai/session_notification",
+            serde_json::json!({
+                "sessionId": "s",
+                "update": { "sessionUpdate": "auto_compact_failed" }
+            }),
+        )
+        .unwrap();
+        let bare_card = map_grok_ext_notification(&bare, AgentType::Grok).expect("failed card");
+        assert!(matches!(
+            compaction_failure_error(&bare_card, AgentType::Grok),
+            Some(AcpEvent::Error { message, .. }) if message == "Context compaction failed"
+        ));
+
+        let completed = UntypedMessage::new(
+            "_x.ai/session_notification",
+            serde_json::json!({
+                "sessionId": "s",
+                "update": { "sessionUpdate": "auto_compact_completed", "tokens_before": 9, "tokens_after": 8 }
+            }),
+        )
+        .unwrap();
+        let completed_card =
+            map_grok_ext_notification(&completed, AgentType::Grok).expect("completed card");
+        assert!(compaction_failure_error(&completed_card, AgentType::Grok).is_none());
     }
 
     /// Grok's cumulative token count rides the OUTER `params._meta` of ordinary
@@ -24414,6 +24645,127 @@ mod tests {
         }
     }
 
+    // ---- Antigravity 1.2's flattened MCP input ------------------------------
+
+    /// The `_meta` Antigravity puts on every MCP frame (`unwrap_mcp_tool_call`).
+    fn antigravity_mcp_meta(prompt: Option<&str>) -> serde_json::Value {
+        let mut meta = serde_json::json!({
+            "mcp": {"tool": "browser_navigate", "server": "codeg-mcp"},
+            "is_mcp_tool_call": true,
+        });
+        if let Some(prompt) = prompt {
+            meta["prompt"] = serde_json::json!(prompt);
+        }
+        meta
+    }
+
+    async fn antigravity_emitted_input(
+        agent_type: AgentType,
+        raw_input: serde_json::Value,
+        meta: serde_json::Value,
+    ) -> serde_json::Value {
+        let mut cache = ToolCallOutputCache::default();
+        let mut cb = CodeBuddyLiveState::default();
+        let (_, emitted, _, _) = pi_emit(
+            agent_type,
+            &mut cache,
+            &mut cb,
+            serde_json::json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_nav",
+                "rawInput": raw_input,
+                "_meta": meta,
+            }),
+        )
+        .await;
+        serde_json::from_str(emitted.as_deref().expect("raw_input")).unwrap()
+    }
+
+    /// 1.2 sends each MCP argument twice — flat, and inside `arguments` — with
+    /// the sentence moved to `_meta.prompt`. Both frame kinds carry it (the
+    /// opening `tool_call` and the in-progress update that reconciles a
+    /// permission prompt), and both must reach the card in the shape history
+    /// has, or the generic card lists every argument twice.
+    #[tokio::test]
+    async fn antigravity_mcp_input_folds_back_into_its_history_shape() {
+        let arguments = serde_json::json!({"tabId": "t1", "url": "https://example.com/"});
+        let mut wire_input = arguments.clone();
+        wire_input["arguments"] = arguments.clone();
+        for session_update in ["tool_call", "tool_call_update"] {
+            let mut cache = ToolCallOutputCache::default();
+            let mut cb = CodeBuddyLiveState::default();
+            let mut wire = serde_json::json!({
+                "sessionUpdate": session_update,
+                "toolCallId": "call_nav",
+                "status": "in_progress",
+                "rawInput": wire_input,
+                "_meta": antigravity_mcp_meta(Some("Opening the example page")),
+            });
+            if session_update == "tool_call" {
+                wire["title"] = serde_json::json!("codeg-mcp_browser_navigate");
+            }
+            let (_, emitted, _, _) =
+                pi_emit(AgentType::Antigravity, &mut cache, &mut cb, wire).await;
+            let emitted: serde_json::Value =
+                serde_json::from_str(emitted.as_deref().expect("raw_input")).unwrap();
+            assert_eq!(
+                emitted,
+                serde_json::json!({
+                    "arguments": arguments,
+                    "prompt": "Opening the example page",
+                }),
+                "{session_update}"
+            );
+        }
+    }
+
+    /// Only an exact flattened copy on an MCP-marked Antigravity call is
+    /// folded; every other input reaches the card as sent.
+    #[tokio::test]
+    async fn antigravity_mcp_input_fold_leaves_every_other_input_alone() {
+        let flattened = serde_json::json!({
+            "arguments": {"task_id": "t-1"},
+            "task_id": "t-1",
+        });
+        let cases = [
+            // 1.1's own shape is the target already.
+            (
+                AgentType::Antigravity,
+                serde_json::json!({"arguments": {"task_id": "t-1"}, "prompt": "Cancel it"}),
+                antigravity_mcp_meta(None),
+            ),
+            // Not marked as MCP: an ordinary tool may have an `arguments` key.
+            (
+                AgentType::Antigravity,
+                flattened.clone(),
+                serde_json::json!({"is_mcp_tool_call": false}),
+            ),
+            // A tool's own `arguments` argument overwrites the wrapper
+            // upstream, so the object under that key is not a copy of the rest.
+            (
+                AgentType::Antigravity,
+                serde_json::json!({"arguments": {"depth": 2}, "task_id": "t-1"}),
+                antigravity_mcp_meta(Some("Inspect it")),
+            ),
+            // A near-copy is not a copy.
+            (
+                AgentType::Antigravity,
+                serde_json::json!({"arguments": {"task_id": "t-1"}, "task_id": "t-2"}),
+                antigravity_mcp_meta(Some("Cancel it")),
+            ),
+            // The same bytes from another agent.
+            (
+                AgentType::Codex,
+                flattened.clone(),
+                antigravity_mcp_meta(Some("Cancel it")),
+            ),
+        ];
+        for (agent_type, raw_input, meta) in cases {
+            let emitted = antigravity_emitted_input(agent_type, raw_input.clone(), meta).await;
+            assert_eq!(emitted, raw_input, "{agent_type:?} {raw_input}");
+        }
+    }
+
     // ---- #525: pi's lifecycle announcements ride the prose channel ----------
 
     /// Wire-in / events-out for a pi `agent_message_chunk`, the counterpart of
@@ -25683,6 +26035,27 @@ mod tests {
             merge_agent_env_with_color(false, &[("FROM_REGISTRY", "registry")], &runtime_env, None);
         assert_eq!(merged_value(&merged, "FROM_REGISTRY"), Some("registry"));
         assert_eq!(merged_value(&merged, "FROM_ROW"), Some("row"));
+    }
+
+    /// A launch that carries a proxy leaves with the loopback exception, in
+    /// both spellings — the agent's own local services (OpenCode's embedded
+    /// server, Antigravity's harness socket) must never be sent to it. The proxy
+    /// comes from the per-agent row so the test does not depend on this
+    /// machine's environment; `*` is what an inherited `NO_PROXY=*` yields.
+    #[test]
+    fn a_proxied_launch_env_carries_the_loopback_exception() {
+        let runtime_env = BTreeMap::from([(
+            "HTTP_PROXY".to_string(),
+            "http://10.0.0.2:3128".to_string(),
+        )]);
+        let merged = merge_agent_env_with_color(false, &[], &runtime_env, None);
+        for key in ["NO_PROXY", "no_proxy"] {
+            let value = merged_value(&merged, key).unwrap_or_default();
+            assert!(
+                value.starts_with("localhost,127.0.0.1,::1,[::1]") || value == "*",
+                "{key}: {value:?}"
+            );
+        }
     }
 
     // ─── trim_partial_ansi_tail ─────────────────────────────────────────

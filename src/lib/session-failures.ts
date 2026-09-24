@@ -34,68 +34,7 @@ import type {
   ContentBlock,
   MessageTurn,
   SessionFailureRecord,
-  SessionNotice,
 } from "@/lib/types"
-
-/**
- * Id prefix for a record synthesized from a {@link SessionNotice}.
- *
- * Advertising `session.notices` makes both adapters route their ADVISORY-class
- * records here instead of the AIR lane (claude's model fallback publishes only
- * `if (!supportsNotices && supportsAirSessionFailures)`; codex states the same
- * precedence). Mirroring them back into this table is what keeps the banner's
- * behaviour unchanged — but a notice carries no id, so one has to be minted,
- * and it MUST be unable to collide with an adapter-published id. The prefix is
- * the guarantee: AIR ids come from the adapter's own vocabulary and none of
- * them can start with a string naming this client's own synthesis.
- *
- * ⚠️ That guarantee is checked against the TWO adapters
- * `client_session_capabilities` advertises to, not proved in general — nothing
- * in the AIR extension reserves a prefix. Re-check it if a third agent is ever
- * advertised `session.notices`.
- */
-export const NOTICE_RECORD_ID_PREFIX = "codeg-notice:"
-
-/**
- * Project a notice onto this table's contract, or `null` when it does not
- * belong here.
- *
- * `info` is toast-only: it is the level both adapters use for things that are
- * not a problem (a model reroute, "context compacted", "task stopped by user"),
- * and a persistent banner row is not what those deserve. `warning` and `error`
- * are what the AIR advisory lane used to carry, so they keep its surface.
- *
- * The id is derived from the CONTENT rather than minted fresh per event, so a
- * repeated advisory revises one row instead of stacking identical ones — the
- * table is keyed by id and the banner renders one entry per record. That is a
- * deliberate departure from the wire, where "repeated notices remain
- * independent events": as toasts they stay independent (each raises its own),
- * but as banner rows the honest rendering of "this is still true" is one row.
- *
- * Revision is taken from the row it replaces, so the monotonic merge accepts
- * it. Without this the second occurrence of an advisory would be rejected as a
- * stale replay and the banner would keep showing the first one's text forever.
- */
-export function sessionFailureFromNotice(
-  current: SessionFailureRecord[],
-  notice: SessionNotice
-): SessionFailureRecord | null {
-  if (notice.severity !== "warning" && notice.severity !== "error") return null
-  const id = `${NOTICE_RECORD_ID_PREFIX}${notice.severity}:${notice.title}`
-  const previous = current.find((record) => record.id === id)
-  return {
-    id,
-    revision: (previous?.revision ?? 0) + 1,
-    // Notices carry no AIR category and always carry a title, so the category
-    // is only ever the banner's title FALLBACK — which this can never need.
-    // `unknown` is the honest value; it folds onto the same rendering any
-    // unrecognized category does.
-    category: "unknown",
-    severity: notice.severity,
-    title: notice.title,
-    ...(notice.description ? { details: notice.description } : {}),
-  }
-}
 
 /** Merge one incoming upsert; returns the SAME array reference when rejected. */
 export function upsertSessionFailure(
@@ -173,15 +112,30 @@ export type SessionFailureSettleScope = "retry_incidents" | "warnings" | "all"
  * "recovers" them, and settling them on the next token would flash them away
  * before they can be read — they wait for the turn boundary like before.
  */
-function isRetryIncident(f: SessionFailureRecord): boolean {
+export function isRetryIncident(f: SessionFailureRecord): boolean {
   return f.severity === "warning" && f.category !== "unknown"
 }
 
-/** Whether a progress settle would change anything — cheap per-chunk guard. */
-export function hasSettleableRetryIncident(
+/**
+ * Whether an in-flight retry incident is active — the cheap per-chunk guard for
+ * a progress settle (nothing to settle otherwise).
+ */
+export function hasActiveRetryIncident(
   failures: SessionFailureRecord[]
 ): boolean {
   return failures.some((f) => !f.resolved && isRetryIncident(f))
+}
+
+/** The most recently arrived active terminal record, or `null` (table order;
+ *  see [`activeRetryIncidentView`] on why that is only a proxy for recency). */
+export function latestActiveTerminalFailure(
+  failures: SessionFailureRecord[]
+): SessionFailureRecord | null {
+  for (let i = failures.length - 1; i >= 0; i--) {
+    const f = failures[i]
+    if (!f.resolved && f.severity !== "warning") return f
+  }
+  return null
 }
 
 /**
@@ -206,8 +160,8 @@ export function settleSessionFailures(
 
 /**
  * Resolve records because the user closed their strip (client-local, like
- * `dismissConfigStale`). Takes a LIST because one collapsed warning strip
- * stands for every active warning behind it — closing a bar labelled "+2 more"
+ * `dismissConfigStale`). Takes a LIST because the one collapsed incident strip
+ * stands for every active incident behind it — closing a bar labelled "+2 more"
  * has to close all three, not peel them off one click at a time.
  *
  * Dismissal is marked distinctly from recovery: `dismissed` records are
@@ -236,66 +190,112 @@ export function dismissSessionFailures(
   )
 }
 
-/** Unresolved records, for the banner's active section. */
+/** Unresolved records. */
 export function activeSessionFailures(
   failures: SessionFailureRecord[]
 ): SessionFailureRecord[] {
   return failures.filter((f) => !f.resolved)
 }
 
-/** What the banner actually renders (see [`activeSessionFailureView`]). */
-export interface ActiveSessionFailureView {
-  /** Terminal records — never collapsed; each needs its own action buttons. */
-  errors: SessionFailureRecord[]
-  /** The active warning to show, or `null` when there is none. */
-  warning: SessionFailureRecord | null
-  /** Older active warnings folded behind `warning` (0 when nothing is hidden). */
-  hiddenWarnings: number
-  /** Every active warning id the collapsed strip stands for, `warning`
-   *  included — closing that one bar must close everything it represents. */
-  warningIds: string[]
+/** The retry-incident strip the composer dock renders (see
+ *  [`activeRetryIncidentView`]). */
+export interface ActiveRetryIncidentView {
+  /** The incident to show, or `null` when none is in flight. */
+  incident: SessionFailureRecord | null
+  /** Older active incidents folded behind `incident` (0 when none). */
+  hiddenCount: number
+  /** Every active incident id the strip stands for, `incident` included —
+   *  closing that one bar must close everything it represents. */
+  ids: string[]
 }
 
 /**
- * Project the active records onto the strips to render.
+ * Project the active retry incidents onto the dock's one incident strip.
  *
- * Warnings collapse to ONE strip plus a count. They are transient incidents
- * that normally settle on the next chunk, but every extra one costs a
- * permanent row docked under the composer, and a turn that retries N times
- * used to stack N identical strips over the chat (issue #496). Errors are not
- * collapsed: each is terminal and carries its own suggested actions.
+ * Incidents are the only session failures the dock draws: they are progress
+ * (the adapter is reconnecting on its own) and settle as soon as the turn moves
+ * again. Advisories and terminal failures are notifications instead — see
+ * [`sessionFailureNotice`].
  *
- * The strip shows the LAST active warning in table order. That is arrival
- * order for live events, but only a best-effort proxy for recency in general
- * — an in-place upsert keeps its original slot, and a hydrating snapshot
- * arrives in the backend's `BTreeMap` id order. Which of several concurrent
- * incidents shows is cosmetic; the count and the dismiss set cover them all.
+ * They collapse to ONE strip plus a count: a turn that reconnects N times used
+ * to stack N identical strips over the chat (issue #496). The strip shows the
+ * LAST active incident in table order — arrival order for live events, but only
+ * a best-effort proxy for recency in general (an in-place upsert keeps its
+ * original slot, and a hydrating snapshot arrives in the backend's `BTreeMap`
+ * id order). Which of several concurrent incidents shows is cosmetic; the count
+ * and the dismiss set cover them all.
  */
-export function activeSessionFailureView(
+export function activeRetryIncidentView(
   failures: SessionFailureRecord[]
-): ActiveSessionFailureView {
-  const active = activeSessionFailures(failures)
-  const warnings = active.filter((f) => f.severity === "warning")
+): ActiveRetryIncidentView {
+  const incidents = failures.filter((f) => !f.resolved && isRetryIncident(f))
   return {
-    errors: active.filter((f) => f.severity !== "warning"),
-    warning: warnings[warnings.length - 1] ?? null,
-    hiddenWarnings: Math.max(0, warnings.length - 1),
-    warningIds: warnings.map((f) => f.id),
+    incident: incidents[incidents.length - 1] ?? null,
+    hiddenCount: Math.max(0, incidents.length - 1),
+    ids: incidents.map((f) => f.id),
   }
 }
 
 /**
- * The record behind the muted "recovered" line: the most recent warning that
- * settled ON ITS OWN. User-dismissed records are excluded — closing a strip
- * has to REMOVE it, not swap it for a line claiming the incident recovered
- * (which would also be false whenever the connection is still down).
+ * Whether an incoming upsert is news the user should be TOLD about, and as
+ * what: `"terminal"` (the turn or session failed), `"advisory"` (a
+ * category-"unknown" warning — the adapter's FYI), or `null`.
+ *
+ * `null` for everything that is not news:
+ * - a stale or verbatim-replayed revision (the reducer drops those too —
+ *   claude re-publishes still-active failures on session/load);
+ * - a retry incident — the dock draws that one live, and a toast per reconnect
+ *   attempt would stack;
+ * - a revision that re-sends what is already showing: the same active record
+ *   with the same wording (adapters bump revisions to re-publish).
+ *
+ * A record that was resolved (the user moved on, or the turn settled it) and
+ * comes back is a new occurrence, and is news again.
+ */
+export function sessionFailureNotice(
+  stored: SessionFailureRecord | undefined,
+  incoming: SessionFailureRecord
+): "terminal" | "advisory" | null {
+  if (!incoming.id || !(incoming.revision >= 1)) return null
+  if (stored && incoming.revision <= stored.revision) return null
+  if (isRetryIncident(incoming)) return null
+  const repeat =
+    stored !== undefined &&
+    !stored.resolved &&
+    stored.severity === incoming.severity &&
+    stored.title === incoming.title &&
+    (stored.details ?? "") === (incoming.details ?? "") &&
+    sameActions(stored.actions, incoming.actions)
+  if (repeat) return null
+  return incoming.severity === "warning" ? "advisory" : "terminal"
+}
+
+function sameActions(
+  a: string[] | null | undefined,
+  b: string[] | null | undefined
+): boolean {
+  const left = a ?? []
+  const right = b ?? []
+  return left.length === right.length && left.every((x, i) => x === right[i])
+}
+
+/**
+ * The record behind the muted "recovered" line: the most recent RETRY INCIDENT
+ * that settled ON ITS OWN. User-dismissed records are excluded — closing a
+ * strip has to REMOVE it, not swap it for a line claiming the incident
+ * recovered (which would also be false whenever the connection is still down).
+ *
+ * Only incidents can recover. A category-"unknown" warning is an advisory
+ * (a config notice, a model-fallback note) that the clean turn end merely
+ * swept; announcing "Recovered · Model fallback: …" afterwards claims a fix
+ * for something that was never broken.
  */
 export function mostRecentRecoveredWarning(
   failures: SessionFailureRecord[]
 ): SessionFailureRecord | null {
   for (let i = failures.length - 1; i >= 0; i--) {
     const f = failures[i]
-    if (f.resolved && !f.dismissed && f.severity === "warning") return f
+    if (f.resolved && !f.dismissed && isRetryIncident(f)) return f
   }
   return null
 }
@@ -308,7 +308,7 @@ export function resolvedSessionFailures(
 }
 
 /**
- * Text of the most recent USER turn — what the failure banner's "retry"
+ * Text of the most recent USER turn — what a failure notification's "retry"
  * action re-submits. Joins the turn's text blocks; image-only or empty user
  * turns are skipped (nothing meaningful to resend). Callers should feed the
  * runtime TIMELINE turns first and fall back to the persisted detail: after a
@@ -335,7 +335,7 @@ export function lastUserPromptText(
   return null
 }
 
-/** The AIR action vocabulary the banner knows how to wire. */
+/** The AIR action vocabulary codeg knows how to wire. */
 export const KNOWN_SESSION_FAILURE_ACTIONS = [
   "retry",
   "login",
@@ -351,4 +351,32 @@ export function knownSessionFailureActions(
 ): SessionFailureAction[] {
   const actions = record.actions ?? []
   return KNOWN_SESSION_FAILURE_ACTIONS.filter((a) => actions.includes(a))
+}
+
+/** `Folder.chat.sessionFailure` key naming a record's category — the title
+ *  shown when the adapter sent a blank one. Unknown wire categories read as
+ *  `unknown`. */
+export function sessionFailureCategoryLabelKey(
+  category: string
+):
+  | "category.connection"
+  | "category.access"
+  | "category.limit"
+  | "category.request"
+  | "category.service"
+  | "category.unknown" {
+  switch (category) {
+    case "connection":
+      return "category.connection"
+    case "access":
+      return "category.access"
+    case "limit":
+      return "category.limit"
+    case "request":
+      return "category.request"
+    case "service":
+      return "category.service"
+    default:
+      return "category.unknown"
+  }
 }

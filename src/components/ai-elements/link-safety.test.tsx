@@ -25,6 +25,7 @@ const DESKTOP_WITHOUT_BROWSER = {
   profiles: false,
   signInUserAgent: false,
   ownedWindowControls: false,
+  remoteEgress: false,
   policy: { enabled: true, managedRules: [], managedSource: null },
 }
 

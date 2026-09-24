@@ -56,6 +56,7 @@ const CAPS: BrowserCapabilities = {
   profiles: true,
   signInUserAgent: true,
   ownedWindowControls: false,
+  remoteEgress: false,
 }
 
 function tab(id = "file:%2Ftmp%2Fa.html"): FileWorkspaceTab {

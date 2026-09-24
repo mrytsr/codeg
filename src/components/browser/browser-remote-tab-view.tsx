@@ -1,6 +1,6 @@
 "use client"
 
-import { Copy, ExternalLink, Server } from "lucide-react"
+import { Copy, ExternalLink, RotateCw, Server } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -9,19 +9,14 @@ import {
   type BrowserWorkspaceTab,
 } from "@/contexts/workspace-context"
 import { hostnameOf, isLoopbackHost } from "@/lib/browser/browser-url"
-import { remoteServerHost } from "@/lib/browser/remote-host"
+import {
+  remoteHostAddress,
+  remoteHostDisplayName,
+} from "@/lib/browser/remote-host"
 import { copyTextToClipboard } from "@/lib/utils"
 
 const ACTION_BTN =
   "inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-primary/8"
-
-/** Where the window's codeg-server lives, as a host a person recognises —
- *  null when it is reached through this machine's own loopback (an SSH
- *  tunnel), which names this computer, not the remote host. */
-function remoteHostName(): string | null {
-  const host = remoteServerHost()
-  return host && !isLoopbackHost(host) ? host : null
-}
 
 /**
  * The same address on the remote host's own name instead of `localhost` —
@@ -45,16 +40,29 @@ function onRemoteHostName(url: string, host: string | null): string | null {
 /**
  * A browser tab on an address of the remote codeg host — a loopback or
  * private address seen from a window bound to that host (see
- * `BrowserTabSeed.remote`). There is no page here, on purpose: loaded in a
- * webview of this computer, `localhost:3000` would be THIS machine's port
- * 3000, which is not the server the agent started. The tab says where the
- * address lives and offers the two ways a person can still get there.
+ * `BrowserTabSeed.remote`) — that could not be opened through that host
+ * (`reason` says why). There is no page here, on purpose: loaded from this
+ * computer, `localhost:3000` would be THIS machine's port 3000, which is not
+ * the server the agent started. The tab says where the address lives and
+ * offers the ways a person can still get there.
  */
-export function BrowserRemoteTabView({ tab }: { tab: BrowserWorkspaceTab }) {
+export function BrowserRemoteTabView({
+  tab,
+  reason = null,
+  onRetry,
+}: {
+  tab: BrowserWorkspaceTab
+  /** Why the page cannot be opened through the remote host, in words. */
+  reason?: string | null
+  /** Try opening it through the remote host again. */
+  onRetry?: () => void
+}) {
   const t = useTranslations("Browser.remote")
   const openBrowserTab = useOptionalWorkspaceActions()?.openBrowserTab ?? null
-  const url = tab.browser.initialUrl
-  const host = remoteHostName()
+  // As the remote host knows it: a record brought back from a suspended
+  // page can hold the macOS alias its page was loaded by.
+  const url = remoteHostAddress(tab.browser.initialUrl)
+  const host = remoteHostDisplayName()
   const hostname = hostnameOf(url)
   const loopback = hostname !== null && isLoopbackHost(hostname)
   const tryUrl = loopback ? onRemoteHostName(url, host) : null
@@ -86,10 +94,19 @@ export function BrowserRemoteTabView({ tab }: { tab: BrowserWorkspaceTab }) {
         <p className="max-w-md break-all text-xs text-muted-foreground">
           {url}
         </p>
+        {reason ? (
+          <p className="max-w-md text-xs text-muted-foreground">{reason}</p>
+        ) : null}
         <p className="max-w-md text-xs text-muted-foreground/80">
           {t("description")}
         </p>
         <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+          {onRetry ? (
+            <button type="button" className={ACTION_BTN} onClick={onRetry}>
+              <RotateCw className="h-3.5 w-3.5" />
+              {t("retry")}
+            </button>
+          ) : null}
           <button
             type="button"
             className={ACTION_BTN}

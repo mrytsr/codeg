@@ -241,6 +241,8 @@
     "enableProxy": "Enable system proxy",
     "proxyAddress": "Proxy address",
     "proxyHint": "Supports http(s)/socks5, example: {example}. Only effective when system proxy is enabled.",
+    "proxyBypass": "Bypass proxy for",
+    "proxyBypassHint": "Separate entries with commas and no spaces, e.g. <code>{example}</code>. <code>example.com</code> matches that domain, <code>.example.com</code> matches all of its subdomains, and IP addresses work too. Local addresses <code>localhost,127.0.0.1,::1</code> always connect directly and do not need to be listed. The list takes effect as the NO_PROXY environment variable.",
     "save": "Save",
     "saving": "Saving...",
     "proxyRequired": "Proxy URL is required when proxy is enabled",
@@ -3018,8 +3020,6 @@
           "openAgentsSettings": "Open Agents settings",
           "retry": "Retry"
         },
-        "agentsSetupHint": "Open Settings > Agents to manage installation.",
-        "withSetupHint": "{message}\n{hint}",
         "blocked": {
           "missingConfig": "Unable to read current Agent configuration.",
           "disabled": "{agent} is disabled in Agents settings. Enable it before connecting.",
@@ -3044,15 +3044,18 @@
           "turnFailedAuthRequired": "{agent} needs you to sign in again before it can run this turn. Sign in from Settings, then send the message again.",
           "agentAuthRequired": "{agent} could not start a session: it has no usable credential. Sign in again from Settings → Agents → {agent}, then reopen this conversation.",
           "grokModelSwitchIncompatibleAgent": "{agent} can't switch to that model in an existing conversation. Start a new session to use it.",
+          "setModeFailed": "{agent} couldn't switch modes.",
+          "setConfigOptionFailed": "{agent} couldn't apply that setting.",
+          "goalControlFailed": "{agent} couldn't update the goal.",
+          "imageDropped": "{agent} didn't receive an attached image.",
+          "sessionLoadFallback": "{agent} couldn't restore the previous session and started a new one — it no longer has the earlier context.",
           "turnFailedEmpty": "{agent} ended the turn without producing any response.",
           "turnFailedEmptyProtocol": "{agent} produced output that codeg could not parse — the agent version may not match the protocol.",
-          "turnFailedEmptyMetadata": "{agent} sent only status updates this turn (plan / mode / usage) and no reply.",
-          "detailsInAlerts": "Open Alerts in the status bar and expand the details to see the agent's output."
+          "turnFailedEmptyMetadata": "{agent} sent only status updates this turn (plan / mode / usage) and no reply."
         },
         "unableReadAgentConfig": "Unable to read Agent config: {message}",
         "connectFailedTitle": "{agent} connection failed",
         "toolFallbackTitle": "Tool",
-        "eventErrorTitle": "Agent Error",
         "notificationTurnComplete": "{agent} has finished responding",
         "notificationError": "{agent} error: {message}",
         "notificationQuestion": "{agent} is waiting for your answer",
@@ -3069,7 +3072,8 @@
           "lineNoErrorWithDelay": "{retry}, {delay}",
           "httpStatus": " (HTTP {status})"
         },
-        "configOptionAdjusted": "{agent} set {option} to {actual} instead of {requested}"
+        "configOptionAdjusted": "{agent} set {option} to {actual} instead of {requested}",
+        "noticeTitle": "{agent}: {title}"
       },
       "connectionLifecycle": {
         "tasks": {
@@ -3795,7 +3799,6 @@
         "reconnecting": "Reconnecting…",
         "reconnectDisabledDuringTurn": "Available once the current turn finishes",
         "dismiss": "Dismiss",
-        "reconnectFailed": "Failed to reconnect session",
         "applied": "New configuration applied"
       },
       "piProjectTrust": {
@@ -6347,6 +6350,7 @@
       "ownedWindow": "This page is shown in its own window.",
       "ownedWindowShow": "Show window",
       "remoteBanner": "Opened through {host}",
+      "remoteBannerDown": "Lost the connection to {host}. It is tried again on the next request.",
       "navigationBlocked": "Navigation blocked: {host}",
       "navigationBlockedRule": "blocked by a site rule",
       "navigationBlockedScheme": "address type not allowed here",
@@ -6360,7 +6364,17 @@
       "agentGrantLost": "Sharing ended: the page left {origin}",
       "agentGrantLostShare": "Share {origin} too",
       "agentGrantReplaced": "Sharing ended: a different program is serving {origin} now",
-      "agentGrantReplacedShare": "Share it anyway"
+      "agentGrantReplacedShare": "Share it anyway",
+      "errorRemoteRefused": "Nothing is listening at this address on the remote host",
+      "errorRemoteRefusedHint": "{host} refused the connection. Check that the server behind this address is running there.",
+      "errorRemoteUnreachable": "The remote host can't reach this address",
+      "errorRemoteUnreachableHint": "Seen from {host}, the name doesn't resolve or there is no route to it.",
+      "errorRemoteNotAllowed": "The remote server doesn't open this address for the browser",
+      "errorRemoteNotAllowedHint": "The codeg-server on {host} only lets its browser tunnel reach private addresses (CODEG_BROWSER_TUNNEL=private).",
+      "errorRemoteTimeout": "The remote host took too long to connect",
+      "errorRemoteTimeoutHint": "{host} got no answer from this address in time. The server there may be busy or behind a firewall.",
+      "errorTunnelDown": "The connection to the remote host is down",
+      "errorTunnelDownHint": "The tunnel to {host} isn't carrying anything right now. Retry once it's reachable again."
     },
     "tab": {
       "untitled": "New tab"
@@ -6386,13 +6400,16 @@
     "remote": {
       "title": "This address is on {host}",
       "titleUnnamed": "This address is on the remote host",
-      "description": "It points at the machine this workspace runs on, not at this computer, so it can't be opened in a tab here yet.",
+      "description": "It points at the machine this workspace runs on, not at this computer.",
       "copyAddress": "Copy address",
       "copied": "Address copied",
       "tryHost": "Try {host}",
       "tryHostHint": "Opens {address} in a tab on this computer. It works if the page there listens on every network interface and this computer can reach its port.",
       "openHere": "Open on this computer",
-      "openHereHint": "Opens the address in a tab on this computer. It works if this computer is on the same network."
+      "openHereHint": "Opens the address in a tab on this computer. It works if this computer is on the same network.",
+      "retry": "Try again",
+      "connecting": "Connecting through {host}…",
+      "connectingUnnamed": "Connecting through the remote host…"
     },
     "download": {
       "started": "Downloading…",
@@ -6579,6 +6596,16 @@
     "inspector": {
       "error": {
         "switchedOff": "This tab was opened with the web inspector switched off. Turn it on in the browser settings, then open the page again."
+      }
+    },
+    "remote": {
+      "error": {
+        "unavailable": "Opening the remote host's addresses in the built-in browser needs macOS 14 or later.",
+        "unsupported": "The remote codeg-server is too old to carry browser traffic. Update it to open its addresses here.",
+        "disabled": "The remote codeg-server has its browser tunnel switched off (CODEG_BROWSER_TUNNEL).",
+        "unreachable": "Couldn't reach the remote codeg-server's browser tunnel ({reason}).",
+        "bypassed": "This computer's browser engine sends some addresses around the tunnel, so the remote host's pages stay closed rather than load from this computer.",
+        "probeFailed": "The built-in browser couldn't confirm that it reaches the remote host through the tunnel. Try again in a moment."
       }
     }
   }

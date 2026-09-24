@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
           profiles: false,
           signInUserAgent: false,
           ownedWindowControls: false,
+          remoteEgress: false,
           policy: { enabled: true, managedRules: [], managedSource: null },
         })
     ),
@@ -115,6 +116,10 @@ import {
   getBrowserDownloads,
   resetBrowserDownloadsForTests,
 } from "@/lib/browser/browser-downloads-store"
+import {
+  resetBrowserEgressStoreForTests,
+  useBrowserEgressStatus,
+} from "@/lib/browser/browser-egress-store"
 import { BrowserEventsBridge } from "./browser-events-bridge"
 
 /** The store's bounds-resync counter for a tab, read as a component would. */
@@ -143,6 +148,7 @@ async function flush() {
 describe("BrowserEventsBridge", () => {
   beforeEach(() => {
     mocks.remoteDesktop = false
+    resetBrowserEgressStoreForTests()
     mocks.handlers.clear()
     mocks.unsubscribed.length = 0
     mocks.subscribe.mockClear()
@@ -180,12 +186,27 @@ describe("BrowserEventsBridge", () => {
       "browser://devtools-closed",
       "browser://doc-state",
       "browser://download",
+      "browser://egress",
       "browser://navigation-blocked",
       "browser://open-request",
       "browser://popup",
       "browser://shortcut",
       "browser://state",
     ])
+    // A remote connection's tunnel, as the banners over its tabs read it.
+    const egress = renderHook(() => useBrowserEgressStatus(4))
+    expect(egress.result.current).toBeNull()
+    act(() => {
+      mocks.handlers.get("browser://egress")!({
+        connectionId: 4,
+        status: { state: "down", reason: "the tunnel closed" },
+      })
+    })
+    expect(egress.result.current).toEqual({
+      state: "down",
+      reason: "the tunnel closed",
+    })
+    egress.unmount()
     // Downloads already running when this document mounted are shown again.
     expect(getBrowserDownloads().map((d) => d.id)).toEqual(["dl-1"])
     mocks.handlers.get("browser://download")!({
@@ -447,6 +468,7 @@ describe("BrowserEventsBridge", () => {
       "browser://devtools-closed",
       "browser://doc-state",
       "browser://download",
+      "browser://egress",
       "browser://navigation-blocked",
       "browser://open-request",
       "browser://popup",
@@ -469,6 +491,7 @@ describe("BrowserEventsBridge", () => {
       profiles: false,
       signInUserAgent: false,
       ownedWindowControls: false,
+      remoteEgress: false,
       policy: { enabled: true, managedRules: [], managedSource: null },
     })
     render(<BrowserEventsBridge />)
@@ -776,6 +799,7 @@ describe("BrowserEventsBridge", () => {
         profiles: false,
         signInUserAgent: false,
         ownedWindowControls: false,
+        remoteEgress: false,
         policy: { enabled: true, managedRules: [], managedSource: null },
       })
       await Promise.resolve()

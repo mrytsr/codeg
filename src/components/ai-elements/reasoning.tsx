@@ -29,7 +29,8 @@ import {
 import { Shimmer } from "./shimmer"
 import { markdownLinkComponents } from "./markdown-link"
 import { mermaidComponents } from "./mermaid-block"
-import { normalizeMathDelimiters } from "./message"
+import { LIVE_REMEND, normalizeMathDelimiters } from "./message"
+import { rehypePluginsAllowingCodeg } from "./rehype-allow-codeg"
 import { remarkTrimCjkAutolinkTail } from "./remark-cjk-autolink-tail"
 import { withRelativeFileLinks } from "./rehype-relative-file-links"
 import { remarkRewriteFileUriLinks } from "./remark-file-uri-links"
@@ -213,10 +214,14 @@ const remarkPlugins = [
   remarkTrimCjkAutolinkTail,
 ]
 
-// Relative local links keep their href through harden, as in MessageResponse:
-// without this `./a.md` would leave harden as `/a.md` and a bare `a.md` would
-// be blocked. See rehype-relative-file-links.
-const rehypePlugins = Object.values(withRelativeFileLinks(defaultRehypePlugins))
+// The same links survive as in MessageResponse: `codeg://` references keep
+// their href through sanitize (rehype-allow-codeg), which would otherwise leave
+// "@Codex [blocked]", and relative local links keep theirs through harden —
+// without that `./a.md` would leave harden as `/a.md` and a bare `a.md` would
+// be blocked (rehype-relative-file-links).
+const rehypePlugins = rehypePluginsAllowingCodeg(
+  withRelativeFileLinks(defaultRehypePlugins)
+)
 
 const reasoningComponents = { ...markdownLinkComponents, ...mermaidComponents }
 
@@ -253,6 +258,9 @@ export const ReasoningContent = memo(
           {...props}
           mode={isStreaming ? "streaming" : "static"}
           parseIncompleteMarkdown={isStreaming}
+          // An unclosed link shows as text, as in MessageResponse — see
+          // LIVE_REMEND for why the default placeholder cannot be used.
+          remend={LIVE_REMEND}
           // Enforce the link icon + safety override after spreading props.
           components={reasoningComponents}
         >

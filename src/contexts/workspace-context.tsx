@@ -87,7 +87,10 @@ import {
   getBrowserPrefs,
   subscribeBrowserPrefs,
 } from "@/lib/browser/browser-prefs"
-import { isRemoteHostAddress } from "@/lib/browser/remote-host"
+import {
+  isRemoteHostAddress,
+  remoteConnectionOfProfile,
+} from "@/lib/browser/remote-host"
 import { randomUUID } from "@/lib/utils"
 
 export type WorkspaceMode = "conversation" | "fusion"
@@ -974,6 +977,9 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       const remote =
         options?.remote ??
         ((opener?.kind === "browser" && opener.browser.remote === true) ||
+          // A request from a page of a connection's profile (a ⌘-click):
+          // its opener's, even when the opener's record is already gone.
+          remoteConnectionOfProfile(options?.profile) !== null ||
           isRemoteHostAddress(url))
       // A tab opened from another tab (⌘-click, a popup) belongs with it:
       // same cookies, same signed-in state. Otherwise the preference. A
@@ -1089,8 +1095,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
             ? opener.browser.profile
             : getBrowserPrefs().newTabProfile),
         null,
-        // A popup lives where its opener's traffic goes.
-        opener?.kind === "browser" && opener.browser.remote === true
+        // A popup lives where its opener's traffic goes — which the profile
+        // the backend built it in says too, when the opener's record is gone.
+        (opener?.kind === "browser" && opener.browser.remote === true) ||
+          remoteConnectionOfProfile(params.profile) !== null
       )
       setFileTabs((prev) => {
         if (prev.some((tab) => tab.id === record.id)) return prev

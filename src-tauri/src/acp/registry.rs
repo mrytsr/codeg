@@ -1245,12 +1245,14 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             //   turning notices on stops feeding codeg's existing
             //   `SessionFailure` banner; codex-acp says the same in its
             //   readme-dev ("notices take precedence over AIR advisory
-            //   records"). PAID: `sessionFailureFromNotice` mirrors
-            //   `warning`/`error` notices back into that table, so the banner
-            //   keeps its rows. Only ADVISORY-class records move — the real
-            //   failures that carry `retry`/`login` actions never went through
-            //   this lane (the extension doc: a `warning` "may still succeed
-            //   and normally has no actions"), so no button is lost.
+            //   records"). ACCEPTED: advisories become notifications (a
+            //   toast, kept in the alert list — `lib/session-notices.ts`);
+            //   mirroring them into the banner as well showed every one
+            //   twice. Only
+            //   ADVISORY-class records move — the real failures that carry
+            //   `retry`/`login` actions never went through this lane (the
+            //   extension doc: a `warning` "may still succeed and normally has
+            //   no actions"), so no button is lost.
             // * It DROPS `informational` frames at `level === "info"` outright
             //   (`if (message.level === "info") break;`). Those are plain
             //   transcript text today. ACCEPTED: upstream's reason is that
@@ -1906,8 +1908,10 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             // trade, because their current channel is not a surface at all:
             // `modelRerouted` is a THOUGHT chunk today (it pollutes reasoning
             // with "Model rerouted from X to Y"), and a deprecation notice
-            // reaches a client only through AIR. The rest land in the banner
-            // mirror, same as claude's.
+            // reaches a client only through AIR. The rest become toasts, same
+            // as claude's — except codex's post-compaction "multiple
+            // compactions" warning, which the frontend drops because the
+            // compaction card already covers it.
             //
             // Compaction is where codex gains most. Its legacy call carries
             // none of the reserved fields (the card's full label was only ever
@@ -2242,8 +2246,8 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             name: "CodeBuddy",
             description: "Tencent Cloud's official AI coding assistant (ACP)",
             distribution: AgentDistribution::Npx {
-                version: "2.156.0",
-                package: "@tencent-ai/codebuddy-code@2.156.0",
+                version: "2.157.0",
+                package: "@tencent-ai/codebuddy-code@2.157.0",
                 cmd: "codebuddy",
                 args: &["--acp"],
                 env: &[],
@@ -2940,18 +2944,20 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             // (`agy_acp_server_20260818_01_RC01`), so substituting a requested
             // version into the URL was a no-op and `supports_custom_version()`
             // answered false. Google has since renamed the archives after the
-            // release itself (`agy_acp_server_1.1.1`) and back-published the
-            // old build under `agy_acp_server_1.0.0`, so the version now
-            // templates into the URL like every other binary agent and the
-            // custom-version control appears for Antigravity. The numbering is
-            // sparse — 1.0.1 was never published, and a typed version that does
-            // not exist 404s at download rather than caching the wrong bytes —
-            // which is the same contract Cursor and OpenCode already have.
-            // `darwin-x86_64` is deliberately absent: upstream publishes no
-            // Intel macOS build, so those machines get `PlatformNotSupported`
-            // rather than a 404 mid-download.
+            // release itself, so the version now templates into the URL like
+            // every other binary agent and the custom-version control appears
+            // for Antigravity. The name has moved twice since: 1.0.0–1.1.x are
+            // `agy-acp-server-agy_acp_server_<version>-<target>.zip` (1.0.0 is
+            // the old build, back-published), and from 1.2.0 the infix is gone
+            // (`agy-acp-server-<version>-<target>.zip`). Only the current shape
+            // is templated, so a typed version below 1.2.0 404s at download —
+            // as does one never published (1.0.1) — rather than caching the
+            // wrong bytes, which is the same contract Cursor and OpenCode
+            // already have. `darwin-x86_64` first shipped with 1.2.1 (1.2.0
+            // still covered only the other five targets), so on an Intel Mac
+            // anything older 404s the same way.
             distribution: AgentDistribution::Binary {
-                version: "1.1.1",
+                version: "1.2.1",
                 // Never resolvable on PATH (there is no standalone CLI by
                 // this name); it exists because `Binary` requires one, and
                 // for dir-tree agents `installed_binary_path` ignores it in
@@ -2968,27 +2974,32 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
                 platforms: &[
                     PlatformBinary {
                         platform: "darwin-aarch64",
-                        url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-agy_acp_server_1.1.1-darwin-arm64.zip",
+                        url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.2.1-darwin-arm64.zip",
+                        sha256: None,
+                    },
+                    PlatformBinary {
+                        platform: "darwin-x86_64",
+                        url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.2.1-darwin-x86_64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "linux-aarch64",
-                        url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-agy_acp_server_1.1.1-linux-arm64.zip",
+                        url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.2.1-linux-arm64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "linux-x86_64",
-                        url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-agy_acp_server_1.1.1-linux-x86_64.zip",
+                        url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.2.1-linux-x86_64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "windows-aarch64",
-                        url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-agy_acp_server_1.1.1-windows-arm64.zip",
+                        url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.2.1-windows-arm64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "windows-x86_64",
-                        url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-agy_acp_server_1.1.1-windows-x86_64.zip",
+                        url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.2.1-windows-x86_64.zip",
                         sha256: None,
                     },
                 ],
@@ -3090,17 +3101,17 @@ mod tests {
                 dir_entry,
                 ..
             } => {
-                assert_eq!(version, "1.1.1");
+                assert_eq!(version, "1.2.1");
                 assert_eq!(cmd, "agy_acp_server");
                 let entry = dir_entry.expect("antigravity must use dir-tree extraction");
                 assert_eq!(entry.unix, "agy_acp_server.par");
                 assert_eq!(entry.windows, "agy_acp_server.exe");
-                // Five targets: upstream publishes no Intel macOS build.
-                assert_eq!(platforms.len(), 5);
-                assert!(!platforms.iter().any(|p| p.platform == "darwin-x86_64"));
+                // Six targets: upstream added the Intel macOS build in 1.2.1.
+                assert_eq!(platforms.len(), 6);
+                assert!(platforms.iter().any(|p| p.platform == "darwin-x86_64"));
                 for platform in platforms {
                     assert!(
-                        platform.url.contains("agy_acp_server_1.1.1"),
+                        platform.url.contains("/agy-acp-server-1.2.1-"),
                         "{} URL lost the release name: {}",
                         platform.platform,
                         platform.url
@@ -3321,8 +3332,8 @@ mod tests {
         );
         assert_npx_version(
             AgentType::CodeBuddy,
-            "2.156.0",
-            "@tencent-ai/codebuddy-code@2.156.0",
+            "2.157.0",
+            "@tencent-ai/codebuddy-code@2.157.0",
             Some("22.0.0"),
         );
         // Kimi Code must never land on 0.37.0–0.38.0: every session in that

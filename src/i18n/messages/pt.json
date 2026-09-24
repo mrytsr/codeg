@@ -241,6 +241,8 @@
     "enableProxy": "Ativar proxy do sistema",
     "proxyAddress": "Endereço do proxy",
     "proxyHint": "Suporta http(s)/socks5, exemplo: {example}. Só funciona quando o proxy do sistema está ativado.",
+    "proxyBypass": "Ignorar o proxy para",
+    "proxyBypassHint": "Separe as entradas com vírgulas, sem espaços, por exemplo <code>{example}</code>. <code>example.com</code> corresponde a esse domínio e <code>.example.com</code> a todos os seus subdomínios; endereços IP também são aceitos. Os endereços locais <code>localhost,127.0.0.1,::1</code> sempre se conectam diretamente e não precisam ser adicionados. A lista é aplicada como a variável de ambiente NO_PROXY.",
     "save": "Salvar",
     "saving": "Salvando...",
     "proxyRequired": "A URL do proxy é obrigatória quando o proxy está ativado",
@@ -3018,8 +3020,6 @@
           "openAgentsSettings": "Abrir configurações de agentes",
           "retry": "Tentar novamente"
         },
-        "agentsSetupHint": "Abra Configurações > Agentes para gerenciar a instalação.",
-        "withSetupHint": "{message}\n{hint}",
         "blocked": {
           "missingConfig": "Não foi possível ler a configuração atual do agente.",
           "disabled": "{agent} está desativado nas configurações de agentes. Ative-o antes de conectar.",
@@ -3044,15 +3044,18 @@
           "turnFailedAuthRequired": "O {agent} precisa que você entre novamente antes de executar este turno. Faça login nas Configurações e envie a mensagem de novo.",
           "agentAuthRequired": "O {agent} não conseguiu iniciar uma sessão: não tem credenciais utilizáveis. Inicia sessão de novo em Definições → Agentes → {agent} e reabre esta conversa.",
           "grokModelSwitchIncompatibleAgent": "{agent} não pode mudar para esse modelo em uma conversa existente. Inicie uma nova sessão para usá-lo.",
+          "setModeFailed": "{agent} não conseguiu mudar de modo.",
+          "setConfigOptionFailed": "{agent} não conseguiu aplicar essa configuração.",
+          "goalControlFailed": "{agent} não conseguiu atualizar o objetivo.",
+          "imageDropped": "{agent} não recebeu uma imagem anexada.",
+          "sessionLoadFallback": "{agent} não conseguiu restaurar a sessão anterior e iniciou uma nova; o contexto anterior não está mais disponível.",
           "turnFailedEmpty": "{agent} encerrou o turno sem produzir nenhuma resposta.",
           "turnFailedEmptyProtocol": "{agent} produziu uma saída que o codeg não conseguiu analisar — a versão do agente pode não corresponder ao protocolo.",
-          "turnFailedEmptyMetadata": "{agent} enviou apenas atualizações de status neste turno (plano / modo / uso) e nenhuma resposta.",
-          "detailsInAlerts": "Abra os alertas na barra de status e expanda os detalhes para ver a saída do agente."
+          "turnFailedEmptyMetadata": "{agent} enviou apenas atualizações de status neste turno (plano / modo / uso) e nenhuma resposta."
         },
         "unableReadAgentConfig": "Não foi possível ler a configuração do agente: {message}",
         "connectFailedTitle": "Falha na conexão de {agent}",
         "toolFallbackTitle": "Ferramenta",
-        "eventErrorTitle": "Erro do agente",
         "notificationTurnComplete": "{agent} terminou de responder",
         "notificationError": "{agent} erro: {message}",
         "notificationQuestion": "{agent} está aguardando sua resposta",
@@ -3069,7 +3072,8 @@
           "lineNoErrorWithDelay": "{retry}, {delay}",
           "httpStatus": " (HTTP {status})"
         },
-        "configOptionAdjusted": "O {agent} definiu {option} como {actual} em vez de {requested}"
+        "configOptionAdjusted": "O {agent} definiu {option} como {actual} em vez de {requested}",
+        "noticeTitle": "{agent}: {title}"
       },
       "connectionLifecycle": {
         "tasks": {
@@ -3795,7 +3799,6 @@
         "reconnecting": "Reconectando…",
         "reconnectDisabledDuringTurn": "Disponível quando o turno atual terminar",
         "dismiss": "Dispensar",
-        "reconnectFailed": "Falha ao reconectar a sessão",
         "applied": "Nova configuração aplicada"
       },
       "piProjectTrust": {
@@ -6347,6 +6350,7 @@
       "ownedWindow": "Esta página é exibida em uma janela própria.",
       "ownedWindowShow": "Mostrar janela",
       "remoteBanner": "Aberto via {host}",
+      "remoteBannerDown": "A conexão com {host} caiu. Ela será tentada de novo na próxima solicitação.",
       "navigationBlocked": "Navegação bloqueada: {host}",
       "navigationBlockedRule": "bloqueada por uma regra de site",
       "navigationBlockedScheme": "este tipo de endereço não pode ser aberto aqui",
@@ -6360,7 +6364,17 @@
       "agentGrantLost": "Partilha terminada: a página saiu de {origin}",
       "agentGrantLostShare": "Partilhar também {origin}",
       "agentGrantReplaced": "Partilha terminada: outro programa serve agora {origin}",
-      "agentGrantReplacedShare": "Partilhar mesmo assim"
+      "agentGrantReplacedShare": "Partilhar mesmo assim",
+      "errorRemoteRefused": "Nada está escutando neste endereço no host remoto",
+      "errorRemoteRefusedHint": "{host} recusou a conexão. Verifique se o servidor por trás deste endereço está em execução lá.",
+      "errorRemoteUnreachable": "O host remoto não consegue alcançar este endereço",
+      "errorRemoteUnreachableHint": "Visto de {host}, o nome não é resolvido ou não há rota até ele.",
+      "errorRemoteNotAllowed": "O servidor remoto não libera este endereço para o navegador",
+      "errorRemoteNotAllowedHint": "O codeg-server em {host} só permite que o túnel do navegador alcance endereços privados (CODEG_BROWSER_TUNNEL=private).",
+      "errorRemoteTimeout": "O host remoto demorou demais para conectar",
+      "errorRemoteTimeoutHint": "{host} não recebeu resposta deste endereço a tempo. O servidor pode estar ocupado ou atrás de um firewall.",
+      "errorTunnelDown": "A conexão com o host remoto caiu",
+      "errorTunnelDownHint": "O túnel até {host} não está transportando nada agora. Tente de novo quando ele voltar a ficar acessível."
     },
     "tab": {
       "untitled": "Nova aba"
@@ -6386,13 +6400,16 @@
     "remote": {
       "title": "Este endereço está em {host}",
       "titleUnnamed": "Este endereço está no anfitrião remoto",
-      "description": "Aponta para a máquina onde este espaço de trabalho corre, não para este computador, por isso ainda não pode ser aberto num separador aqui.",
+      "description": "Ele aponta para a máquina onde este espaço de trabalho é executado, não para este computador.",
       "copyAddress": "Copiar endereço",
       "copied": "Endereço copiado",
       "tryHost": "Experimentar {host}",
       "tryHostHint": "Abre {address} num separador deste computador. Funciona se a página estiver à escuta em todas as interfaces de rede e este computador conseguir chegar à porta.",
       "openHere": "Abrir neste computador",
-      "openHereHint": "Abre o endereço num separador deste computador. Funciona se este computador estiver na mesma rede."
+      "openHereHint": "Abre o endereço num separador deste computador. Funciona se este computador estiver na mesma rede.",
+      "retry": "Tentar novamente",
+      "connecting": "Conectando por {host}…",
+      "connectingUnnamed": "Conectando pelo host remoto…"
     },
     "download": {
       "started": "Baixando…",
@@ -6579,6 +6596,16 @@
     "inspector": {
       "error": {
         "switchedOff": "Esta aba foi aberta com o inspetor web desligado. Ligue-o nas configurações do navegador e abra a página novamente."
+      }
+    },
+    "remote": {
+      "error": {
+        "unavailable": "Abrir os endereços do host remoto no navegador integrado requer o macOS 14 ou posterior.",
+        "unsupported": "O codeg-server remoto é antigo demais para transportar o tráfego do navegador. Atualize-o para abrir os endereços dele aqui.",
+        "disabled": "O codeg-server remoto está com o túnel do navegador desativado (CODEG_BROWSER_TUNNEL).",
+        "unreachable": "Não foi possível alcançar o túnel do navegador do codeg-server remoto ({reason}).",
+        "bypassed": "O mecanismo do navegador deste computador envia alguns endereços por fora do túnel, então as páginas do host remoto não abrem para não serem carregadas deste computador.",
+        "probeFailed": "O navegador integrado não conseguiu confirmar que alcança o host remoto pelo túnel. Tente novamente em instantes."
       }
     }
   }

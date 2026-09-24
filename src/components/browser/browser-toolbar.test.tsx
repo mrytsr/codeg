@@ -588,6 +588,72 @@ describe("BrowserToolbar in a remote workspace window", () => {
     expect(toolbarMocks.openBrowserTab).not.toHaveBeenCalled()
   })
 
+  describe("on a tab of the remote host", () => {
+    function renderRemoteTab(url = "http://remote.localhost:3000/app") {
+      const remoteTab = {
+        ...tabIn("default", url),
+        browser: {
+          initialUrl: url,
+          openerTabId: null,
+          profile: "default",
+          remote: true,
+        },
+      } as BrowserWorkspaceTab
+      return render(
+        <NextIntlClientProvider locale="en" messages={enMessages}>
+          <BrowserToolbar
+            tab={remoteTab}
+            state={{ ...unsharedState(), url, profile: "remote-4" }}
+          />
+        </NextIntlClientProvider>
+      )
+    }
+
+    // Everything a remote tab loads comes from the remote host: another of
+    // its addresses is simply where this tab goes next.
+    it("navigates a typed loopback address in place", async () => {
+      renderRemoteTab()
+      const bar = screen.getByRole("textbox", { name: "Enter an address" })
+      await act(async () => {
+        fireEvent.change(bar, { target: { value: "localhost:5173" } })
+        fireEvent.keyDown(bar, { key: "Enter" })
+      })
+      expect(vi.mocked(browserNavigate)).toHaveBeenCalledWith(
+        "abc",
+        "http://localhost:5173/"
+      )
+      expect(toolbarMocks.openBrowserTab).not.toHaveBeenCalled()
+    })
+
+    it("has no profile to choose and no system browser to hand the page to", async () => {
+      setBrowserProfiles([{ id: "p-work", name: "Work" }])
+      renderRemoteTab()
+      expect(screen.queryByRole("button", { name: /^Profile:/ })).toBeNull()
+      await openMenu(screen.getByRole("button", { name: "More" }))
+      expect(
+        await screen.findByRole("menuitem", { name: "Copy link" })
+      ).toBeVisible()
+      expect(
+        screen.queryByRole("menuitem", { name: "Open in system browser" })
+      ).toBeNull()
+    })
+
+    // The macOS alias names nothing outside this tab.
+    it("copies the link as the remote host knows it", async () => {
+      const copied = vi.fn()
+      Object.assign(navigator, { clipboard: { writeText: copied } })
+      copied.mockResolvedValue(undefined)
+      renderRemoteTab("http://remote.localhost:3000/app?x=1")
+      await openMenu(screen.getByRole("button", { name: "More" }))
+      await act(async () => {
+        fireEvent.click(
+          await screen.findByRole("menuitem", { name: "Copy link" })
+        )
+      })
+      expect(copied).toHaveBeenCalledWith("http://localhost:3000/app?x=1")
+    })
+  })
+
   // Its agents run on the remote host and cannot reach this browser.
   it("offers no sharing with agents, and says why", () => {
     renderToolbar("default", undefined, unsharedState())
