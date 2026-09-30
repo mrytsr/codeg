@@ -3917,6 +3917,7 @@ impl crate::acp::delegation::spawner::ConnectionSpawner for ConnectionManagerSpa
             self.data_dir.as_path(),
             parent_conversation_id,
             None,
+            false,
         )
         .await
         .map_err(|e| SpawnerError::Spawn(e.to_string()))?;
@@ -4037,6 +4038,7 @@ impl crate::acp::delegation::spawner::ConnectionSpawner for ConnectionManagerSpa
             self.data_dir.as_path(),
             parent_conversation_id,
             None,
+            false,
         )
         .await
         .map_err(|e| SpawnerError::Spawn(e.to_string()))?;

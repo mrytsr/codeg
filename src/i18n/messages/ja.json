@@ -722,13 +722,6 @@
     "emptyNoAgent": "利用可能なエージェントがありません。",
     "configManagement": "設定管理",
     "envVars": "環境変数",
-    "adapterChannel": {
-      "label": "アダプターのバージョン",
-      "description": "インストールとアップグレードは、codeg がレビューして固定したバージョンを使用します。「最新版」を選ぶと、その時点で最新の npm リリースをインストールします。最新版のインストールに失敗した場合は固定バージョンにフォールバックし、インストールログにその旨を記録します。",
-      "pinned": "固定バージョン（推奨）",
-      "latest": "最新版（未レビュー）",
-      "latestWarning": "最新リリースは未レビューのため、codeg でこのエージェントが動かなくなることがあります。まれに既知の不具合を含むリリースが最新版になっていることもあります。実際にインストールされたバージョンはバージョン状態に表示されます。"
-    },
     "hostTools": {
       "label": "ファイルとコマンドをエージェント自身に処理させる",
       "description": "codeg がファイルアクセスとターミナルコマンドを代行しなくなり、エージェントが自身のプロセスで実行します。そうすることで初めて、エージェント自身のサンドボックスと権限ルールが適用されます。他のエージェントへの委任も無効になります（同じ処理が codeg 経由に戻ってしまうため）。codeg 自体はサンドボックスを提供しないため、エージェント側でサンドボックスを設定済みの場合にのみ有効にしてください。"
@@ -799,6 +792,7 @@
       "saveCodeBuddyConfig": "CodeBuddy 設定を保存",
       "saveKimiCodeConfig": "Kimi Code の設定を保存",
       "customInstall": "カスタムインストール",
+      "upgradeToLatest": "未レビューの最新版 {version} にアップグレード",
       "saveKimiCodeRawConfig": "Save config.toml",
       "saveDeepSeekConfig": "DeepSeek 設定を保存",
       "diagnose": "診断"
@@ -1046,9 +1040,9 @@
       "sandboxMode_read-only": "読み取り専用",
       "sandboxMode_workspace-write": "ワークスペース書き込み",
       "sandboxMode_danger-full-access": "フルアクセス（サンドボックスなし）",
-      "sandboxModeReadOnlyAcpWarning": "ACP アダプタには読み取り専用のサンドボックスがなくなったため、ここでの選択にかかわらず codeg のセッションはワークスペース書き込み可で動きます。codeg は選べる中で最も厳しいプリセット（権限昇格はすべてあなたの承認を求める）を選びますが、ワークスペース内の編集には承認が要らなくなります。codex CLI と IDE のセッションは引き続き読み取り専用に従います。",
+      "sandboxModeReadOnlyAcpWarning": "codex-acp 1.7〜1.13 には読み取り専用のサンドボックスがありません。これらのアダプタでは、ここでの選択にかかわらず codeg のセッションはワークスペース書き込み可で動きます（権限昇格は引き続きすべてあなたの承認を求めます）。codex-acp 2.0 で復活したので、古いアダプタが入っている場合は更新してください。codex CLI と IDE のセッションは常に読み取り専用に従います。",
       "sandboxModeHint": "Windows では、codex の実験的 Windows サンドボックスが無効な場合、ワークスペース書き込みは読み取り専用に降格されます。",
-      "sandboxModeSeedsPresetHint": "codeg はこれをセッション開始時の承認プリセットにも対応づけるため、承認ポリシーとは違って通常のプロンプトにも効きます。なお、アダプタの既定プリセットではモデルが権限昇格を先に選別し、危険と判断したものだけを転送します。すべて自分で確認したい場合は入力欄で「承認を求める」を選んでください。入力欄のプリセットが常に優先されます。",
+      "sandboxModeSeedsPresetHint": "codeg はこれをセッション開始時の承認プリセットにも対応づけるため、承認ポリシーとは違って通常のプロンプトにも効きます。読み取り専用は「Read-only」で始まります。承認ポリシーが never のとき、フルアクセスは「Full access」、ワークスペース書き込み可は「Auto review」で始まります（モデルが権限昇格を先に選別し、危険と判断したものだけを転送します）。それ以外の承認ポリシーでは、ワークスペース書き込み可とフルアクセスは codex-acp 2.0 以降なら「Workspace access」で始まり、権限昇格をすべてあなたの承認に回します。それより古いアダプタでは「Auto review」で始まります。未設定ならアダプタ既定の「Auto review」のままです。入力欄のプリセットが常に優先されます。",
       "writableRootsLabel": "追加の書き込み可能フォルダ",
       "writableRootsHint": "作業ディレクトリに加えて許可する絶対パスを 1 行に 1 つ。",
       "sandboxRootsRelativeError": "絶対パスである必要があります — codex は相対パスを ~/.codex 基準で解決します: {path}",
@@ -1389,6 +1383,7 @@
       "haikuDefaultModel": "デフォルト Haiku モデル",
       "sonnetDefaultModel": "デフォルト Sonnet モデル",
       "opusDefaultModel": "デフォルト Opus モデル",
+      "fableDefaultModel": "デフォルト Fable モデル",
       "customModelOption": "カスタムモデル ID",
       "customModelOptionName": "カスタムモデル名",
       "customModelOptionDescription": "カスタムモデルの説明",
@@ -1407,7 +1402,9 @@
       "customInstallDescription": "インストールするバージョンを入力します。再インストールされ、現在インストールされているバージョンを置き換えます。",
       "customInstallVersionLabel": "バージョン番号",
       "customInstallInvalid": "有効なバージョン番号を入力してください（例: 1.2.3）。",
-      "customInstallSubmit": "インストール"
+      "customInstallSubmit": "インストール",
+      "confirmUpgradeToLatest": "{name} を未レビューの {version} にアップグレードしますか？",
+      "confirmUpgradeToLatestDescription": "このリリースは codeg で未レビューのため、codeg で {name} が動かなくなることがあります。まれに既知の不具合を含むリリースであることもあります。元に戻すには、「カスタムインストール」で推奨バージョン {recommendedVersion} を再インストールしてください。"
     },
     "errors": {
       "windowsFileLocked": "{name} のファイルは実行中のセッションが使用中のため、Windows では置き換えられません。{name} のセッションをすべて終了してから再試行してください。",
@@ -1496,7 +1493,7 @@
     "version": {
       "statusLabel": "バージョン状態",
       "notInstalled": "未インストール",
-      "remoteLocal": "リモート: {remoteVersion} · ローカル: {localVersion}",
+      "recommendedLocal": "推奨: {recommendedVersion} · ローカル: {localVersion}",
       "localOnly": "ローカル：{localVersion}",
       "localInstalled": "{versionText}。インストール済みです。",
       "platformUnsupported": "{versionText}。現在のプラットフォームではこのエージェントをサポートしていません。",
@@ -1504,9 +1501,9 @@
       "clickInstall": "{versionText}。右側の「インストール」をクリックしてください。",
       "localUnrecognized": "{versionText}。ローカルバージョンは比較できません。上書きインストールのためアップグレードを試してください。",
       "upgradeAvailable": "{versionText}。アップグレード可能です。",
-      "remoteUnavailable": "{versionText}。現在リモートバージョンは取得できません。",
+      "recommendedUnavailable": "{versionText}。推奨バージョンはありません。",
       "latest": "{versionText}。すでに最新です。",
-      "latestChannel": "{versionText}。最新版チャンネルが有効です。アップグレードで最新リリースをインストールします。"
+      "unreviewedAvailable": "{versionText}。未レビューの新しいリリースがあります。"
     },
     "adapter": {
       "label": "ACP アダプター",
@@ -1556,7 +1553,8 @@
         "medium": "中",
         "high": "高",
         "minimal": "最小",
-        "xhigh": "最高"
+        "xhigh": "最高",
+        "max": "最大"
       },
       "apiKeyLabel": "API キー",
       "apiKeyHint": "選択したプロバイダーの ~/.pi/agent/auth.json に保存されます。",
@@ -1570,7 +1568,9 @@
       "modeCustom": "カスタム pi",
       "modeCustomHint": "自分の pi ビルド・インストール・ラッパーを実行します。",
       "commandLabel": "pi コマンドまたはパス",
-      "commandHint": "絶対パス、PATH 上のコマンド名、またはラッパースクリプト（例: monorepo の ./pi-test.sh）。",
+      "commandHint": "絶対パスまたは PATH 上のコマンド名を指定してください。",
+      "relativeCommandPath": "Pi コマンドの絶対パス、または PATH 上のコマンド名を指定してください。",
+      "relativeAgentDir": "Pi エージェントディレクトリの絶対パスまたは ~/... を指定してください。相対パスは作業場所によって変わります。",
       "commandNotFound": "コマンドが見つかりません",
       "validate": "検証",
       "advanced": "詳細設定",
@@ -1611,7 +1611,14 @@
       "levelsEmptyError": "レベルを 1 つ以上選んでください。1 つも選ばないと pi は Off に戻ります。",
       "wireValuesTitle": "詳細: プロバイダーに送る値",
       "wireValuesHint": "空欄ならレベル名をそのまま送信します。エンドポイントが別の表記を求める場合のみ設定してください（Google 系は LOW / HIGH）。",
-      "defaultLevelUnlisted": "このレベルは上の選択リストにありません。pi が丸めてしまいます。"
+      "defaultLevelUnlisted": "このレベルは上の選択リストにありません。pi が丸めてしまいます。",
+      "modelLevels": "{model} の思考レベル：{levels}。",
+      "modelNoThinking": "{model} には思考レベルがありません。Pi は常に思考オフで実行します。",
+      "levelClamped": "{model} には「{level}」がないため、Pi は「{effective}」で実行します。「{level}」があるモデルは引き続き「{level}」で実行されます。",
+      "modelNotListed": "Pi はこのプロバイダーでこのモデルを一覧に表示していません。モデル ID を確認してください。Pi は API キーまたはログインがあるプロバイダーのみを表示します。",
+      "catalogUnavailable": "このモデルの思考レベルを Pi に問い合わせできませんでした。",
+      "configLoadFailed": "Pi の設定を読み込めませんでした：{message}",
+      "runtimeTooOld": "この Pi は古すぎます。Codeg でセッションを開くには Pi {min} 以降が必要です。先に Pi を更新してください。"
     },
     "addCustomAgent": "カスタムエージェントを追加",
     "addCustomAgentHint": "ACP 対応のエージェントを追加できます。公開 ACP レジストリから選ぶか、レジストリ情報を貼り付けてください。",
@@ -1999,7 +2006,7 @@
       "tasks": "ToDo タスク",
       "loadingSubsessions": "サブ会話を読み込み中…",
       "forge": "リポジトリパネル",
-      "canvas": "無限会話",
+      "canvas": "無限キャンバス",
       "folderGroup": {
         "newGroup": "新しいグループ",
         "newGroupTitle": "新しいフォルダグループ",
@@ -2015,7 +2022,12 @@
         "removeFromGroup": "グループなし",
         "newGroupAndMove": "新しいグループ…",
         "dropToUngroup": "ここにドロップしてグループから外す"
-      }
+      },
+      "recentFilterAll": "すべて",
+      "recentFilterTitle": "最近の表示: {filter}",
+      "noRecentChats": "最近のチャットはありません",
+      "noRecentFolders": "最近のフォルダー会話はありません",
+      "recentFilterMenuLabel": "最近の表示"
     },
     "conversation": {
       "reloadFailed": "会話の再読み込みに失敗しました: {message}",
@@ -3043,6 +3055,7 @@
           "turnFailedUnknown": "{agent} が不明な停止理由でターンを終了しました。",
           "turnFailedAuthRequired": "{agent} はこのターンを実行する前に再度のサインインを必要としています。設定からサインインしてから、メッセージを送り直してください。",
           "agentAuthRequired": "{agent} はセッションを開始できませんでした。使用可能な認証情報がありません。設定 → エージェント → {agent} で再度サインインしてから、この会話を開き直してください。",
+          "agentRuntimeOutdated": "{agent} はこのバージョンの Codeg には古すぎます。更新してから、この会話を開き直してください。",
           "grokModelSwitchIncompatibleAgent": "{agent} は既存の会話ではこのモデルに切り替えられません。新しいセッションを開始して使用してください。",
           "setModeFailed": "{agent} はモードを切り替えられませんでした。",
           "setConfigOptionFailed": "{agent} はその設定を適用できませんでした。",
@@ -3073,7 +3086,8 @@
           "httpStatus": " (HTTP {status})"
         },
         "configOptionAdjusted": "{agent} は{option}を {requested} ではなく {actual} にしました",
-        "noticeTitle": "{agent}：{title}"
+        "noticeTitle": "{agent}：{title}",
+        "pluginLoadFailedTitle": "{agent} で {count} 個のプラグインを読み込めませんでした"
       },
       "connectionLifecycle": {
         "tasks": {
@@ -3711,7 +3725,22 @@
           "outputMissing": "codex がスクリプト出力を切り詰めた際にこのコマンドの区切り行が失われたため、出力を割り当てられませんでした。",
           "sharedWith": "この範囲には {commands} の出力も含まれます — 区切り行が codex により切り捨てられました。",
           "truncated": "切り詰め済み"
-        }
+        },
+        "visualizeTitle": "ビジュアライゼーション",
+        "visualizeWide": "ワイド",
+        "visualizeLoading": "ビジュアライゼーションを読み込み中…",
+        "visualizeError": "ビジュアライゼーションを読み込めませんでした",
+        "visualizeReload": "再読み込み",
+        "visualizeOpenFile": "ファイルを開く",
+        "visualizeExpand": "すべて表示",
+        "visualizeCollapse": "折りたたむ",
+        "visualizeScriptsOn": "スクリプト有効",
+        "visualizeScriptsOff": "スクリプトを有効化",
+        "visualizeScriptsHint": "ビジュアライゼーションのスクリプトを実行して操作できるようにします。サンドボックス内で実行され、ネットワークやファイルにはアクセスできません。",
+        "visualizeFrameTitle": "Codex ビジュアライゼーション",
+        "htmlPreviewOpen": "プレビュー",
+        "htmlPreviewOpenAria": "{name} をプレビュー",
+        "htmlPreviewHide": "プレビューを閉じる"
       },
       "messageNav": {
         "title": "メッセージナビ",
@@ -4236,13 +4265,14 @@
     "agentTypeRequired": "エージェントタイプを選択してください。",
     "agentTypeImmutableHint": "エージェントタイプは作成後に変更できません。",
     "model": "モデル",
-    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
+    "modelPlaceholderCodex": "gpt-6.1-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "メインモデル",
     "claudeReasoningModel": "推論モデル（思考）",
     "claudeHaikuDefaultModel": "デフォルトの Haiku モデル",
     "claudeSonnetDefaultModel": "デフォルトの Sonnet モデル",
     "claudeOpusDefaultModel": "デフォルトの Opus モデル",
+    "claudeFableDefaultModel": "デフォルトの Fable モデル",
     "claudeCustomModelOption": "カスタムモデル ID",
     "claudeCustomModelOptionName": "カスタムモデル名",
     "claudeCustomModelOptionDescription": "カスタムモデルの説明",
@@ -4745,7 +4775,8 @@
     "none": "ブランチがありません",
     "local": "ローカル",
     "remote": "リモート",
-    "useCustom": "「{query}」を使用"
+    "useCustom": "「{query}」を使用",
+    "head": "HEAD"
   },
   "BackupSettings": {
     "tabs": {
@@ -5519,7 +5550,6 @@
     "promptPlaceholder": "エージェントへの指示を記述 — @ でファイル参照、/ でコマンド",
     "folderPlaceholder": "フォルダを選択",
     "baseBranch": "ベースブランチ",
-    "baseBranchPlaceholder": "現在のブランチ",
     "baseBranchDefault": "タスク開始時の現在のブランチ",
     "baseBranchHint": "タスクはこのブランチから分岐し、マージもこのブランチに戻ります。",
     "agentInheritedHint": "タスク設定から継承 — 変更するとこのタスク専用になります",
@@ -5651,8 +5681,8 @@
     "eventContextCompact": "コンテキスト圧縮",
     "eventUserAction": "ユーザー操作",
     "eventDiffStat": "変更スナップショット",
-    "eventForgeWriteback": "Issue にコメント済み",
-    "eventForgeWritebackFailed": "Issue へのコメントに失敗",
+    "eventForgeWriteback": "項目にコメント済み",
+    "eventForgeWritebackFailed": "項目へのコメントに失敗",
     "actionDeliverPr": "プルリクエストを作成",
     "actionDeliverPrMr": "マージリクエストを作成",
     "actionDeliverPrBack": "PR に push",
@@ -6186,7 +6216,7 @@
     "scenarioPlanFirst": "まず計画",
     "scenarioPlanFirstHint": "問題が実在することを確認したうえで実装計画を出し、そこで停止します。確認後にタスクを差し戻すと同じワークツリーで実装します。",
     "scenarioReviewFix": "レビューして修正",
-    "scenarioReviewFixHint": "変更をレビューして問題をその場で修正。承認するとコミットが元のブランチへプッシュされます。",
+    "scenarioReviewFixHint": "エージェントはまず方針そのものが妥当かを判断し、妥当なときだけその上で問題を修正します。妥当でなければ何もコミットせず、レビュー結果を添えてあなたの判断を待ちます。承認すると修正コミットが元のブランチへプッシュされます。",
     "scenarioReviewOnly": "レビューのみ",
     "scenarioReviewOnlyHint": "指摘と提案をまとめたレビューレポートのみで、コミットはしません。修正させたい場合はタスクを差し戻します。",
     "settingsTitle": "パネル設定",
@@ -6214,7 +6244,7 @@
     "save": "保存"
   },
   "Canvas": {
-    "title": "無限会話",
+    "title": "無限キャンバス",
     "untitled": "無題の会話",
     "unresolvedConversation": "会話は削除されました",
     "removeCard": "カードを削除",
@@ -6302,7 +6332,36 @@
     "removeTerminalCard": "ターミナルカードを削除",
     "terminalNoDirectory": "このカードには作業ディレクトリがありません",
     "confirmDeleteTerminals": "実行中のターミナル {count} 個が閉じられ、そのプロセスも終了します。",
-    "confirmDeleteNotesAndTerminals": "書き込んだメモ {notes} 件が完全に削除され、実行中のターミナル {terminals} 個も終了します。"
+    "confirmDeleteNotesAndTerminals": "書き込んだメモ {notes} 件が完全に削除され、実行中のターミナル {terminals} 個も終了します。",
+    "boardsTitle": "キャンバス",
+    "boardsSubtitle": "キャンバスごとに独立した無限ボードがあり、リージョン、会話カード、メモ、ファイル、ターミナルを配置できます。",
+    "boardCount": "{count} 個のキャンバス",
+    "newBoard": "新規キャンバス",
+    "newBoardTitle": "新規キャンバス",
+    "editBoard": "キャンバスを編集…",
+    "editBoardTitle": "キャンバスを編集",
+    "deleteBoard": "キャンバスを削除…",
+    "openBoard": "開く",
+    "boardMenu": "キャンバスのオプション",
+    "boardName": "名前",
+    "boardDescription": "説明",
+    "boardDescriptionPlaceholder": "このキャンバスの用途（任意）",
+    "untitledBoard": "無題のキャンバス",
+    "boardItemCount": "{count, plural, =0 {空} other {# 個の要素}}",
+    "boardEditedAt": "{time}に編集",
+    "boardsEmpty": "キャンバスはまだありません",
+    "boardsEmptyHint": "キャンバスを作成して、作業を空間的に整理しましょう。キャンバスごとにリージョン、カード、メモを持てます。",
+    "searchBoards": "キャンバスを検索…",
+    "noBoardsMatch": "「{query}」に一致するキャンバスはありません",
+    "boardsLoadFailed": "キャンバスを読み込めませんでした",
+    "retry": "再試行",
+    "backToBoards": "すべてのキャンバスに戻る",
+    "boardDeleted": "このキャンバスは削除されました",
+    "deleteBoardTitle": "このキャンバスを削除しますか？",
+    "deleteBoardDescription": "「{name}」とその上のすべての内容が完全に削除されます。表示されている会話、フォルダー、ファイル自体には影響しません。",
+    "deleteBoardItems": "このキャンバスには {count} 個の要素があります。",
+    "deleteBoardTerminals": "そのうちターミナル {count} 個が閉じられ、プロセスも終了します。",
+    "deleteBoardConfirm": "キャンバスを削除"
   },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",

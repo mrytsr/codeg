@@ -722,13 +722,6 @@
     "emptyNoAgent": "لا يوجد وكيل متاح.",
     "configManagement": "إدارة الإعدادات",
     "envVars": "متغيرات البيئة",
-    "adapterChannel": {
-      "label": "إصدار المحوّل",
-      "description": "يستخدم التثبيت والترقية الإصدار الذي راجعه codeg واعتمده. عند اختيار الأحدث يُثبَّت أحدث إصدار npm للحزمة في حينه؛ وإذا فشل ذلك، يعود codeg إلى الإصدار المعتمد ويوضح ذلك في سجل التثبيت.",
-      "pinned": "الإصدار المعتمد (موصى به)",
-      "latest": "الأحدث (غير مُراجَع)",
-      "latestWarning": "أحدث الإصدارات غير مُراجَعة وقد تعطّل هذا الوكيل في codeg، بل قد يكون الإصدار الأحدث معروفًا بأنه معطوب أحيانًا. تعرض حالة الإصدار ما تم تثبيته فعليًا."
-    },
     "hostTools": {
       "label": "دع الوكيل يتولى الملفات والأوامر بنفسه",
       "description": "يتوقف codeg عن تنفيذ الوصول إلى الملفات وأوامر الطرفية، فينفّذها الوكيل داخل عمليته الخاصة — وعندها فقط تُطبَّق البيئة المعزولة وقواعد الأذونات الخاصة به. كما يُعطَّل التفويض إلى وكلاء آخرين، لأنه سيعيد العمل نفسه عبر codeg. لا يضيف codeg بيئة معزولة من عنده، لذا فعّل هذا الخيار فقط إذا كان الوكيل قد أُعِدّت له واحدة."
@@ -799,6 +792,7 @@
       "saveCodeBuddyConfig": "حفظ إعدادات CodeBuddy",
       "saveKimiCodeConfig": "حفظ إعدادات Kimi Code",
       "customInstall": "تثبيت مخصص",
+      "upgradeToLatest": "الترقية إلى أحدث إصدار غير مُراجَع {version}",
       "saveKimiCodeRawConfig": "Save config.toml",
       "saveDeepSeekConfig": "حفظ إعدادات DeepSeek",
       "diagnose": "تشخيص"
@@ -1046,9 +1040,9 @@
       "sandboxMode_read-only": "قراءة فقط",
       "sandboxMode_workspace-write": "الكتابة في مساحة العمل",
       "sandboxMode_danger-full-access": "وصول كامل (بدون عزل)",
-      "sandboxModeReadOnlyAcpWarning": "لم يعد محوّل ACP يوفّر بيئة معزولة للقراءة فقط، لذا تعمل جلسات codeg بصلاحية الكتابة في مساحة العمل مهما كان الاختيار هنا. يختار codeg أشد إعداد متاح — إذ يُعرض عليك كل تصعيد للصلاحيات للموافقة — لكن التعديلات داخل مساحة العمل لم تعد تحتاج موافقة. أما جلسات codex CLI وبيئة التطوير فما زالت تحترم وضع القراءة فقط.",
+      "sandboxModeReadOnlyAcpWarning": "لا يوفّر codex-acp من 1.7 إلى 1.13 بيئة معزولة للقراءة فقط، لذا تعمل جلسة codeg على هذه الإصدارات بصلاحية الكتابة في مساحة العمل مهما كان الاختيار هنا، مع بقاء كل تصعيد للصلاحيات معروضاً عليك للموافقة. أعاد codex-acp 2.0 هذه البيئة، فحدّث المحوّل إن كان المثبّت أقدم. أما جلسات codex CLI وبيئة التطوير فتحترم وضع القراءة فقط دائماً.",
       "sandboxModeHint": "على Windows، تُخفَّض الكتابة في مساحة العمل إلى قراءة فقط ما لم تُفعَّل بيئة العزل التجريبية الخاصة بـ codex.",
-      "sandboxModeSeedsPresetHint": "يربط codeg هذا أيضاً بإعداد الموافقة الذي تبدأ به الجلسة، فهو — بخلاف سياسة الموافقة — يؤثر على الطلبات العادية. لاحظ أن الإعداد الافتراضي للمحوّل صار يجعل نموذجاً يفرز طلبات تصعيد الصلاحيات ولا يمرّر إلا ما يراه غير آمن؛ اختر «طلب الموافقة» في مربع الكتابة لمراجعتها كلها بنفسك. ويظل إعداد مربع الكتابة هو الغالب دائماً.",
+      "sandboxModeSeedsPresetHint": "يربط codeg هذا أيضاً بإعداد الموافقة الذي تبدأ به الجلسة، فهو — بخلاف سياسة الموافقة — يؤثر على الطلبات العادية. القراءة فقط تبدأ بإعداد «Read-only». ومع سياسة الموافقة never يبدأ الوصول الكامل بإعداد «Full access» والكتابة في مساحة العمل بإعداد «Auto review»، حيث يفرز نموذجٌ طلبات التصعيد ولا يمرّر إلا ما يراه غير آمن. ومع أي سياسة موافقة أخرى تبدأ الكتابة في مساحة العمل والوصول الكامل بإعداد «Workspace access» الذي يعرض عليك كل تصعيد للصلاحيات في codex-acp 2.0 وما بعده، وبإعداد «Auto review» في المحوّلات الأقدم. وإن لم يُضبط يبقى الإعداد الافتراضي للمحوّل «Auto review». ويظل إعداد مربع الكتابة هو الغالب دائماً.",
       "writableRootsLabel": "مجلدات إضافية قابلة للكتابة",
       "writableRootsHint": "مسار مطلق واحد في كل سطر، إضافةً إلى مجلد العمل.",
       "sandboxRootsRelativeError": "يجب أن يكون مسارًا مطلقًا — يحسم codex المسارات النسبية داخل ~/.codex: {path}",
@@ -1389,6 +1383,7 @@
       "haikuDefaultModel": "نموذج Haiku الافتراضي",
       "sonnetDefaultModel": "نموذج Sonnet الافتراضي",
       "opusDefaultModel": "نموذج Opus الافتراضي",
+      "fableDefaultModel": "نموذج Fable الافتراضي",
       "customModelOption": "معرّف النموذج المخصّص",
       "customModelOptionName": "اسم النموذج المخصّص",
       "customModelOptionDescription": "وصف النموذج المخصّص",
@@ -1407,7 +1402,9 @@
       "customInstallDescription": "أدخل الإصدار المراد تثبيته. سيؤدي ذلك إلى إعادة التثبيت واستبدال الإصدار المثبت حاليًا.",
       "customInstallVersionLabel": "رقم الإصدار",
       "customInstallInvalid": "أدخل رقم إصدار صالحًا، مثل 1.2.3.",
-      "customInstallSubmit": "تثبيت"
+      "customInstallSubmit": "تثبيت",
+      "confirmUpgradeToLatest": "ترقية {name} إلى الإصدار غير المُراجَع {version}؟",
+      "confirmUpgradeToLatestDescription": "لم يراجع codeg هذا الإصدار، وقد يعطّل {name} في codeg، بل قد يكون الإصدار معروفًا بأنه معطوب أحيانًا. للرجوع، استخدم التثبيت المخصص لإعادة تثبيت الإصدار الموصى به {recommendedVersion}."
     },
     "errors": {
       "windowsFileLocked": "ملفات {name} قيد الاستخدام بواسطة جلسة قيد التشغيل، لذا لا يمكن لـ Windows استبدالها. أغلق جميع جلسات {name} ثم حاول مرة أخرى.",
@@ -1496,7 +1493,7 @@
     "version": {
       "statusLabel": "حالة الإصدار",
       "notInstalled": "غير مثبت",
-      "remoteLocal": "البعيد: {remoteVersion} · المحلي: {localVersion}",
+      "recommendedLocal": "الموصى به: {recommendedVersion} · المحلي: {localVersion}",
       "localOnly": "المحلي: {localVersion}",
       "localInstalled": "{versionText}. مثبت.",
       "platformUnsupported": "{versionText}. المنصة الحالية لا تدعم هذا الوكيل.",
@@ -1504,9 +1501,9 @@
       "clickInstall": "{versionText}. انقر تثبيت في الجهة اليمنى.",
       "localUnrecognized": "{versionText}. الإصدار المحلي غير قابل للمقارنة؛ جرّب الترقية للكتابة فوق التثبيت.",
       "upgradeAvailable": "{versionText}. تتوفر ترقية.",
-      "remoteUnavailable": "{versionText}. الإصدار البعيد غير متاح حاليًا.",
+      "recommendedUnavailable": "{versionText}. لا يتوفر إصدار موصى به.",
       "latest": "{versionText}. أنت على أحدث إصدار.",
-      "latestChannel": "{versionText}. قناة الأحدث مفعّلة؛ الترقية تثبّت أحدث إصدار."
+      "unreviewedAvailable": "{versionText}. يتوفر إصدار أحدث غير مُراجَع."
     },
     "adapter": {
       "label": "محوّل ACP",
@@ -1556,7 +1553,8 @@
         "medium": "متوسط",
         "high": "مرتفع",
         "minimal": "الحد الأدنى",
-        "xhigh": "مرتفع جدًا"
+        "xhigh": "مرتفع جدًا",
+        "max": "أقصى"
       },
       "apiKeyLabel": "مفتاح API",
       "apiKeyHint": "يُحفظ في ~/.pi/agent/auth.json للمزوّد المحدد.",
@@ -1570,7 +1568,9 @@
       "modeCustom": "pi مخصّص",
       "modeCustomHint": "شغّل بناء pi أو تثبيته أو غلافه الخاص بك.",
       "commandLabel": "أمر pi أو مساره",
-      "commandHint": "مسار مطلق، أو اسم أمر في PATH، أو نص غلاف (مثل ./pi-test.sh في monorepo).",
+      "commandHint": "استخدم مساراً مطلقاً أو اسم أمر في PATH.",
+      "relativeCommandPath": "استخدم مساراً مطلقاً لأمر Pi أو اسم أمر في PATH.",
+      "relativeAgentDir": "استخدم مساراً مطلقاً لمجلد وكيل Pi أو ~/...؛ تختلف المسارات النسبية حسب مجلد العمل.",
       "commandNotFound": "الأمر غير موجود",
       "validate": "تحقّق",
       "advanced": "متقدّم",
@@ -1611,7 +1611,14 @@
       "levelsEmptyError": "اختر مستوى واحدًا على الأقل — بدون أي مستوى يعود pi إلى Off.",
       "wireValuesTitle": "متقدم: القيم المرسلة إلى المزوّد",
       "wireValuesHint": "اتركه فارغًا لإرسال اسم المستوى كما هو. اضبطه عندما تتوقع نقطة النهاية صيغة أخرى — الواجهات على نمط Google تحتاج LOW / HIGH.",
-      "defaultLevelUnlisted": "هذا المستوى ليس ضمن القائمة أعلاه — سيخفّضه pi."
+      "defaultLevelUnlisted": "هذا المستوى ليس ضمن القائمة أعلاه — سيخفّضه pi.",
+      "modelLevels": "يوفّر {model}: {levels}.",
+      "modelNoThinking": "لا يملك {model} مستويات تفكير — يشغّله Pi دائمًا مع إيقاف التفكير.",
+      "levelClamped": "لا يوفّر {model} المستوى {level}، لذا يشغّله Pi بالمستوى {effective}. تظل النماذج التي توفّر {level} تستخدمه.",
+      "modelNotListed": "لا يعرض Pi هذا النموذج لهذا المزوّد. تحقّق من معرّف النموذج — لا يعرض Pi إلا المزوّدين الذين لديه مفتاح API أو تسجيل دخول لهم.",
+      "catalogUnavailable": "تعذّر سؤال Pi عن مستويات التفكير التي يوفّرها هذا النموذج.",
+      "configLoadFailed": "تعذّرت قراءة إعدادات Pi: {message}",
+      "runtimeTooOld": "إصدار Pi هذا قديم جدًا: يحتاج Codeg إلى Pi {min} أو أحدث لفتح جلسة. حدّثه أولًا."
     },
     "addCustomAgent": "إضافة وكيل مخصص",
     "addCustomAgentHint": "سجّل أي وكيل متوافق مع ACP. اختر واحدًا من سجل ACP العام، أو الصق معلومات السجل الخاصة به.",
@@ -1999,7 +2006,7 @@
       "tasks": "المهام قيد الانتظار",
       "loadingSubsessions": "جارٍ تحميل المحادثات الفرعية…",
       "forge": "لوحة المستودع",
-      "canvas": "محادثات لا نهائية",
+      "canvas": "لوحة لا نهائية",
       "folderGroup": {
         "newGroup": "مجموعة جديدة",
         "newGroupTitle": "مجموعة مجلدات جديدة",
@@ -2015,7 +2022,12 @@
         "removeFromGroup": "بدون مجموعة",
         "newGroupAndMove": "مجموعة جديدة…",
         "dropToUngroup": "أفلِت هنا لإزالته من المجموعة"
-      }
+      },
+      "recentFilterAll": "الكل",
+      "recentFilterTitle": "عرض في الأحدث: {filter}",
+      "noRecentChats": "لا توجد محادثات دردشة حديثة",
+      "noRecentFolders": "لا توجد محادثات مجلدات حديثة",
+      "recentFilterMenuLabel": "عرض في الأحدث"
     },
     "conversation": {
       "reloadFailed": "فشل إعادة تحميل المحادثة: {message}",
@@ -3043,6 +3055,7 @@
           "turnFailedUnknown": "أنهى {agent} الجولة بسبب توقف غير معروف.",
           "turnFailedAuthRequired": "يحتاج {agent} إلى تسجيل دخولك من جديد قبل تنفيذ هذه الجولة. سجّل الدخول من الإعدادات ثم أعد إرسال الرسالة.",
           "agentAuthRequired": "تعذّر على {agent} بدء جلسة: لا توجد بيانات اعتماد صالحة للاستخدام. سجّل الدخول من جديد عبر الإعدادات ← الوكلاء ← {agent}، ثم أعد فتح هذه المحادثة.",
+          "agentRuntimeOutdated": "{agent} قديم جدًا بالنسبة إلى هذا الإصدار من Codeg. حدّثه، ثم أعد فتح هذه المحادثة.",
           "grokModelSwitchIncompatibleAgent": "لا يمكن لـ {agent} التبديل إلى هذا النموذج في محادثة قائمة. ابدأ جلسة جديدة لاستخدامه.",
           "setModeFailed": "تعذّر على {agent} تبديل الوضع.",
           "setConfigOptionFailed": "تعذّر على {agent} تطبيق هذا الإعداد.",
@@ -3073,7 +3086,8 @@
           "httpStatus": " (HTTP {status})"
         },
         "configOptionAdjusted": "ضبط {agent} {option} على {actual} بدلاً من {requested}",
-        "noticeTitle": "{agent}: {title}"
+        "noticeTitle": "{agent}: {title}",
+        "pluginLoadFailedTitle": "تعذّر على {agent} تحميل {count} من الإضافات"
       },
       "connectionLifecycle": {
         "tasks": {
@@ -3711,7 +3725,22 @@
           "outputMissing": "اقتطع codex مُخرَج النص البرمجي وأزال الفاصل الخاص بهذا الأمر، لذا تعذّر نسب أي مُخرَج إليه.",
           "sharedWith": "يحتوي هذا المقطع أيضًا على مُخرَج {commands} — إذ اقتطع codex الفواصل الخاصة بها.",
           "truncated": "مقتطع"
-        }
+        },
+        "visualizeTitle": "تصوّر بياني",
+        "visualizeWide": "عريض",
+        "visualizeLoading": "جارٍ تحميل التصوّر البياني…",
+        "visualizeError": "تعذّر تحميل التصوّر البياني",
+        "visualizeReload": "إعادة التحميل",
+        "visualizeOpenFile": "فتح الملف",
+        "visualizeExpand": "عرض الكل",
+        "visualizeCollapse": "عرض أقل",
+        "visualizeScriptsOn": "البرامج النصية مفعّلة",
+        "visualizeScriptsOff": "تفعيل البرامج النصية",
+        "visualizeScriptsHint": "تشغيل البرامج النصية للتصوّر البياني ليصبح تفاعليًا. يعمل داخل بيئة معزولة ولا يمكنه الوصول إلى الشبكة أو ملفاتك.",
+        "visualizeFrameTitle": "تصوّر بياني من Codex",
+        "htmlPreviewOpen": "معاينة",
+        "htmlPreviewOpenAria": "معاينة {name}",
+        "htmlPreviewHide": "إخفاء المعاينة"
       },
       "messageNav": {
         "title": "تنقل الرسائل",
@@ -4236,13 +4265,14 @@
     "agentTypeRequired": "نوع الوكيل مطلوب.",
     "agentTypeImmutableHint": "لا يمكن تغيير نوع الوكيل بعد الإنشاء.",
     "model": "النموذج",
-    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
+    "modelPlaceholderCodex": "gpt-6.1-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "النموذج الرئيسي",
     "claudeReasoningModel": "نموذج الاستدلال (التفكير)",
     "claudeHaikuDefaultModel": "نموذج Haiku الافتراضي",
     "claudeSonnetDefaultModel": "نموذج Sonnet الافتراضي",
     "claudeOpusDefaultModel": "نموذج Opus الافتراضي",
+    "claudeFableDefaultModel": "نموذج Fable الافتراضي",
     "claudeCustomModelOption": "معرّف النموذج المخصّص",
     "claudeCustomModelOptionName": "اسم النموذج المخصّص",
     "claudeCustomModelOptionDescription": "وصف النموذج المخصّص",
@@ -4745,7 +4775,8 @@
     "none": "لا توجد فروع",
     "local": "محلي",
     "remote": "بعيد",
-    "useCustom": "استخدام \"{query}\""
+    "useCustom": "استخدام \"{query}\"",
+    "head": "HEAD"
   },
   "BackupSettings": {
     "tabs": {
@@ -5519,7 +5550,6 @@
     "promptPlaceholder": "صف المهمة للوكيل — استخدم @ للإشارة إلى الملفات و / للأوامر",
     "folderPlaceholder": "اختر مجلدًا",
     "baseBranch": "الفرع الأساسي",
-    "baseBranchPlaceholder": "الفرع الحالي",
     "baseBranchDefault": "الفرع الحالي عند بدء المهمة",
     "baseBranchHint": "تتفرّع المهمة من هذا الفرع، ويعيدها الدمج إليه.",
     "agentInheritedHint": "موروث من إعدادات المهام — عدِّله ليصبح خاصًا بهذه المهمة",
@@ -5651,8 +5681,8 @@
     "eventContextCompact": "ضغط السياق",
     "eventUserAction": "إجراء المستخدم",
     "eventDiffStat": "لقطة التغييرات",
-    "eventForgeWriteback": "تم التعليق على المشكلة",
-    "eventForgeWritebackFailed": "فشل التعليق على المشكلة",
+    "eventForgeWriteback": "تم التعليق على العنصر",
+    "eventForgeWritebackFailed": "فشل التعليق على العنصر",
     "actionDeliverPr": "فتح طلب سحب",
     "actionDeliverPrMr": "فتح طلب دمج",
     "actionDeliverPrBack": "ادفع إلى طلب السحب",
@@ -6186,7 +6216,7 @@
     "scenarioPlanFirst": "الخطة أولاً",
     "scenarioPlanFirstHint": "يتأكد الوكيل من أن المشكلة حقيقية ثم يقدّم خطة تنفيذ ويتوقف — وافق عليها بإعادة المهمة لتنفيذها.",
     "scenarioReviewFix": "مراجعة وإصلاح",
-    "scenarioReviewFixHint": "يراجع التغييرات ويصلح المشكلات فوقها؛ وعند القبول تُدفع الإيداعات إلى الفرع نفسه.",
+    "scenarioReviewFixHint": "يحكم الوكيل أولاً على ما إذا كان النهج نفسه سليماً، ولا يصلح المشكلات فوقه إلا إذا كان كذلك؛ وإلا فلا يودِع شيئاً ويعيد إليك المراجعة لتقرر. وعند القبول تُدفع الإصلاحات إلى الفرع نفسه.",
     "scenarioReviewOnly": "مراجعة فقط",
     "scenarioReviewOnlyHint": "تقرير مراجعة بالملاحظات والاقتراحات دون أي إيداع — أعد المهمة إذا أردت تطبيق الإصلاحات.",
     "settingsTitle": "إعدادات اللوحة",
@@ -6214,7 +6244,7 @@
     "save": "حفظ"
   },
   "Canvas": {
-    "title": "محادثات لا نهائية",
+    "title": "لوحة لا نهائية",
     "untitled": "محادثة بلا عنوان",
     "unresolvedConversation": "تم حذف المحادثة",
     "removeCard": "إزالة البطاقة",
@@ -6302,7 +6332,36 @@
     "removeTerminalCard": "إزالة بطاقة الطرفية",
     "terminalNoDirectory": "لا يوجد دليل عمل لهذه البطاقة",
     "confirmDeleteTerminals": "سيتم إغلاق {count} من الطرفيات قيد التشغيل وإنهاء عملياتها.",
-    "confirmDeleteNotesAndTerminals": "سيتم حذف {notes} من الملاحظات التي كتبتها نهائيًا، وإنهاء {terminals} من الطرفيات قيد التشغيل."
+    "confirmDeleteNotesAndTerminals": "سيتم حذف {notes} من الملاحظات التي كتبتها نهائيًا، وإنهاء {terminals} من الطرفيات قيد التشغيل.",
+    "boardsTitle": "اللوحات",
+    "boardsSubtitle": "كل لوحة مساحة لا نهائية مستقلة تضم مناطق وبطاقات محادثات وملاحظات وملفات وطرفيات.",
+    "boardCount": "{count, plural, =0 {لا توجد لوحات} one {لوحة واحدة} two {لوحتان} few {# لوحات} many {# لوحة} other {# لوحة}}",
+    "newBoard": "لوحة جديدة",
+    "newBoardTitle": "لوحة جديدة",
+    "editBoard": "تعديل اللوحة…",
+    "editBoardTitle": "تعديل اللوحة",
+    "deleteBoard": "حذف اللوحة…",
+    "openBoard": "فتح",
+    "boardMenu": "خيارات اللوحة",
+    "boardName": "الاسم",
+    "boardDescription": "الوصف",
+    "boardDescriptionPlaceholder": "ما الغرض من هذه اللوحة؟ (اختياري)",
+    "untitledBoard": "لوحة بلا عنوان",
+    "boardItemCount": "{count, plural, =0 {فارغة} one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصرًا} other {# عنصر}}",
+    "boardEditedAt": "عُدّلت {time}",
+    "boardsEmpty": "لا توجد لوحات بعد",
+    "boardsEmptyHint": "أنشئ لوحة لتنظيم عملك مكانيًا. لكل لوحة مناطقها وبطاقاتها وملاحظاتها الخاصة.",
+    "searchBoards": "البحث في اللوحات…",
+    "noBoardsMatch": "لا توجد لوحات تطابق «{query}»",
+    "boardsLoadFailed": "تعذّر تحميل اللوحات",
+    "retry": "إعادة المحاولة",
+    "backToBoards": "العودة إلى كل اللوحات",
+    "boardDeleted": "تم حذف هذه اللوحة",
+    "deleteBoardTitle": "حذف هذه اللوحة؟",
+    "deleteBoardDescription": "سيتم حذف «{name}» وكل ما عليها نهائيًا. لن تتأثر المحادثات والمجلدات والملفات التي تعرضها.",
+    "deleteBoardItems": "تحتوي على {count, plural, one {عنصر واحد} two {عنصرين} few {# عناصر} many {# عنصرًا} other {# عنصر}}.",
+    "deleteBoardTerminals": "سيتم إغلاق {count, plural, one {طرفية واحدة} two {طرفيتين} few {# طرفيات} many {# طرفية} other {# طرفية}} عليها وإنهاء عملياتها.",
+    "deleteBoardConfirm": "حذف اللوحة"
   },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",

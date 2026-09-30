@@ -722,13 +722,6 @@
     "emptyNoAgent": "Keine verfügbaren Agenten.",
     "configManagement": "Konfigurationsverwaltung",
     "envVars": "Umgebungsvariablen",
-    "adapterChannel": {
-      "label": "Adapter-Version",
-      "description": "Installieren und Aktualisieren verwenden die von codeg geprüfte und angepinnte Version. Mit Neueste wird stattdessen die jeweils neueste npm-Version des Pakets installiert; schlägt das fehl, fällt codeg auf die angepinnte Version zurück und vermerkt es im Installationsprotokoll.",
-      "pinned": "Angepinnt (empfohlen)",
-      "latest": "Neueste (ungeprüft)",
-      "latestWarning": "Die neuesten Versionen sind ungeprüft und können diesen Agenten in codeg beschädigen; gelegentlich ist eine Version sogar bekanntermaßen defekt. Der Versionsstatus zeigt, was tatsächlich installiert ist."
-    },
     "hostTools": {
       "label": "Dateien und Befehle vom Agenten selbst ausführen lassen",
       "description": "codeg übernimmt Dateizugriffe und Terminalbefehle nicht mehr, sodass der Agent sie im eigenen Prozess ausführt – nur dort greifen seine eigene Sandbox und seine Berechtigungsregeln. Auch das Delegieren an andere Agenten wird deaktiviert, da dieselbe Arbeit sonst wieder über codeg liefe. codeg fügt selbst keine Sandbox hinzu; aktivieren Sie dies also nur, wenn im Agenten eine konfiguriert ist."
@@ -799,6 +792,7 @@
       "saveCodeBuddyConfig": "CodeBuddy-Konfiguration speichern",
       "saveKimiCodeConfig": "Kimi-Code-Konfiguration speichern",
       "customInstall": "Benutzerdefinierte Installation",
+      "upgradeToLatest": "Auf ungeprüfte neueste Version {version} aktualisieren",
       "saveKimiCodeRawConfig": "Save config.toml",
       "saveDeepSeekConfig": "DeepSeek-Konfiguration speichern",
       "diagnose": "Diagnose"
@@ -1046,9 +1040,9 @@
       "sandboxMode_read-only": "Nur lesen",
       "sandboxMode_workspace-write": "Workspace-Schreibzugriff",
       "sandboxMode_danger-full-access": "Vollzugriff (keine Sandbox)",
-      "sandboxModeReadOnlyAcpWarning": "Der ACP-Adapter liefert keine schreibgeschützte Sandbox mehr, daher laufen codeg-Sitzungen unabhängig von dieser Einstellung mit Schreibrecht im Arbeitsbereich. codeg wählt die strengste verfügbare Voreinstellung – jede Rechteausweitung kommt zu dir zur Freigabe –, doch Änderungen innerhalb des Arbeitsbereichs brauchen keine mehr. codex-CLI- und IDE-Sitzungen beachten „schreibgeschützt“ weiterhin.",
+      "sandboxModeReadOnlyAcpWarning": "codex-acp 1.7–1.13 liefern keine schreibgeschützte Sandbox: Mit diesen Adapterversionen läuft eine codeg-Sitzung unabhängig von dieser Einstellung mit Schreibrecht im Arbeitsbereich, wobei jede Rechteausweitung weiterhin zu dir zur Freigabe kommt. codex-acp 2.0 hat sie wiederhergestellt – aktualisiere den Adapter, falls ein älterer installiert ist. codex-CLI- und IDE-Sitzungen beachten „schreibgeschützt“ immer.",
       "sandboxModeHint": "Unter Windows wird Workspace-Schreibzugriff auf Nur-Lesen herabgestuft, sofern die experimentelle Windows-Sandbox von codex nicht aktiviert ist.",
-      "sandboxModeSeedsPresetHint": "codeg bildet dies auch auf die Start-Freigabe-Voreinstellung der Sitzung ab, wirkt sich also – anders als die Freigaberichtlinie – auf gewöhnliche Anfragen aus. Beachte: Bei der Standard-Voreinstellung des Adapters sichtet jetzt ein Modell die Rechteausweitungen vor und leitet nur weiter, was es für unsicher hält; wähle im Eingabefeld „Um Freigabe bitten“, um jede selbst zu prüfen. Die Voreinstellung im Eingabefeld hat immer Vorrang.",
+      "sandboxModeSeedsPresetHint": "codeg bildet dies auch auf die Start-Freigabe-Voreinstellung der Sitzung ab, wirkt sich also – anders als die Freigaberichtlinie – auf gewöhnliche Anfragen aus. Schreibgeschützt startet in „Read-only“. Mit der Freigaberichtlinie never startet Vollzugriff in „Full access“ und Schreibrecht im Arbeitsbereich in „Auto review“, wo ein Modell die Rechteausweitungen vorsichtet und nur weiterleitet, was es für unsicher hält. Mit jeder anderen Freigaberichtlinie starten Schreibrecht im Arbeitsbereich und Vollzugriff ab codex-acp 2.0 in „Workspace access“, das dir jede Rechteausweitung vorlegt, bei älteren Adaptern in „Auto review“. Ohne Einstellung bleibt die Adaptervorgabe „Auto review“. Die Voreinstellung im Eingabefeld hat immer Vorrang.",
       "writableRootsLabel": "Zusätzliche beschreibbare Ordner",
       "writableRootsHint": "Ein absoluter Pfad pro Zeile, zusätzlich zum Arbeitsverzeichnis.",
       "sandboxRootsRelativeError": "Muss ein absoluter Pfad sein – codex löst relative Angaben unter ~/.codex auf: {path}",
@@ -1389,6 +1383,7 @@
       "haikuDefaultModel": "Standard-Haiku-Modell",
       "sonnetDefaultModel": "Standard-Sonnet-Modell",
       "opusDefaultModel": "Standard-Opus-Modell",
+      "fableDefaultModel": "Standard-Fable-Modell",
       "customModelOption": "Benutzerdefinierte Modell-ID",
       "customModelOptionName": "Name des benutzerdefinierten Modells",
       "customModelOptionDescription": "Beschreibung des benutzerdefinierten Modells",
@@ -1407,7 +1402,9 @@
       "customInstallDescription": "Geben Sie die zu installierende Version ein. Dies installiert neu und ersetzt die aktuell installierte Version.",
       "customInstallVersionLabel": "Versionsnummer",
       "customInstallInvalid": "Geben Sie eine gültige Versionsnummer ein, z. B. 1.2.3.",
-      "customInstallSubmit": "Installieren"
+      "customInstallSubmit": "Installieren",
+      "confirmUpgradeToLatest": "{name} auf die ungeprüfte Version {version} aktualisieren?",
+      "confirmUpgradeToLatestDescription": "Diese Version wurde von codeg nicht geprüft. Sie kann {name} in codeg beschädigen; gelegentlich ist eine Version sogar bekanntermaßen defekt. Um zurückzukehren, installiere über „Benutzerdefinierte Installation“ die empfohlene Version {recommendedVersion} neu."
     },
     "errors": {
       "windowsFileLocked": "Die Dateien von {name} werden von einer laufenden Sitzung verwendet, daher kann Windows sie nicht ersetzen. Schließe alle {name}-Sitzungen und versuche es erneut.",
@@ -1496,7 +1493,7 @@
     "version": {
       "statusLabel": "Versionsstatus",
       "notInstalled": "Nicht installiert",
-      "remoteLocal": "Remote: {remoteVersion} · Lokal: {localVersion}",
+      "recommendedLocal": "Empfohlen: {recommendedVersion} · Lokal: {localVersion}",
       "localOnly": "Lokal: {localVersion}",
       "localInstalled": "{versionText}. Installiert.",
       "platformUnsupported": "{versionText}. Aktuelle Plattform unterstützt diesen Agenten nicht.",
@@ -1504,9 +1501,9 @@
       "clickInstall": "{versionText}. Rechts auf Installieren klicken.",
       "localUnrecognized": "{versionText}. Lokale Version ist nicht vergleichbar; zum Überschreiben bitte Upgrade versuchen.",
       "upgradeAvailable": "{versionText}. Upgrade verfügbar.",
-      "remoteUnavailable": "{versionText}. Remote-Version ist derzeit nicht verfügbar.",
+      "recommendedUnavailable": "{versionText}. Keine empfohlene Version verfügbar.",
       "latest": "{versionText}. Bereits aktuell.",
-      "latestChannel": "{versionText}. Neueste-Kanal ist aktiv; Aktualisieren installiert die neueste Version."
+      "unreviewedAvailable": "{versionText}. Eine neuere, ungeprüfte Version ist verfügbar."
     },
     "adapter": {
       "label": "ACP-Adapter",
@@ -1556,7 +1553,8 @@
         "medium": "Mittel",
         "high": "Hoch",
         "minimal": "Minimal",
-        "xhigh": "Sehr hoch"
+        "xhigh": "Sehr hoch",
+        "max": "Maximum"
       },
       "apiKeyLabel": "API-Schlüssel",
       "apiKeyHint": "Wird in ~/.pi/agent/auth.json für den ausgewählten Anbieter gespeichert.",
@@ -1570,7 +1568,9 @@
       "modeCustom": "Eigenes pi",
       "modeCustomHint": "Führe deinen eigenen pi-Build, deine Installation oder einen Wrapper aus.",
       "commandLabel": "pi-Befehl oder -Pfad",
-      "commandHint": "Ein absoluter Pfad, ein Befehlsname im PATH oder ein Wrapper-Skript (z. B. ./pi-test.sh eines Monorepos).",
+      "commandHint": "Verwende einen absoluten Pfad oder einen Befehlsnamen aus PATH.",
+      "relativeCommandPath": "Verwende einen absoluten Pi-Befehlspfad oder einen Befehlsnamen aus PATH.",
+      "relativeAgentDir": "Verwende ein absolutes Pi-Agent-Verzeichnis oder ~/...; relative Pfade hängen vom Arbeitsverzeichnis ab.",
       "commandNotFound": "Befehl nicht gefunden",
       "validate": "Prüfen",
       "advanced": "Erweitert",
@@ -1611,7 +1611,14 @@
       "levelsEmptyError": "Wähle mindestens eine Stufe — ohne eine fällt pi auf Off zurück.",
       "wireValuesTitle": "Erweitert: an den Anbieter gesendete Werte",
       "wireValuesHint": "Leer lassen, um den Stufennamen unverändert zu senden. Setze einen Wert, wenn dein Endpunkt etwas anderes erwartet — Google-artige Backends erwarten LOW / HIGH.",
-      "defaultLevelUnlisted": "Diese Stufe steht nicht in der Liste oben — pi würde sie begrenzen."
+      "defaultLevelUnlisted": "Diese Stufe steht nicht in der Liste oben — pi würde sie begrenzen.",
+      "modelLevels": "{model} bietet: {levels}.",
+      "modelNoThinking": "{model} hat keine Denkstufen — Pi führt es immer ohne Denken aus.",
+      "levelClamped": "{model} bietet {level} nicht an, daher führt Pi es mit {effective} aus. Modelle, die {level} anbieten, nutzen es weiterhin.",
+      "modelNotListed": "Pi listet dieses Modell für diesen Anbieter nicht auf. Prüfe die Modell-ID — Pi listet nur Anbieter, für die ein API-Schlüssel oder eine Anmeldung vorliegt.",
+      "catalogUnavailable": "Pi konnte nicht gefragt werden, welche Denkstufen dieses Modell anbietet.",
+      "configLoadFailed": "Die Pi-Einstellungen konnten nicht gelesen werden: {message}",
+      "runtimeTooOld": "Dieses Pi ist zu alt: Codeg benötigt Pi {min} oder neuer, um eine Sitzung zu öffnen. Aktualisiere es zuerst."
     },
     "addCustomAgent": "Eigenen Agenten hinzufügen",
     "addCustomAgentHint": "Registriere jeden ACP-kompatiblen Agenten. Wähle einen aus der öffentlichen ACP-Registry oder füge seine Registry-Informationen ein.",
@@ -1999,7 +2006,7 @@
       "tasks": "To-dos",
       "loadingSubsessions": "Unterkonversationen werden geladen…",
       "forge": "Repository-Panel",
-      "canvas": "Unendliche Unterhaltungen",
+      "canvas": "Unendlicher Canvas",
       "folderGroup": {
         "newGroup": "Neue Gruppe",
         "newGroupTitle": "Neue Ordnergruppe",
@@ -2015,7 +2022,12 @@
         "removeFromGroup": "Keine Gruppe",
         "newGroupAndMove": "Neue Gruppe…",
         "dropToUngroup": "Hier ablegen, um aus der Gruppe zu entfernen"
-      }
+      },
+      "recentFilterAll": "Alle",
+      "recentFilterTitle": "In „Zuletzt“ anzeigen: {filter}",
+      "noRecentChats": "Keine letzten Chats",
+      "noRecentFolders": "Keine letzten Ordner-Unterhaltungen",
+      "recentFilterMenuLabel": "In „Zuletzt“ anzeigen"
     },
     "conversation": {
       "reloadFailed": "Konversation konnte nicht neu geladen werden: {message}",
@@ -3043,6 +3055,7 @@
           "turnFailedUnknown": "{agent} hat die Runde mit einem unbekannten Stoppgrund beendet.",
           "turnFailedAuthRequired": "{agent} benötigt eine erneute Anmeldung, bevor diese Runde ausgeführt werden kann. Melde dich in den Einstellungen an und sende die Nachricht erneut.",
           "agentAuthRequired": "{agent} konnte keine Sitzung starten: Es sind keine verwendbaren Anmeldedaten vorhanden. Melde dich unter Einstellungen → Agenten → {agent} erneut an und öffne diese Unterhaltung neu.",
+          "agentRuntimeOutdated": "{agent} ist für diese Version von Codeg zu alt. Aktualisiere es und öffne diese Unterhaltung dann erneut.",
           "grokModelSwitchIncompatibleAgent": "{agent} kann in einer bestehenden Unterhaltung nicht zu diesem Modell wechseln. Starte eine neue Sitzung, um es zu verwenden.",
           "setModeFailed": "{agent} konnte den Modus nicht wechseln.",
           "setConfigOptionFailed": "{agent} konnte diese Einstellung nicht übernehmen.",
@@ -3073,7 +3086,8 @@
           "httpStatus": " (HTTP {status})"
         },
         "configOptionAdjusted": "{agent} hat {option} auf {actual} statt {requested} gesetzt",
-        "noticeTitle": "{agent}: {title}"
+        "noticeTitle": "{agent}: {title}",
+        "pluginLoadFailedTitle": "{agent} konnte {count, plural, one {# Plugin} other {# Plugins}} nicht laden"
       },
       "connectionLifecycle": {
         "tasks": {
@@ -3711,7 +3725,22 @@
           "outputMissing": "Codex hat die Skriptausgabe gekürzt und dabei das Trennzeichen dieses Befehls entfernt, sodass ihm keine Ausgabe zugeordnet werden konnte.",
           "sharedWith": "Enthält auch die Ausgabe von {commands} – codex hat deren Trennzeichen abgeschnitten.",
           "truncated": "gekürzt"
-        }
+        },
+        "visualizeTitle": "Visualisierung",
+        "visualizeWide": "Breit",
+        "visualizeLoading": "Visualisierung wird geladen…",
+        "visualizeError": "Die Visualisierung konnte nicht geladen werden",
+        "visualizeReload": "Neu laden",
+        "visualizeOpenFile": "Datei öffnen",
+        "visualizeExpand": "Alles anzeigen",
+        "visualizeCollapse": "Weniger anzeigen",
+        "visualizeScriptsOn": "Skripte aktiv",
+        "visualizeScriptsOff": "Skripte aktivieren",
+        "visualizeScriptsHint": "Führt die Skripte der Visualisierung aus, damit sie interaktiv ist. Sie läuft in einer Sandbox und hat keinen Zugriff auf das Netzwerk oder deine Dateien.",
+        "visualizeFrameTitle": "Codex-Visualisierung",
+        "htmlPreviewOpen": "Vorschau",
+        "htmlPreviewOpenAria": "Vorschau von {name}",
+        "htmlPreviewHide": "Vorschau ausblenden"
       },
       "messageNav": {
         "title": "Nachrichtennavigation",
@@ -4236,13 +4265,14 @@
     "agentTypeRequired": "Agententyp ist erforderlich.",
     "agentTypeImmutableHint": "Der Agententyp kann nach der Erstellung nicht mehr geändert werden.",
     "model": "Modell",
-    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
+    "modelPlaceholderCodex": "gpt-6.1-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "Hauptmodell",
     "claudeReasoningModel": "Reasoning-Modell (Thinking)",
     "claudeHaikuDefaultModel": "Standard Haiku-Modell",
     "claudeSonnetDefaultModel": "Standard Sonnet-Modell",
     "claudeOpusDefaultModel": "Standard Opus-Modell",
+    "claudeFableDefaultModel": "Standard Fable-Modell",
     "claudeCustomModelOption": "Benutzerdefinierte Modell-ID",
     "claudeCustomModelOptionName": "Name des benutzerdefinierten Modells",
     "claudeCustomModelOptionDescription": "Beschreibung des benutzerdefinierten Modells",
@@ -4745,7 +4775,8 @@
     "none": "Keine Branches",
     "local": "Lokal",
     "remote": "Remote",
-    "useCustom": "„{query}“ verwenden"
+    "useCustom": "„{query}“ verwenden",
+    "head": "HEAD"
   },
   "BackupSettings": {
     "tabs": {
@@ -5519,7 +5550,6 @@
     "promptPlaceholder": "Beschreibe die Aufgabe für den Agenten — @ für Dateiverweise, / für Befehle",
     "folderPlaceholder": "Ordner wählen",
     "baseBranch": "Basis-Branch",
-    "baseBranchPlaceholder": "Aktueller Branch",
     "baseBranchDefault": "Aktueller Branch beim Start der Aufgabe",
     "baseBranchHint": "Die Aufgabe zweigt von diesem Branch ab und wird beim Mergen wieder dorthin übernommen.",
     "agentInheritedHint": "Aus den Aufgaben-Einstellungen geerbt — Änderungen gelten nur für diese Aufgabe",
@@ -5651,8 +5681,8 @@
     "eventContextCompact": "Kontext-Komprimierung",
     "eventUserAction": "Benutzeraktion",
     "eventDiffStat": "Änderungs-Snapshot",
-    "eventForgeWriteback": "Im Issue kommentiert",
-    "eventForgeWritebackFailed": "Kommentar im Issue fehlgeschlagen",
+    "eventForgeWriteback": "Im Eintrag kommentiert",
+    "eventForgeWritebackFailed": "Kommentar im Eintrag fehlgeschlagen",
     "actionDeliverPr": "Pull Request öffnen",
     "actionDeliverPrMr": "Merge Request öffnen",
     "actionDeliverPrBack": "In den Pull Request pushen",
@@ -6186,7 +6216,7 @@
     "scenarioPlanFirst": "Erst planen",
     "scenarioPlanFirstHint": "Der Agent bestätigt, dass das Problem wirklich existiert, liefert einen Umsetzungsplan und stoppt — nach deiner Freigabe setzt er ihn per Rückgabe im selben Worktree um.",
     "scenarioReviewFix": "Review & Fix",
-    "scenarioReviewFixHint": "Änderungen reviewen und Probleme direkt beheben; nach der Abnahme gehen die Commits zurück auf den Branch.",
+    "scenarioReviewFixHint": "Der Agent prüft zuerst, ob der Ansatz selbst trägt, und behebt erst dann Probleme direkt darauf — trägt er nicht, committet er nichts und gibt dir das Review zur Entscheidung zurück. Nach der Abnahme gehen die Fixes zurück auf den Branch.",
     "scenarioReviewOnly": "Nur Review",
     "scenarioReviewOnlyHint": "Ein Review-Bericht mit Funden und Vorschlägen, ohne Commits — gib die Aufgabe zurück, wenn Fixes gewünscht sind.",
     "settingsTitle": "Panel-Einstellungen",
@@ -6214,7 +6244,7 @@
     "save": "Speichern"
   },
   "Canvas": {
-    "title": "Unendliche Unterhaltungen",
+    "title": "Unendlicher Canvas",
     "untitled": "Unbenannte Unterhaltung",
     "unresolvedConversation": "Unterhaltung gelöscht",
     "removeCard": "Karte entfernen",
@@ -6302,7 +6332,36 @@
     "removeTerminalCard": "Terminalkarte entfernen",
     "terminalNoDirectory": "Diese Karte hat kein Arbeitsverzeichnis",
     "confirmDeleteTerminals": "{count} laufende Terminal(s) werden geschlossen und ihre Prozesse beendet.",
-    "confirmDeleteNotesAndTerminals": "{notes} von dir geschriebene Notiz(en) werden endgültig gelöscht und {terminals} laufende Terminal(s) beendet."
+    "confirmDeleteNotesAndTerminals": "{notes} von dir geschriebene Notiz(en) werden endgültig gelöscht und {terminals} laufende Terminal(s) beendet.",
+    "boardsTitle": "Canvases",
+    "boardsSubtitle": "Jeder Canvas ist ein eigenes unendliches Board mit Regionen, Unterhaltungskarten, Notizen, Dateien und Terminals.",
+    "boardCount": "{count, plural, one {# Canvas} other {# Canvases}}",
+    "newBoard": "Neuer Canvas",
+    "newBoardTitle": "Neuer Canvas",
+    "editBoard": "Canvas bearbeiten…",
+    "editBoardTitle": "Canvas bearbeiten",
+    "deleteBoard": "Canvas löschen…",
+    "openBoard": "Öffnen",
+    "boardMenu": "Canvas-Optionen",
+    "boardName": "Name",
+    "boardDescription": "Beschreibung",
+    "boardDescriptionPlaceholder": "Wofür ist dieser Canvas? (optional)",
+    "untitledBoard": "Unbenannter Canvas",
+    "boardItemCount": "{count, plural, =0 {Leer} one {# Element} other {# Elemente}}",
+    "boardEditedAt": "Bearbeitet {time}",
+    "boardsEmpty": "Noch keine Canvases",
+    "boardsEmptyHint": "Erstelle einen Canvas, um deine Arbeit räumlich zu ordnen. Jeder Canvas hat eigene Regionen, Karten und Notizen.",
+    "searchBoards": "Canvases durchsuchen…",
+    "noBoardsMatch": "Kein Canvas passt zu „{query}“",
+    "boardsLoadFailed": "Canvases konnten nicht geladen werden",
+    "retry": "Erneut versuchen",
+    "backToBoards": "Zurück zu allen Canvases",
+    "boardDeleted": "Dieser Canvas wurde gelöscht",
+    "deleteBoardTitle": "Diesen Canvas löschen?",
+    "deleteBoardDescription": "„{name}“ und alles darauf werden endgültig gelöscht. Die angezeigten Unterhaltungen, Ordner und Dateien selbst bleiben unberührt.",
+    "deleteBoardItems": "Er enthält {count, plural, one {# Element} other {# Elemente}}.",
+    "deleteBoardTerminals": "{count, plural, one {# Terminal darauf wird geschlossen und sein Prozess beendet.} other {# Terminals darauf werden geschlossen und ihre Prozesse beendet.}}",
+    "deleteBoardConfirm": "Canvas löschen"
   },
   "ModelProviderPicker": {
     "placeholder": "Provider · Model",

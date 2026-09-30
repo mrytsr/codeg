@@ -20,7 +20,7 @@ pub use automation::{
     AutomationAction, AutomationConfig, AutomationDraft, AutomationInfo, AutomationRunInfo,
     AutomationRunStatus, IsolationMode, TriggerKind,
 };
-pub use canvas::{CanvasMutation, CanvasNode, CanvasSnapshot};
+pub use canvas::{CanvasBoard, CanvasBoardSummary, CanvasMutation, CanvasNode, CanvasSnapshot};
 #[allow(unused_imports)]
 pub use chat_channel::{ChannelStatusInfo, ChatChannelInfo, ChatChannelMessageLogInfo};
 pub use conversation::{

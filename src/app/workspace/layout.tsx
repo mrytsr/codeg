@@ -429,9 +429,13 @@ function WorkspaceContent({ children }: { children: React.ReactNode }) {
                 {/* Pane activation lives on the CONTENT, not the top bar: clicking
                   edge chrome (terminal/settings/toggles) or grabbing a drag
                   region stays pane-neutral so it never hijacks close-tab /
-                  next-tab routing. Tabs self-activate via switchTab. */}
+                  next-tab routing. Tabs self-activate via switchTab. Neither
+                  handler fires for a click inside an iframe or a native page;
+                  `data-workspace-pane` is how ⌘W pressed there finds its pane
+                  (see `menu-close-shortcut`). */}
                 <div
                   className="relative flex-1 min-h-0 overflow-hidden"
+                  data-workspace-pane="conversation"
                   onPointerDownCapture={markConversationActive}
                   onFocusCapture={markConversationActive}
                 >
@@ -528,6 +532,7 @@ function WorkspaceContent({ children }: { children: React.ReactNode }) {
                   the top bar (see the conversation section). */}
               <div
                 className="flex min-h-0 flex-1 flex-col overflow-hidden"
+                data-workspace-pane="files"
                 onPointerDownCapture={markFileActive}
                 onFocusCapture={markFileActive}
               >
@@ -591,7 +596,10 @@ function MobileWorkspaceContent({ children }: { children: React.ReactNode }) {
           // Mobile mirrors the desktop chrome: no tab strip — the conversation
           // detail header (folder › title) renders inside {children}, and tabs
           // are navigated from the sidebar (single active conversation at a time).
-          <section className="flex h-full min-h-0 flex-col overflow-hidden">
+          <section
+            className="flex h-full min-h-0 flex-col overflow-hidden"
+            data-workspace-pane="conversation"
+          >
             <div className="relative flex-1 min-h-0 overflow-hidden">
               {children}
             </div>
@@ -599,7 +607,10 @@ function MobileWorkspaceContent({ children }: { children: React.ReactNode }) {
         ) : (
           // File view: the shared FileWorkspaceHeader (folder › file breadcrumb)
           // replaces the file tab strip, matching the desktop file column.
-          <section className="flex h-full min-h-0 flex-col overflow-hidden">
+          <section
+            className="flex h-full min-h-0 flex-col overflow-hidden"
+            data-workspace-pane="files"
+          >
             <FileWorkspaceHeader />
             <div className="flex-1 min-h-0 overflow-hidden">
               <FileWorkspacePanel />

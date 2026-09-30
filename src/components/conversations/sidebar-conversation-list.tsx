@@ -79,8 +79,11 @@ import {
   saveFolderExpanded,
   loadFolderGroupExpanded,
   saveFolderGroupExpanded,
+  loadRecentFilter,
   loadSectionCollapsed,
+  saveRecentFilter,
   saveSectionCollapsed,
+  type SidebarRecentFilter,
   loadConversationExpanded,
   saveConversationExpanded,
   DEFAULT_SECTION_ORDER,
@@ -1022,6 +1025,14 @@ export function SidebarConversationList({
   const foldersExpanded = !sectionCollapsed.folders
   const chatsExpanded = !sectionCollapsed.chats
   const recentExpanded = !sectionCollapsed.recent
+  // Which kinds the Recent section lists (all / chats / folder sessions).
+  // Persisted: it is a view preference, not a reading gesture. Hydrated from
+  // localStorage after mount like the section collapse state.
+  const [recentFilter, setRecentFilter] = useState<SidebarRecentFilter>("all")
+  const changeRecentFilter = useCallback((next: SidebarRecentFilter) => {
+    saveRecentFilter(next)
+    setRecentFilter(next)
+  }, [])
   // How many Recent rows are currently revealed. Session-only (not persisted):
   // "show me more of this list right now" is a reading gesture, not a setting —
   // and a fresh sidebar should open short again.
@@ -1151,6 +1162,7 @@ export function SidebarConversationList({
     setFolderExpanded(loadFolderExpanded())
     setFolderGroupExpanded(loadFolderGroupExpanded())
     setSectionCollapsed(loadSectionCollapsed())
+    setRecentFilter(loadRecentFilter())
     setConversationExpanded(new Set(loadConversationExpanded()))
   }, [])
 
@@ -1354,11 +1366,12 @@ export function SidebarConversationList({
       showCompleted,
       sortMode,
       openFolderIds,
-      recentConvsRef.current
+      recentConvsRef.current,
+      recentFilter
     )
     recentConvsRef.current = next
     return next
-  }, [conversations, showCompleted, sortMode, openFolderIds])
+  }, [conversations, showCompleted, sortMode, openFolderIds, recentFilter])
 
   // Maps each open worktree child folder → its (open) root folder. A child is
   // only redirected when its parent is also open, so a worktree whose root was
@@ -2804,6 +2817,12 @@ export function SidebarConversationList({
           onNewFolderGroup={
             row.section === "folders" ? openNewGroupDialog : undefined
           }
+          // Recent's kind filter (All / Chat / Folders). Stable callback, so
+          // the memo holds; the value only changes when the user picks another one.
+          recentFilter={row.section === "recent" ? recentFilter : undefined}
+          onRecentFilterChange={
+            row.section === "recent" ? changeRecentFilter : undefined
+          }
           // Every section header carries a top gap: it separates "Folders" from
           // the "Pinned" section above it, and — now that a fixed New chat /
           // Search region sits above the scrolled list — gives the first section
@@ -2921,11 +2940,17 @@ export function SidebarConversationList({
     }
     if (row.kind === "recent-empty") {
       // Empty "Recent" section hint — same folderless, rail-less treatment as
-      // the other two. Only reachable in a workspace with no conversations at
-      // all, since Recent spans every section.
+      // the other two. Reachable when no conversation passes Recent's gates
+      // (pinned, hidden-completed and closed-folder ones stay out), or when
+      // the kind filter narrows the list to nothing — the hint names the
+      // filter so the user knows what to undo.
       return (
         <div className="px-[0.5rem] py-[0.375rem] text-[0.75rem] text-muted-foreground/70">
-          {t("noRecent")}
+          {recentFilter === "chats"
+            ? t("noRecentChats")
+            : recentFilter === "folders"
+              ? t("noRecentFolders")
+              : t("noRecent")}
         </div>
       )
     }

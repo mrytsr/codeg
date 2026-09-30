@@ -112,6 +112,15 @@ fn tab_id_for_webview(pointer: usize) -> Option<String> {
     })
 }
 
+/// Main thread only: the tab whose surface has keyboard focus in `window` —
+/// its webview is the window's first responder, or holds the view that is.
+#[cfg(target_os = "macos")]
+pub fn tab_with_keyboard_focus(window: &objc2_app_kit::NSWindow) -> Option<String> {
+    shim::first_responder_chain(window)
+        .into_iter()
+        .find_map(tab_id_for_webview)
+}
+
 /// One sink for every tab: messages are attributed by source webview, because
 /// an adopted popup shares its opener's user-content controller (macOS).
 fn message_sink(app: &AppHandle) -> MessageSink {

@@ -14,7 +14,9 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, sel, DeclaredClass, MainThreadMarker, MainThreadOnly, Message};
-use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSImage, NSImageCompressionFactor};
+use objc2_app_kit::{
+    NSBitmapImageFileType, NSBitmapImageRep, NSImage, NSImageCompressionFactor, NSView, NSWindow,
+};
 use objc2_foundation::{
     ns_string, NSArray, NSDate, NSDictionary, NSError, NSNumber, NSProcessInfo, NSString, NSURL,
     NSURLErrorFailingURLErrorKey, NSUUID,
@@ -530,6 +532,24 @@ fn with_inspector<R>(
 
 pub fn webview_pointer(webview: &wry::WebView) -> usize {
     Retained::as_ptr(&webview.webview()) as usize
+}
+
+/// `window`'s first responder and every view it sits in, innermost first, as
+/// pointers comparable with [`webview_pointer`]. Empty when no view holds
+/// keyboard focus (the window itself is the first responder).
+pub fn first_responder_chain(window: &NSWindow) -> Vec<usize> {
+    let mut chain = Vec::new();
+    let Some(Ok(mut view)) = window.firstResponder().map(|r| r.downcast::<NSView>()) else {
+        return chain;
+    };
+    loop {
+        chain.push(Retained::as_ptr(&view) as usize);
+        // SAFETY: main thread (the caller holds the key window), live view.
+        match unsafe { view.superview() } {
+            Some(parent) => view = parent,
+            None => return chain,
+        }
+    }
 }
 
 /// Diagnostic view of the native state (dev puppet only).

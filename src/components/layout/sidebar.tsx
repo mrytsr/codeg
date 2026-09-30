@@ -71,6 +71,7 @@ import {
   type SidebarSortMode,
   type SidebarSectionOrder,
 } from "@/lib/sidebar-view-mode-storage"
+import { useCanvasBoardsStore } from "@/stores/canvas-boards-store"
 import { SidebarSectionOrderControl } from "./sidebar-section-order-control"
 import { cn } from "@/lib/utils"
 
@@ -574,6 +575,12 @@ export function Sidebar() {
             active={routeId === "canvas"}
             onClick={() => {
               if (isMobile) toggle()
+              // Coming from elsewhere returns to the canvas that was open;
+              // clicking it again from inside one goes up to the list — the
+              // route's own home, like re-tapping an active tab.
+              if (routeId === "canvas") {
+                useCanvasBoardsStore.getState().closeBoard()
+              }
               setRoute("canvas")
             }}
           />

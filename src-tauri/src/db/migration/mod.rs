@@ -49,6 +49,8 @@ mod m20260906_000002_conversation_model_selection;
 mod m20260907_000001_canvas_node_path;
 mod m20260917_000001_custom_agent_model_env;
 mod m20260917_000002_agent_setting_catalog_selection;
+mod m20260929_000001_canvas_board;
+mod m20260930_000001_agent_setting_drop_adapter_channel;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -104,6 +106,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260907_000001_canvas_node_path::Migration),
             Box::new(m20260917_000001_custom_agent_model_env::Migration),
             Box::new(m20260917_000002_agent_setting_catalog_selection::Migration),
+            Box::new(m20260929_000001_canvas_board::Migration),
+            Box::new(m20260930_000001_agent_setting_drop_adapter_channel::Migration),
         ]
     }
 }

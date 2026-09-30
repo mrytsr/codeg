@@ -722,13 +722,6 @@
     "emptyNoAgent": "暫無可用 Agent。",
     "configManagement": "配置管理",
     "envVars": "環境變數",
-    "adapterChannel": {
-      "label": "轉接器版本",
-      "description": "安裝與升級預設使用 codeg 審查並固定的版本。選擇最新版後會改為安裝該套件當時最新的 npm 版本；若最新版安裝失敗，codeg 會回退到固定版本，並在安裝日誌中說明。",
-      "pinned": "固定版本（建議）",
-      "latest": "最新版（未經審查）",
-      "latestWarning": "最新版本未經審查，可能破壞該 Agent 在 codeg 中的使用，偶爾甚至是已知損壞的版本。實際安裝的版本以版本狀態為準。"
-    },
     "hostTools": {
       "label": "由 Agent 自行處理檔案與指令",
       "description": "codeg 不再代為提供檔案存取與終端指令，改由 Agent 在自己的行程中執行——只有這樣它自帶的沙箱與權限規則才會生效。同時會關閉向其他 Agent 委派，否則同樣的操作又會繞回 codeg 執行。codeg 本身不提供沙箱，因此請僅在 Agent 已設定沙箱時開啟。"
@@ -799,6 +792,7 @@
       "saveCodeBuddyConfig": "儲存 CodeBuddy 設定",
       "saveKimiCodeConfig": "儲存 Kimi Code 設定",
       "customInstall": "自訂安裝",
+      "upgradeToLatest": "升級到未經審查的最新版本 {version}",
       "saveKimiCodeRawConfig": "儲存 config.toml",
       "saveDeepSeekConfig": "儲存 DeepSeek 設定",
       "diagnose": "診斷"
@@ -1046,9 +1040,9 @@
       "sandboxMode_read-only": "唯讀",
       "sandboxMode_workspace-write": "可寫工作區",
       "sandboxMode_danger-full-access": "完全開放（無沙箱）",
-      "sandboxModeReadOnlyAcpWarning": "ACP 轉接器已經沒有唯讀沙箱了，因此無論這裡怎麼選，codeg 工作階段都以可寫工作區執行。codeg 會選中它能選的最嚴格預設——每一次越權都交給你審批——但工作區內部的修改不再需要審批。codex CLI 和 IDE 工作階段仍然遵守唯讀。",
+      "sandboxModeReadOnlyAcpWarning": "codex-acp 1.7–1.13 沒有唯讀沙箱：在這些轉接器版本上，無論這裡怎麼選，codeg 工作階段都以可寫工作區執行，但每一次越權仍會交給你審批。codex-acp 2.0 已恢復唯讀沙箱，若裝的是舊版轉接器請升級。codex CLI 和 IDE 工作階段始終遵守唯讀。",
       "sandboxModeHint": "在 Windows 上，未開啟 codex 的實驗性 Windows 沙箱時，可寫工作區會被降級為唯讀。",
-      "sandboxModeSeedsPresetHint": "codeg 還會用它推導工作階段的初始審批預設，因此與審批策略不同，它對一般提問同樣生效。注意：轉接器的預設現在會讓模型先篩一遍越權請求，只把它判定為不安全的轉給你；想逐條自己審，在輸入框中選「請求批准」。輸入框中選擇的預設始終覆蓋它。",
+      "sandboxModeSeedsPresetHint": "codeg 還會用它推導工作階段的初始審批預設，因此與審批策略不同，它對一般提問同樣生效。唯讀從「Read-only」開始。審批策略為 never 時，完全存取從「Full access」開始，可寫工作區從「Auto review」開始——由模型先篩一遍越權請求，只把它判定為不安全的轉給你。審批策略為其他值時，可寫工作區與完全存取在 codex-acp 2.0 及以上從「Workspace access」開始，每一次越權都交給你審批；在更舊的轉接器上從「Auto review」開始。未設定時沿用轉接器預設的「Auto review」。輸入框中選擇的預設始終覆蓋它。",
       "writableRootsLabel": "額外可寫目錄",
       "writableRootsHint": "每行一個絕對路徑，作為工作目錄之外的額外可寫位置。",
       "sandboxRootsRelativeError": "必須是絕對路徑 — codex 會把相對路徑解析到 ~/.codex 底下：{path}",
@@ -1389,6 +1383,7 @@
       "haikuDefaultModel": "Haiku 預設模型",
       "sonnetDefaultModel": "Sonnet 預設模型",
       "opusDefaultModel": "Opus 預設模型",
+      "fableDefaultModel": "Fable 預設模型",
       "customModelOption": "自訂模型 ID",
       "customModelOptionName": "自訂模型名稱",
       "customModelOptionDescription": "自訂模型描述",
@@ -1407,7 +1402,9 @@
       "customInstallDescription": "輸入要安裝的版本號。將重新安裝並替換目前已安裝的版本。",
       "customInstallVersionLabel": "版本號",
       "customInstallInvalid": "請輸入有效的版本號，例如 1.2.3。",
-      "customInstallSubmit": "安裝"
+      "customInstallSubmit": "安裝",
+      "confirmUpgradeToLatest": "將 {name} 升級到未經審查的 {version}？",
+      "confirmUpgradeToLatestDescription": "此版本未經 codeg 審查，可能破壞 {name} 在 codeg 中的使用，偶爾甚至是已知損壞的版本。如需回退，可透過「自訂安裝」重新安裝建議版本 {recommendedVersion}。"
     },
     "errors": {
       "windowsFileLocked": "{name} 的程式檔案正被執行中的工作階段佔用，Windows 下無法替換。請先關閉所有 {name} 工作階段後重試。",
@@ -1496,7 +1493,7 @@
     "version": {
       "statusLabel": "版本狀態",
       "notInstalled": "未安裝",
-      "remoteLocal": "遠端：{remoteVersion} · 本地：{localVersion}",
+      "recommendedLocal": "建議：{recommendedVersion} · 本地：{localVersion}",
       "localOnly": "本機：{localVersion}",
       "localInstalled": "{versionText}。已安裝。",
       "platformUnsupported": "{versionText}。目前平台不支援該 Agent。",
@@ -1504,9 +1501,9 @@
       "clickInstall": "{versionText}。請點擊右側安裝。",
       "localUnrecognized": "{versionText}。本地版本無法識別，可嘗試升級覆蓋安裝。",
       "upgradeAvailable": "{versionText}。發現可升級版本。",
-      "remoteUnavailable": "{versionText}。遠端版本暫不可用。",
+      "recommendedUnavailable": "{versionText}。暫無建議版本。",
       "latest": "{versionText}。已是最新版本。",
-      "latestChannel": "{versionText}。已啟用最新版通道；升級會安裝最新版本。"
+      "unreviewedAvailable": "{versionText}。有未經審查的較新版本。"
     },
     "adapter": {
       "label": "ACP 轉接器",
@@ -1556,7 +1553,8 @@
         "medium": "中",
         "high": "高",
         "minimal": "極低",
-        "xhigh": "極高"
+        "xhigh": "極高",
+        "max": "最高"
       },
       "apiKeyLabel": "API Key",
       "apiKeyHint": "為所選提供方寫入 ~/.pi/agent/auth.json。",
@@ -1570,7 +1568,9 @@
       "modeCustom": "自訂 pi",
       "modeCustomHint": "執行你自己的 pi 建置、安裝或包裝腳本。",
       "commandLabel": "pi 命令或路徑",
-      "commandHint": "絕對路徑、PATH 上的命令名，或包裝腳本（如 monorepo 的 ./pi-test.sh）。",
+      "commandHint": "請使用絕對路徑或 PATH 中的命令名稱。",
+      "relativeCommandPath": "請使用 Pi 命令的絕對路徑或 PATH 中的命令名稱。",
+      "relativeAgentDir": "請使用 Pi agent 目錄的絕對路徑或 ~/...；相對目錄會隨工作區變動。",
       "commandNotFound": "找不到命令",
       "validate": "驗證",
       "advanced": "進階",
@@ -1611,7 +1611,14 @@
       "levelsEmptyError": "至少選一個等級——一個都不選時 pi 只會退回 Off。",
       "wireValuesTitle": "進階：送給供應商的值",
       "wireValuesHint": "留空表示原樣送出等級名稱。端點需要別的寫法時才填——Google 系需要 LOW / HIGH。",
-      "defaultLevelUnlisted": "該等級不在上面的可選清單裡——pi 會把它壓下來。"
+      "defaultLevelUnlisted": "該等級不在上面的可選清單裡——pi 會把它壓下來。",
+      "modelLevels": "{model} 提供：{levels}。",
+      "modelNoThinking": "{model} 沒有思考等級——Pi 執行它時一律關閉思考。",
+      "levelClamped": "{model} 不提供「{level}」，Pi 會以「{effective}」執行它；提供「{level}」的模型仍依「{level}」執行。",
+      "modelNotListed": "Pi 沒有在該提供方下列出此模型。請檢查模型 ID——Pi 只會列出已設定 API 金鑰或已登入的提供方。",
+      "catalogUnavailable": "無法向 Pi 查詢此模型提供哪些思考等級。",
+      "configLoadFailed": "無法讀取 Pi 的設定：{message}",
+      "runtimeTooOld": "此 Pi 版本過舊：Codeg 需要 Pi {min} 或更新版本才能開啟工作階段。請先更新 Pi。"
     },
     "addCustomAgent": "新增自訂智慧體",
     "addCustomAgentHint": "接入任何相容 ACP 的智慧體。可從公開 ACP 註冊表中選擇，或直接貼上其註冊表資訊。",
@@ -1999,7 +2006,7 @@
       "tasks": "待辦任務",
       "loadingSubsessions": "正在載入子會話…",
       "forge": "儲存庫面板",
-      "canvas": "無限會話",
+      "canvas": "無限畫布",
       "folderGroup": {
         "newGroup": "新增分組",
         "newGroupTitle": "新增資料夾分組",
@@ -2015,7 +2022,12 @@
         "removeFromGroup": "不分組",
         "newGroupAndMove": "新增分組…",
         "dropToUngroup": "拖到這裡可移出分組"
-      }
+      },
+      "recentFilterAll": "全部",
+      "recentFilterTitle": "最近顯示：{filter}",
+      "noRecentChats": "沒有最近的聊天",
+      "noRecentFolders": "沒有最近的資料夾對話",
+      "recentFilterMenuLabel": "最近顯示"
     },
     "conversation": {
       "reloadFailed": "會話重新載入失敗：{message}",
@@ -3043,6 +3055,7 @@
           "turnFailedUnknown": "{agent} 以未知的停止原因結束了此輪回覆。",
           "turnFailedAuthRequired": "{agent} 需要你重新登入後才能執行本輪回覆。請在設定中登入，然後重新傳送這則訊息。",
           "agentAuthRequired": "{agent} 無法建立工作階段：沒有可用的登入憑證。請在 設定 → 智能體 → {agent} 中重新登入，然後重新開啟此對話。",
+          "agentRuntimeOutdated": "{agent} 版本過舊，無法搭配目前版本的 Codeg 使用。請更新後重新開啟此對話。",
           "grokModelSwitchIncompatibleAgent": "{agent} 無法在既有對話中切換到該模型，請新建工作階段以使用它。",
           "setModeFailed": "{agent} 切換模式失敗。",
           "setConfigOptionFailed": "{agent} 未能套用該設定。",
@@ -3073,7 +3086,8 @@
           "httpStatus": "（HTTP {status}）"
         },
         "configOptionAdjusted": "{agent} 把{option}設成了 {actual}，而不是 {requested}",
-        "noticeTitle": "{agent}：{title}"
+        "noticeTitle": "{agent}：{title}",
+        "pluginLoadFailedTitle": "{agent} 有 {count} 個外掛載入失敗"
       },
       "connectionLifecycle": {
         "tasks": {
@@ -3711,7 +3725,22 @@
           "outputMissing": "codex 截斷指令碼輸出時捨棄了這個命令的分隔行，因此沒有輸出可歸屬給它。",
           "sharedWith": "本段還包含 {commands} 的輸出——它們的分隔行已被 codex 截斷捨棄。",
           "truncated": "已截斷"
-        }
+        },
+        "visualizeTitle": "視覺化",
+        "visualizeWide": "寬版",
+        "visualizeLoading": "正在載入視覺化…",
+        "visualizeError": "無法載入視覺化內容",
+        "visualizeReload": "重新載入",
+        "visualizeOpenFile": "開啟檔案",
+        "visualizeExpand": "展開全部",
+        "visualizeCollapse": "收合",
+        "visualizeScriptsOn": "腳本已開啟",
+        "visualizeScriptsOff": "啟用腳本",
+        "visualizeScriptsHint": "執行視覺化中的腳本以支援互動。腳本在沙箱中執行，無法存取網路或你的檔案。",
+        "visualizeFrameTitle": "Codex 視覺化",
+        "htmlPreviewOpen": "預覽",
+        "htmlPreviewOpenAria": "預覽 {name}",
+        "htmlPreviewHide": "收起預覽"
       },
       "messageNav": {
         "title": "訊息導覽",
@@ -4236,13 +4265,14 @@
     "agentTypeRequired": "請選擇智能體類型。",
     "agentTypeImmutableHint": "智能體類型建立後不可修改。",
     "model": "模型",
-    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
+    "modelPlaceholderCodex": "gpt-6.1-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "主要模型",
     "claudeReasoningModel": "推理模型（思考）",
     "claudeHaikuDefaultModel": "預設 Haiku 模型",
     "claudeSonnetDefaultModel": "預設 Sonnet 模型",
     "claudeOpusDefaultModel": "預設 Opus 模型",
+    "claudeFableDefaultModel": "預設 Fable 模型",
     "claudeCustomModelOption": "自訂模型 ID",
     "claudeCustomModelOptionName": "自訂模型名稱",
     "claudeCustomModelOptionDescription": "自訂模型描述",
@@ -4745,7 +4775,8 @@
     "none": "無分支",
     "local": "本機",
     "remote": "遠端",
-    "useCustom": "使用「{query}」"
+    "useCustom": "使用「{query}」",
+    "head": "HEAD"
   },
   "BackupSettings": {
     "tabs": {
@@ -5519,7 +5550,6 @@
     "promptPlaceholder": "向 agent 描述任務——輸入 @ 可引用檔案，/ 可喚起指令",
     "folderPlaceholder": "選擇資料夾",
     "baseBranch": "基準分支",
-    "baseBranchPlaceholder": "目前分支",
     "baseBranchDefault": "任務開始時的目前分支",
     "baseBranchHint": "任務從該分支拉出工作樹，合併時也會落回該分支。",
     "agentInheritedHint": "繼承自任務設定，修改後僅對本任務生效",
@@ -6186,7 +6216,7 @@
     "scenarioPlanFirst": "先出方案",
     "scenarioPlanFirstHint": "先確認問題真實存在，再產出實作方案就停——你確認後退回任務，於同一工作樹實作。",
     "scenarioReviewFix": "審查並修復",
-    "scenarioReviewFixHint": "審查改動並順手修掉問題，驗收後提交推回原分支。",
+    "scenarioReviewFixHint": "智慧體先判斷方案本身是否合理，合理才在其上修復問題；不合理就不提交任何程式碼，帶著審查回來等你處理。驗收後修復提交推回原分支。",
     "scenarioReviewOnly": "僅審查",
     "scenarioReviewOnlyHint": "只出審查報告（問題、位置、建議），不改程式碼——需要修時退回任務即可。",
     "settingsTitle": "面板設定",
@@ -6214,7 +6244,7 @@
     "save": "儲存"
   },
   "Canvas": {
-    "title": "無限會話",
+    "title": "無限畫布",
     "untitled": "未命名會話",
     "unresolvedConversation": "會話已刪除",
     "removeCard": "移除卡片",
@@ -6302,7 +6332,36 @@
     "removeTerminalCard": "移除終端機卡片",
     "terminalNoDirectory": "這張卡片沒有工作目錄",
     "confirmDeleteTerminals": "{count} 個執行中的終端機會被關閉，其中的處理程序也會一併結束。",
-    "confirmDeleteNotesAndTerminals": "你寫下的 {notes} 則便條將被永久刪除，另有 {terminals} 個執行中的終端機會被結束。"
+    "confirmDeleteNotesAndTerminals": "你寫下的 {notes} 則便條將被永久刪除，另有 {terminals} 個執行中的終端機會被結束。",
+    "boardsTitle": "畫布",
+    "boardsSubtitle": "每個畫布都是一塊獨立的無限畫板，可以擺放區域、會話卡片、便籤、檔案和終端機。",
+    "boardCount": "{count} 個畫布",
+    "newBoard": "新增畫布",
+    "newBoardTitle": "新增畫布",
+    "editBoard": "編輯畫布…",
+    "editBoardTitle": "編輯畫布",
+    "deleteBoard": "刪除畫布…",
+    "openBoard": "開啟",
+    "boardMenu": "畫布選項",
+    "boardName": "名稱",
+    "boardDescription": "描述",
+    "boardDescriptionPlaceholder": "這個畫布用來做什麼？（選填）",
+    "untitledBoard": "未命名畫布",
+    "boardItemCount": "{count, plural, =0 {空白} other {# 個元素}}",
+    "boardEditedAt": "{time}編輯",
+    "boardsEmpty": "還沒有畫布",
+    "boardsEmptyHint": "新增一個畫布，用空間方式梳理工作。每個畫布都有自己的區域、卡片和便籤。",
+    "searchBoards": "搜尋畫布…",
+    "noBoardsMatch": "沒有與「{query}」相符的畫布",
+    "boardsLoadFailed": "無法載入畫布",
+    "retry": "重試",
+    "backToBoards": "返回所有畫布",
+    "boardDeleted": "此畫布已被刪除",
+    "deleteBoardTitle": "刪除這個畫布？",
+    "deleteBoardDescription": "「{name}」及其上的所有內容將被永久刪除。畫布上呈現的會話、資料夾和檔案本身不受影響。",
+    "deleteBoardItems": "畫布上共有 {count} 個元素。",
+    "deleteBoardTerminals": "其中 {count} 個終端機卡片會被關閉，處理程序也會一併結束。",
+    "deleteBoardConfirm": "刪除畫布"
   },
   "ModelProviderPicker": {
     "placeholder": "供應商 · 模型",

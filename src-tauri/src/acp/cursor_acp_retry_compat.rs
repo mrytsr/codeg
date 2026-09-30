@@ -40,6 +40,9 @@
 //! .assign(…`), where darwin is `y`/`M` and linux is `b`/`k`. The minifier
 //! numbers each archive independently, so the only safe assumption is that
 //! EVERY local is per-archive — which is what deriving them buys.
+//! `2026.09.26-dd393fe` then moved linux's action local from `b` to `y`, so all
+//! six of its archives happen to agree on `y`; one build agreeing is not a
+//! pattern to hard-code either.
 //!
 //! So nothing about the splice is transcribed by hand any more:
 //!
@@ -82,6 +85,7 @@ const TRIAGED_AFFECTED_VERSIONS: &[&str] = &[
     "2026.09.10-fd3934a",
     "2026.09.15-d2fe57e",
     "2026.09.18-9a7762b",
+    "2026.09.26-dd393fe",
 ];
 
 /// Cursor agent-cli versions whose bundle was inspected and found to already
@@ -688,7 +692,8 @@ mod tests {
 
     /// The run-options statement exactly as `2026.09.15-d2fe57e` ships it on
     /// **darwin/arm64**, from `dist-package/2698.index.js`. Byte-identical in
-    /// `2026.09.18-9a7762b` (`dist-package/1006.index.js`).
+    /// `2026.09.18-9a7762b` (`dist-package/1006.index.js`) and in both darwin
+    /// archives of `2026.09.26-dd393fe` (`5672.index.js` arm64, `9841` x64).
     const REAL_DARWIN_RUN_OPTIONS: &str = concat!(
         r#"y=new c.ConversationAction({action:{case:"userMessageAction",value:d}}),"#,
         r#"M=Object.assign(Object.assign({conversationId:this.agentStore.getId(),"#,
@@ -726,6 +731,8 @@ mod tests {
     /// the action local from darwin (`y`) and the object-assign local from
     /// linux (`k`). Proof that the two locals vary independently, so "the
     /// darwin one" and "the linux one" are not two variants to choose between.
+    /// `2026.09.26-dd393fe` ships exactly this statement in all four of its
+    /// linux and windows archives.
     const REAL_WINDOWS_RUN_OPTIONS: &str = concat!(
         r#"y=new c.ConversationAction({action:{case:"userMessageAction",value:d}}),"#,
         r#"k=Object.assign(Object.assign({conversationId:this.agentStore.getId(),"#,

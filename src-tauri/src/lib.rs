@@ -6,6 +6,10 @@
 // so the giant future's layout resolves. See the big-stack thread in
 // `acp/connection.rs` for the sibling *runtime* mitigation of the same frame.
 #![recursion_limit = "256"]
+// The unoptimized lib test binary trips the same harmless macOS
+// "__eh_frame section too large" linker warning as the `codeg` binary; see the
+// note at the top of `main.rs`.
+#![cfg_attr(debug_assertions, allow(linker_messages))]
 
 pub mod acp;
 pub mod acp_transcript;
@@ -15,6 +19,8 @@ pub use acp::{
 pub use acp::scratch_dir::scratch_sweep_task;
 pub use network::proxy::init_proxy_from_db;
 mod app_error;
+#[cfg(all(feature = "tauri-runtime", target_os = "macos"))]
+mod app_menu;
 pub mod app_state;
 pub mod automation;
 pub mod backgrounds;
@@ -457,6 +463,11 @@ mod tauri_app {
         process::ensure_user_npm_prefix_in_path();
 
         let builder = tauri::Builder::default();
+
+        // The default menu minus its ⌘W "Close Window", which closed the
+        // workspace whenever ⌘W was pressed inside a page (see `app_menu`).
+        #[cfg(target_os = "macos")]
+        let builder = builder.menu(crate::app_menu::build);
 
         // Must be the first plugin: it short-circuits second launches by
         // signalling the running instance and exiting before any other
@@ -1279,6 +1290,11 @@ mod tauri_app {
             .on_menu_event(|app, event| {
                 let id = event.id().as_ref().to_string();
 
+                #[cfg(target_os = "macos")]
+                if crate::app_menu::handle_event(app, &id) {
+                    return;
+                }
+
                 // Tray menu items act in Rust directly: showing the
                 // workspace and quitting are both pure runtime concerns
                 // with no UI state to coordinate.
@@ -1558,6 +1574,10 @@ mod tauri_app {
                 folder_links::rename_folder_link,
                 folder_links::repair_folder_link,
                 folder_links::remove_folder_link,
+                canvas_commands::canvas_list_boards,
+                canvas_commands::canvas_create_board,
+                canvas_commands::canvas_update_board,
+                canvas_commands::canvas_delete_board,
                 canvas_commands::canvas_list_nodes,
                 canvas_commands::canvas_create_node,
                 canvas_commands::canvas_group_into_region,
@@ -1791,6 +1811,7 @@ mod tauri_app {
                 acp_commands::acp_download_agent_binary,
                 acp_commands::acp_install_uv_tool,
                 acp_commands::acp_detect_agent_local_version,
+                acp_commands::acp_fetch_agent_latest_release,
                 acp_commands::acp_prepare_npx_agent,
                 acp_commands::acp_uninstall_agent,
                 acp_commands::acp_update_agent_preferences,
@@ -1803,6 +1824,7 @@ mod tauri_app {
                 deepseek_settings_commands::acp_update_deepseek_model_catalog,
                 acp_commands::acp_update_pi_config,
                 acp_commands::acp_load_pi_config,
+                acp_commands::acp_list_pi_model_capabilities,
                 acp_commands::acp_validate_pi_command,
                 acp_commands::acp_sync_antigravity_settings,
                 acp_commands::acp_antigravity_login_start,
