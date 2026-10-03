@@ -114,6 +114,93 @@ pub fn build_router(
             post(handlers::browser_tools::set_browser_tools_settings),
         )
         .route(
+            "/get_computer_tools_settings",
+            post(handlers::computer_tools::get_computer_tools_settings),
+        )
+        .route(
+            "/set_computer_tools_settings",
+            post(handlers::computer_tools::set_computer_tools_settings),
+        )
+        .route(
+            "/set_computer_tools_enabled",
+            post(handlers::computer_tools::set_computer_tools_enabled),
+        )
+        .route(
+            "/set_computer_tools_preferences",
+            post(handlers::computer_tools::set_computer_tools_preferences),
+        )
+        // Computer use itself: answered only by a codeg-server let share the
+        // screen it runs on (see `handlers::computer`).
+        .route(
+            "/computer_available",
+            post(handlers::computer::computer_available),
+        )
+        .route(
+            "/computer_status",
+            post(handlers::computer::computer_status),
+        )
+        .route(
+            "/computer_request_permission",
+            post(handlers::computer::computer_request_permission),
+        )
+        .route(
+            "/computer_open_permission_settings",
+            post(handlers::computer::computer_open_permission_settings),
+        )
+        .route(
+            "/computer_reveal_helper",
+            post(handlers::computer::computer_reveal_helper),
+        )
+        .route(
+            "/computer_list_shareable_windows",
+            post(handlers::computer::computer_list_shareable_windows),
+        )
+        .route(
+            "/computer_window_thumbnail",
+            post(handlers::computer::computer_window_thumbnail),
+        )
+        .route(
+            "/computer_share_window",
+            post(handlers::computer::computer_share_window),
+        )
+        .route(
+            "/computer_share_windows",
+            post(handlers::computer::computer_share_windows),
+        )
+        .route(
+            "/computer_shared_state",
+            post(handlers::computer::computer_shared_state),
+        )
+        .route(
+            "/computer_share_app",
+            post(handlers::computer::computer_share_app),
+        )
+        .route(
+            "/computer_share_screen",
+            post(handlers::computer::computer_share_screen),
+        )
+        .route(
+            "/computer_revoke_all",
+            post(handlers::computer::computer_revoke_all),
+        )
+        .route("/computer_stop", post(handlers::computer::computer_stop))
+        .route(
+            "/computer_stop_key_status",
+            post(handlers::computer::computer_stop_key_status),
+        )
+        .route(
+            "/computer_driver_info",
+            post(handlers::computer::computer_driver_info),
+        )
+        .route(
+            "/computer_driver_install",
+            post(handlers::computer::computer_driver_install),
+        )
+        .route(
+            "/computer_driver_uninstall",
+            post(handlers::computer::computer_driver_uninstall),
+        )
+        .route(
             "/get_chat_authoring_settings",
             post(handlers::chat_authoring::get_chat_authoring_settings),
         )

@@ -53,7 +53,6 @@ import {
 import { AgentIcon } from "@/components/agent-icon"
 import { cn, copyTextFromMenu } from "@/lib/utils"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
-import { useIsMobile } from "@/hooks/use-mobile"
 import { useIsCoarsePointer } from "@/hooks/use-is-coarse-pointer"
 import { useHistorySwipe } from "@/hooks/use-history-swipe"
 import { imageFilesFromClipboardApi } from "@/lib/clipboard-images"
@@ -118,6 +117,7 @@ import {
 } from "@/lib/model-config-groups"
 import { useAgentSkills } from "@/hooks/use-agent-skills"
 import { useAcpAgents } from "@/hooks/use-acp-agents"
+import { isPrimaryPointerCoarse } from "@/hooks/use-is-coarse-pointer"
 import { useScrollbarSafeDismiss } from "@/hooks/use-scrollbar-safe-dismiss"
 import { useAgentVocabulary } from "@/hooks/use-agent-vocabulary"
 import {
@@ -419,7 +419,6 @@ export function MessageInput({
   tall = false,
 }: MessageInputProps) {
   const t = useTranslations("Folder.chat.messageInput")
-  const isMobile = useIsMobile()
   const isCoarsePointer = useIsCoarsePointer()
   const tQueue = useTranslations("Folder.chat.messageQueue")
   // Kept as a separate binding from `t` so its call sites — exclusively
@@ -703,15 +702,27 @@ export function MessageInput({
   // editor a tick after mount (mirrors the hydration effect's gate). Ordered
   // after that hydration effect so this rAF runs after its setContent, landing
   // the caret at the end of a restored draft rather than before it.
-  // Skipped on mobile: auto-focus pops the soft keyboard every time a session
-  // is opened, which is intrusive on touch devices.
+  //
+  // Skipped on a coarse pointer, where focusing the editor raises the soft
+  // keyboard over the transcript. Each trigger here is a moment the user is
+  // more likely reading than typing: a session opening, a switch to one, a turn
+  // ending. Tapping the composer still focuses it (natively in the text, the
+  // chrome-press handler in the padding), so the keyboard comes up on demand.
+  // The pointer kind is read when the focus would happen, not subscribed to.
+  // Every open tab keeps its composer mounted, so a subscription would cost
+  // each one a listener and a re-render on every pointer change. As a
+  // dependency here it would also focus an idle composer when the pointer turns
+  // fine (a 2-in-1 docking to its mouse).
   useEffect(() => {
-    if (isActive && !isMobile && composerReady && !isPrompting) {
-      requestAnimationFrame(() => {
-        editorRef.current?.focus()
-      })
-    }
-  }, [isActive, isMobile, composerReady, isPrompting])
+    if (!isActive || !composerReady || isPrompting) return
+    if (isPrimaryPointerCoarse()) return
+    const raf = requestAnimationFrame(() => {
+      editorRef.current?.focus()
+    })
+    // Dropped if the tab goes inactive or a turn starts before the frame runs.
+    // A tiled group keeps that composer on screen, where it would take the caret.
+    return () => cancelAnimationFrame(raf)
+  }, [isActive, composerReady, isPrompting])
 
   // Re-hydrate when the user (re)edits a *different* queue item after the
   // initial mount hydration above. Keyed on the item id (not display text) so

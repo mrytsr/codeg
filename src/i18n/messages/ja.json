@@ -53,7 +53,8 @@
       "office_tools": "Officeツール",
       "skill_packs": "スキルパック",
       "collaboration": "コラボレーション",
-      "browser": "ブラウザ",
+      "browser": "ブラウザ操作",
+      "computer_use": "コンピューター操作",
       "quick_messages": "クイックメッセージ",
       "logs": "実行ログ"
     }
@@ -3047,7 +3048,7 @@
           "downloadFailed": "{agent} のダウンロードに失敗しました: {message}",
           "sessionLoadResourceNotFound": "{agent} セッションの読み込みに失敗しました。再読み込みして再試行するか、新しい会話を開始してください。",
           "sessionLoadUnavailable": "{agent} はこのセッションを復元できませんでした。セッションが終了したか、エージェントが停止した可能性があります。再読み込みして再試行するか、新しい会話を開始してください。",
-          "sessionLoadBusy": "この履歴は、そこから分岐したセッションが開いたままにしています。そのセッションを閉じてから再読み込みしてください。",
+          "sessionLoadBusy": "このセッションは別の場所で開かれています。別の {agent} クライアント（デスクトップアプリ、CLI、IDE 拡張機能）で開いている場合は、そちらで閉じるかそのクライアントを終了してから再読み込みしてください。ここから分岐した直後なら、1 分ほどしてから再読み込みしてください。",
           "sessionArchived": "以前のセッションは {agent} 側でアーカイブされています。ターミナルで {command} を実行して復元してから再読み込みするか、新しい会話を開始してください。",
           "turnFailedRefusal": "{agent} がこのターンの続行を拒否しました。バックエンドまたはゲートウェイのエラーが原因の可能性があります。エージェントのログを確認してください。",
           "turnFailedMaxTokens": "{agent} がこのターンの最大トークン数に達しました。",
@@ -4755,6 +4756,7 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "restoreFailed": "リモートワークスペース「{name}」を再度開けませんでした",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
   },
@@ -5077,6 +5079,11 @@
       "short": "共有したページで自分のコードを実行します。既定では確認しません。",
       "hint": "共有したページ上で、エージェントが自分で書いた JavaScript を実行できるようにします。既定ではオフで、上のスイッチも必要です。オンにするとコードは確認なしで実行されるため、判断はこのスイッチで行うことになります。1 つずつ確認したい場合は、設定 → 内蔵ブラウザで変更できます。"
     },
+    "computer": {
+      "label": "デスクトップのウィンドウを見て操作する",
+      "short": "アプリとウィンドウを一覧し、共有したウィンドウを読み取り、許可したウィンドウを操作します。",
+      "hint": "エージェントがデスクトップ上のアプリとウィンドウを一覧し、あなたが共有したウィンドウを読み取り——スクリーンショット、内容、期待した状態になっているか——操作を許可したウィンドウでクリック、入力、キー操作ができるようにします。ステータスバーの「コンピューター操作」パネルでウィンドウを共有するまで、どのウィンドウも読めず、操作も許可しない限りどのウィンドウも操作されません。共有はウィンドウが閉じたとき、しばらく使われなかったとき、またはあなたが停止したときに終わり、パネルの「エージェントを停止」ですべてのエージェントを即座に止められます。入力はバックグラウンドでウィンドウに届きます。バックグラウンドでは届かない操作では、エージェントがウィンドウを前面に出すことがあります（コンピューター操作の設定でオフにできます）。デスクトップアプリのみ。macOS では codeg-computer-helper への権限付与が必要です。プレビュー。"
+    },
     "automations": {
       "label": "自動化を作成",
       "short": "定期自動化を作成・管理します。",
@@ -5239,6 +5246,249 @@
     "clearConfirmDescriptionProfile": "プロファイル {name} の Cookie、キャッシュ、サイトデータを削除します。開いているタブはそのままですが、各サイトからログアウトされます。",
     "signInUaTitle": "Google ログインとの互換性",
     "signInUaHint": "Google は埋め込みブラウザーからのログインを拒否します。オンにすると、タブは Google のログインページ（accounts.google.com）に対してだけ Firefox として名乗ります。それ以外では実際に動いているエンジンとして名乗り、Firefox を名乗ることはありません。埋め込みタブにのみ適用され、別ウィンドウ表示には適用されません。ログインページから別のサイトへリダイレクトされた場合、そのサイトへの最初のリクエストにはログイン時の識別情報が残ります。"
+  },
+  "ComputerUse": {
+    "title": "コンピューター操作",
+    "preview": "プレビュー",
+    "refresh": "更新",
+    "tooltipShared": "コンピューター操作 · {count, plural, other {# 個のウィンドウを共有中}}",
+    "stop": "共有を停止",
+    "stopHint": "すべてのウィンドウの共有を今すぐ停止し、エージェントが行っている操作を中断します。必要になったら、もう一度ウィンドウを共有してください。",
+    "indicator": {
+      "actOne": "エージェントが「{app}」を操作できます",
+      "actMany": "エージェントが {count, plural, other {# 個のウィンドウ}}を操作できます",
+      "readOne": "エージェントが「{app}」を見られます",
+      "readMany": "エージェントが {count, plural, other {# 個のウィンドウ}}を見られます",
+      "readScreen": "エージェントが画面全体を見られます",
+      "actScreen": "エージェントが画面全体を操作できます",
+      "recent": "{app}：{action}",
+      "stop": "共有を停止",
+      "stopWithKey": "すべてのウィンドウの共有を停止（{key}）"
+    },
+    "codegGranted": "codeg 自体に「アクセシビリティ」または「画面収録」が許可されているため、エージェントのシェルは共有なしでそれを使えます。必要なければ、システム設定で codeg の許可をオフにしてください。",
+    "backend": {
+      "idle": "未起動",
+      "downloading": "ドライバーをダウンロード中…",
+      "starting": "ヘルパーを起動中…",
+      "ready": "準備完了",
+      "failed": "失敗"
+    },
+    "driver": "cua-driver {version}",
+    "devBuild": "開発ビルド：ヘルパーは呼び出し元のプログラムを検証しません。",
+    "devTag": "開発ビルド",
+    "permissions": {
+      "accessibility": "アクセシビリティ",
+      "screenRecording": "画面収録",
+      "granted": "許可済み",
+      "request": "許可する…",
+      "why": "システム設定で codeg-computer-helper をオンにしてください（codeg ではありません）。画面収録はウィンドウの表示内容を見るため、アクセシビリティはウィンドウの読み取りと操作のために使います。",
+      "devRebuild": "helper を再ビルドするたびに以前の許可は無効になります。先にリストから古い codeg-computer-helper を削除してから、もう一度許可してください。",
+      "notListed": "リストに codeg-computer-helper がない場合は、Finder からドラッグして追加してください：",
+      "reveal": "Finder で表示"
+    },
+    "shared": {
+      "title": "{count, plural, =0 {共有中のウィンドウなし} other {# 個のウィンドウを共有中}}",
+      "empty": "エージェントはウィンドウを一覧できますが、あなたが共有するまでどれも読めません。",
+      "stop": "停止",
+      "wholeApp": "アプリ全体 · {count, plural, =0 {開いているウィンドウなし} other {# 個のウィンドウ}}",
+      "screen": "画面全体",
+      "screenWindows": "{count, plural, =0 {ウィンドウなし} other {# 個のウィンドウ}}"
+    },
+    "level": {
+      "read": "読み取り可",
+      "control": "操作可",
+      "readLong": "読み取りのみ",
+      "controlLong": "読み取りと操作",
+      "change": "エージェントにできることを変更"
+    },
+    "activity": {
+      "title": "最近のアクティビティ",
+      "clear": "最近のアクティビティをクリア",
+      "capture": "スクリーンショット",
+      "snapshot": "読み取り",
+      "verify": "確認",
+      "click": "クリック",
+      "drag": "ドラッグ",
+      "scroll": "スクロール",
+      "type": "入力",
+      "key": "キー",
+      "hold-key": "キー長押し",
+      "set-value": "値の設定",
+      "restore": "復元",
+      "menu": "メニュー",
+      "set-frame": "ウィンドウを移動",
+      "launch": "アプリを起動",
+      "clipboard-read": "クリップボードを読む",
+      "clipboard-write": "クリップボードに書く",
+      "outcome": {
+        "done": "完了",
+        "refused": "拒否",
+        "failed": "失敗"
+      }
+    },
+    "share": "ウィンドウを共有…",
+    "openSettings": "詳細設定を開く",
+    "picker": {
+      "title": "ウィンドウをエージェントと共有",
+      "description": "すべての会話のエージェントが、共有したウィンドウを読み取れます。操作を許可したウィンドウではクリックや入力もできます。共有は、停止するか、ウィンドウが閉じられるか、設定した時間使われないと終わります。",
+      "count": "{count, plural, other {# 個のウィンドウ}}",
+      "sharedCount": "{count, plural, other {# 個を共有中}}",
+      "loading": "ウィンドウを読み込み中…",
+      "refresh": "更新",
+      "empty": "ウィンドウが見つかりません。あるはずなら、コンピューター操作パネルで権限を確認してください。",
+      "noScreenRecording": "codeg-computer-helper にまだ「画面収録」の権限がありません。ウィンドウのタイトルと画像を表示できず、エージェントもウィンドウを読み取れません。",
+      "unnamedApp": "不明なアプリ",
+      "untitled": "無題のウィンドウ",
+      "minimized": "最小化",
+      "hidden": "非表示",
+      "notGrantable": {
+        "codeg": "codeg のウィンドウ",
+        "blocklisted": "共有禁止リストに登録済み",
+        "unidentified": "アプリを特定できません"
+      },
+      "shareRead": "エージェントに読み取りを許可",
+      "shareControl": "エージェントに読み取りと操作を許可",
+      "stopSharing": "共有を停止",
+      "levelNone": "オフ",
+      "levelRead": "読み取り",
+      "levelControl": "操作",
+      "levelLabel": "{app} に対してエージェントができること",
+      "wholeApp": "アプリ全体",
+      "wholeAppHint": "{app} のすべてのウィンドウ（あとで開くものも含む）と、そのメニューやショートカット",
+      "appLevelLabel": "{app} 全体に対してエージェントができること",
+      "viaApp": "アプリごと共有",
+      "screenTitle": "画面全体",
+      "screenHint": "共有できるすべてのウィンドウ（あとで開くものも含む）と、デスクトップ自体のショートカット。codeg のウィンドウと共有禁止リストのアプリは常に塗りつぶされます。",
+      "screenLevelLabel": "画面全体に対してエージェントができること",
+      "viaScreen": "画面ごと共有",
+      "shareAll": "すべて共有",
+      "shareAllRead": "すべてエージェントに読み取りを許可",
+      "shareAllControl": "すべてエージェントに読み取りと操作を許可",
+      "stopSharingAll": "すべての共有を停止",
+      "skipped": "{count, plural, other {# 個のウィンドウを共有できませんでした。閉じられた可能性があります。}}",
+      "unshareable": "{count, plural, other {共有できないウィンドウ # 個}}",
+      "noneShareable": "共有できるウィンドウはありません。",
+      "codegWhy": "codeg のウィンドウは決して共有されません。codeg を操作できるエージェントは、自分の要求を自分で承認したり、自分にさらにウィンドウを共有したりできてしまうためです。ほかの codeg のウィンドウも同様です。"
+    },
+    "settings": {
+      "pageTitle": "コンピューター操作",
+      "pageDescription": "共有したデスクトップのウィンドウを、エージェントが見て操作できるようにします。",
+      "switch": {
+        "label": "コンピューター操作を有効にする",
+        "hint": "エージェントはアプリとウィンドウを一覧し、共有したウィンドウを読み取り、操作を許可したウィンドウでクリックや入力ができます。ステータスバーから共有するまで、どのウィンドウも読み取れません。",
+        "failed": "コンピューター操作を切り替えられませんでした"
+      },
+      "driver": {
+        "title": "ドライバー",
+        "description": "コンピューター操作は、オープンソースの cua-driver を通じてウィンドウを読み取り、操作します。codeg は検証済みのリリース {version} だけを実行し、初めて必要になったときにダウンロードします。",
+        "loading": "確認中…",
+        "unsupported": "cua-driver にはこのプラットフォーム向けのビルドがありません。",
+        "installing": "インストール中…",
+        "downloadingOf": "ダウンロード中… {done} / {total} MB",
+        "downloadingSoFar": "ダウンロード中… {done} MB",
+        "uninstalling": "アンインストール中…",
+        "installed": "インストール済み · {version}",
+        "outdated": "{installed} がインストールされています。この codeg は {version} を使います。",
+        "notInstalled": "未インストールです。コンピューター操作で初めて必要になったときにダウンロードされます。今すぐインストールすることもできます。",
+        "install": "インストール",
+        "upgrade": "{version} にアップグレード",
+        "uninstall": "アンインストール",
+        "installDone": "cua-driver をインストールしました",
+        "uninstallDone": "cua-driver をアンインストールしました",
+        "confirmTitle": "cua-driver をアンインストールしますか？",
+        "confirmDescription": "コンピューター操作はオフになり、すべてのウィンドウの共有が終わります。もう一度オンにすると、ドライバーを再びダウンロードします。",
+        "cancel": "キャンセル"
+      },
+      "permissions": {
+        "title": "権限",
+        "description": "macOS では codeg-computer-helper への許可が必要です。システム設定で許可してここに戻ると、表示は自動で更新されます。",
+        "off": "コンピューター操作をオンにすると、ここで権限を確認・許可できます。",
+        "accessibilityHint": "ウィンドウの内容を読み取り、操作します。",
+        "screenRecordingHint": "スクリーンショットを撮り、ウィンドウタイトルを読み取ります。"
+      },
+      "title": "共有・入力・停止",
+      "description": "共有したウィンドウがいつまで共有されるか、決して共有しないアプリ、すべての共有を一度に止めるショートカットとフローティング停止バー、そしてエージェントがウィンドウを前面に出して操作できるかどうか。",
+      "ttl": {
+        "label": "使われていないウィンドウの共有を停止するまで",
+        "hint": "共有中のウィンドウは、どのエージェントにもこの時間読み取られないと共有が停止します。",
+        "minutes": "{minutes} 分",
+        "never": "しない（自分で停止するまで）"
+      },
+      "blocklist": {
+        "label": "共有しないアプリ",
+        "hint": "これらのアプリのウィンドウはエージェントと共有できません。不要な既定項目は削除でき、バンドル ID（com.example.app）、実行ファイル名（app.exe）、フルパスでアプリを追加することもできます。",
+        "placeholder": "com.example.app",
+        "add": "追加",
+        "remove": "{name} を削除",
+        "restore": "既定に戻す",
+        "restoreConfirmTitle": "既定のリストに戻しますか？",
+        "restoreConfirmAdded": "{count, plural, other {追加した # 件のアプリがリストから外れます。}}",
+        "restoreConfirmRemoved": "{count, plural, other {削除した既定のアプリ # 件がリストに戻ります。}}",
+        "restoreConfirmSave": "保存すると反映されます。",
+        "cancel": "キャンセル",
+        "custom": "追加した項目",
+        "duplicate": "すでにリストにあります。",
+        "removedCount": "{count, plural, other {既定のアプリを # 件削除しました。}}",
+        "items": {
+          "systemSettings": "システム設定",
+          "credentialPrompts": "システムのパスワード・認証の画面",
+          "keychain": "キーチェーンアクセス",
+          "passwords": "パスワード"
+        }
+      },
+      "stopKey": {
+        "label": "停止ショートカット",
+        "hint": "どのアプリからでも、「共有を停止」ボタンと同じくすべてのウィンドウの共有を止めます。コンピューター操作がオンの間このキーは codeg が使うため、ほかで使わない組み合わせを選んでください。",
+        "recording": "キーを押してください…",
+        "recordHint": "Ctrl ともう一つの修飾キー（Alt か Shift）を押しながらキーを押します。Esc でキャンセル。",
+        "recordHintMac": "⌃ か ⌘ ともう一つの修飾キーを押しながらキーを押します。Esc でキャンセル。",
+        "off": "オフ",
+        "useDefault": "デフォルト",
+        "turnOff": "オフにする",
+        "statusActive": "有効：どこで押してもすべてのウィンドウの共有を停止します。",
+        "statusIdle": "コンピューター操作をオンにすると有効になります。",
+        "statusOff": "オフ：共有を止めるのは「共有を停止」ボタンだけです。",
+        "statusFailed": "無効：ほかのアプリがこのキーを使っているようです。別の組み合わせを選んでください。",
+        "problem": {
+          "unsupportedKey": "このキーは使えません。英字、数字、F1–F12、Esc、記号キーから選んでください。",
+          "weakModifiers": "修飾キーを 2 つ以上押してください。そのうち 1 つは Ctrl（Mac では ⌘ も可）です。",
+          "metaOffMac": "Windows キーは含められません。"
+        }
+      },
+      "strip": {
+        "label": "フローティング停止バー",
+        "hint": "ウィンドウを共有している間、エージェントができることと「共有を停止」ボタンを載せたバーを、すべてのウィンドウの上に表示します。オフにしても、ステータスバーの「コンピューター操作」ポップオーバーや停止ショートカットで共有を停止できます。"
+      },
+      "foreground": {
+        "label": "エージェントがウィンドウを前面に出すのを許可",
+        "hint": "バックグラウンドではキー入力や文字入力を受け付けないアプリがあります。Windows では Edge、Chrome、VS Code など Chromium ベースのアプリがすべてそうです。オンにすると、エージェントは操作を許可されたウィンドウを 1 回の操作のあいだだけ前面に出し、その後あなたが使っていたウィンドウに戻します（Linux ではそのウィンドウが前面に残ります）。ウィンドウが前面に出るのが見え、その瞬間にあなたが入力した文字はそのウィンドウに入ることがあります。クリックでマウスポインターが動くこともあります。"
+      },
+      "delivery": {
+        "label": "既定の入力方法",
+        "hint": "エージェントが指定しないとき、クリック、スクロール、文字入力、キー操作をどうウィンドウに届けるか。バックグラウンド：ウィンドウはそのままで、マウスとキーボードはあなたのものです。前面：操作のたびにウィンドウを前面に出します。",
+        "hintOff": "ウィンドウを前面に出すことを許可していない間は、常にバックグラウンドです。",
+        "background": "バックグラウンド",
+        "foreground": "前面"
+      },
+      "launch": {
+        "label": "エージェントがアプリを開いたりウィンドウを動かしたりするのを許可",
+        "hint": "オンにすると、エージェントはインストール済みのアプリをバックグラウンドで起動できます（codeg と共有しないアプリを除く）。また、操作を許可したウィンドウを移動したりサイズを変えたりできます。アプリを起動してもそのウィンドウは共有されず、共有するかどうかは引き続きあなたが決めます。"
+      },
+      "clipboard": {
+        "label": "エージェントがクリップボードを使うのを許可",
+        "hint": "オンにすると、エージェントはテキストをクリップボードに置いてペーストしたり、共有したウィンドウから自分でコピーした内容を読み返したりできます。あなたが自分でコピーした内容がエージェントに読まれることはなく、エージェントがペーストできるのは自分で置いた内容だけです。"
+      },
+      "screen": {
+        "label": "画面全体の共有を許可",
+        "hint": "オンにすると、共有ピッカーに「画面全体」が表示されます。エージェントは画面全体を1枚の画像として見て、どこでもクリックでき、共有できるすべてのウィンドウとデスクトップ自体のショートカットも一緒に共有されます。codeg のウィンドウと共有禁止リストのアプリは常に塗りつぶされます。オフにすると画面全体の共有は終了します。"
+      },
+      "boundary": "macOS では権限は codeg-computer-helper に与えられ、codeg だけが使えるため、エージェントのシェルは使えません。Windows と Linux にはこの分離がありません。そこでは、これらの設定は codeg を通じてエージェントに何を渡すかを決めるもので、コンピューター上のプログラムにできることを決めるものではありません。",
+      "save": "保存",
+      "saving": "保存中…",
+      "saved": "コンピューター操作の設定を保存しました",
+      "saveFailed": "コンピューター操作の設定を保存できませんでした",
+      "loadFailed": "読み込みに失敗しました：{detail}"
+    }
   },
   "LogsSettings": {
     "loading": "読み込み中…",
@@ -5553,6 +5803,8 @@
     "baseBranchDefault": "タスク開始時の現在のブランチ",
     "baseBranchHint": "タスクはこのブランチから分岐し、マージもこのブランチに戻ります。",
     "agentInheritedHint": "タスク設定から継承 — 変更するとこのタスク専用になります",
+    "agentNoDefaultHint": "タスク設定に既定のエージェントがありません — 選択中のエージェントをこのタスクに保存します",
+    "agentInheritedUnavailableHint": "タスク設定の {agent} は利用できません — 選択中のエージェントをこのタスクに保存します",
     "agentOverrideReset": "継承に戻す",
     "sectionTarget": "ターゲット",
     "errorTitle": "タイトルを入力してください",

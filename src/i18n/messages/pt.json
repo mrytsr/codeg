@@ -53,7 +53,8 @@
       "office_tools": "Ferramentas de escritório",
       "skill_packs": "Pacotes de habilidades",
       "collaboration": "Colaboração",
-      "browser": "Navegador",
+      "browser": "Uso do navegador",
+      "computer_use": "Uso do computador",
       "quick_messages": "Mensagens rápidas",
       "logs": "Registros de execução"
     }
@@ -3047,7 +3048,7 @@
           "downloadFailed": "Falha no download de {agent}: {message}",
           "sessionLoadResourceNotFound": "Falha ao carregar a sessão de {agent}. Recarregue para tentar novamente ou inicie uma nova conversa.",
           "sessionLoadUnavailable": "{agent} não conseguiu restaurar esta sessão; ela pode ter terminado ou o agente parou. Recarregue para tentar novamente ou inicie uma nova conversa.",
-          "sessionLoadBusy": "Este histórico está sendo mantido aberto pela sessão bifurcada a partir dele. Feche essa sessão e recarregue para abri-lo.",
+          "sessionLoadBusy": "Esta sessão está aberta em outro lugar. Se outro cliente do {agent} (o app, a CLI ou uma extensão de IDE) estiver com ela aberta, feche-a lá ou encerre esse cliente e recarregue. Se você acabou de bifurcá-la, recarregue em cerca de um minuto.",
           "sessionArchived": "A sessão anterior foi arquivada pelo {agent}. Execute {command} num terminal para restaurá-la e recarregá-la, ou inicie uma nova conversa.",
           "turnFailedRefusal": "{agent} recusou continuar este turno. Costuma indicar um erro de backend ou gateway. Confira os logs do agente.",
           "turnFailedMaxTokens": "{agent} atingiu o limite máximo de tokens para este turno.",
@@ -4755,6 +4756,7 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "restoreFailed": "Não foi possível reabrir o espaço de trabalho remoto \"{name}\"",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
   },
@@ -5077,6 +5079,11 @@
       "short": "Executa o próprio código numa página compartilhada, sem perguntar.",
       "hint": "Permite que os agentes executem o próprio JavaScript numa página que você compartilhou. Desativado por padrão e depende do interruptor acima. Ligá-lo significa que os trechos são executados sem perguntar, então a decisão é tomada neste interruptor; em Configurações → Navegador integrado dá para pedir que cada trecho seja mostrado a você."
     },
+    "computer": {
+      "label": "Ver e usar as janelas da área de trabalho",
+      "short": "Listar apps e janelas; ler as que você compartilhar e agir nas que permitir.",
+      "hint": "Permite que um agente liste os aplicativos e janelas da sua área de trabalho, leia as janelas que você compartilhar com ele — uma captura, o conteúdo, se mostra o que se espera — e clique, digite e pressione teclas nas que você compartilhar para agir. Nada fica legível até você compartilhar uma janela no painel Uso do computador da barra de status, e em nenhuma é possível agir sem que você também permita; o compartilhamento termina quando a janela fecha, depois de um tempo sem uso ou quando você o interrompe, e Parar agentes nesse painel para todos de uma vez. A entrada chega à janela em segundo plano; para uma ação que não chega em segundo plano, um agente pode trazer a janela para a frente, o que você pode desativar nas configurações de Uso do computador. Apenas no app para desktop; no macOS, exige permissões concedidas ao codeg-computer-helper. Prévia."
+    },
     "automations": {
       "label": "Criar automações",
       "short": "Cria e gere automações agendadas.",
@@ -5239,6 +5246,249 @@
     "clearConfirmDescriptionProfile": "Os cookies, caches e armazenamento de sites do perfil {name} serão removidos. As abas abertas continuam abertas, mas você sairá dos sites.",
     "signInUaTitle": "Compatibilidade com o login do Google",
     "signInUaHint": "O Google recusa login a partir de navegadores incorporados. Quando ativado, as abas se apresentam como Firefox apenas às páginas de login do Google (accounts.google.com); em todo o resto elas se apresentam como o mecanismo em que são executadas, nunca como Firefox. Apenas em abas incorporadas, não na janela separada; quando uma página de login redireciona para outro site, a primeira solicitação a ele ainda leva a identidade de login."
+  },
+  "ComputerUse": {
+    "title": "Uso do computador",
+    "preview": "Prévia",
+    "refresh": "Atualizar",
+    "tooltipShared": "Uso do computador · {count, plural, one {# janela compartilhada} other {# janelas compartilhadas}}",
+    "stop": "Parar de compartilhar",
+    "stopHint": "Para de compartilhar todas as janelas agora e interrompe o que os agentes estiverem fazendo. Compartilhe uma janela de novo quando quiser que continuem.",
+    "indicator": {
+      "actOne": "Os agentes podem agir em {app}",
+      "actMany": "Os agentes podem agir em {count, plural, one {# janela} other {# janelas}}",
+      "readOne": "Os agentes podem ver {app}",
+      "readMany": "Os agentes podem ver {count, plural, one {# janela} other {# janelas}}",
+      "readScreen": "Os agentes podem ver a tela inteira",
+      "actScreen": "Os agentes podem agir na tela inteira",
+      "recent": "{action} em {app}",
+      "stop": "Parar de compartilhar",
+      "stopWithKey": "Parar de compartilhar todas as janelas ({key})"
+    },
+    "codegGranted": "O próprio codeg tem Acessibilidade ou Gravação de Tela, então o shell dos agentes pode usá-la sem que nada seja compartilhado. Se não precisar, desative-a para o codeg nos Ajustes do Sistema.",
+    "backend": {
+      "idle": "Não iniciado",
+      "downloading": "Baixando o driver…",
+      "starting": "Iniciando o auxiliar…",
+      "ready": "Pronto",
+      "failed": "Falhou"
+    },
+    "driver": "cua-driver {version}",
+    "devBuild": "Build de desenvolvimento: o auxiliar não verifica qual programa o chama.",
+    "devTag": "build de desenvolvimento",
+    "permissions": {
+      "accessibility": "Acessibilidade",
+      "screenRecording": "Gravação de Tela",
+      "granted": "Concedida",
+      "request": "Conceder…",
+      "why": "Ative o codeg-computer-helper nos Ajustes do Sistema, não o codeg. A Gravação de Tela permite que ele veja as janelas; a Acessibilidade, que as leia e aja nelas.",
+      "devRebuild": "Cada recompilação do auxiliar anula a permissão anterior: remova primeiro o codeg-computer-helper antigo da lista e conceda de novo.",
+      "notListed": "Se o codeg-computer-helper não estiver na lista, arraste-o do Finder:",
+      "reveal": "Mostrar no Finder"
+    },
+    "shared": {
+      "title": "{count, plural, =0 {Nenhuma janela compartilhada} one {# janela compartilhada} other {# janelas compartilhadas}}",
+      "empty": "Os agentes podem listar suas janelas, mas não ler nenhuma até você compartilhar uma.",
+      "stop": "Parar",
+      "wholeApp": "App inteiro · {count, plural, =0 {nenhuma janela aberta} one {# janela} other {# janelas}}",
+      "screen": "Tela inteira",
+      "screenWindows": "{count, plural, =0 {nenhuma janela ainda} one {# janela} other {# janelas}}"
+    },
+    "level": {
+      "read": "Pode ler",
+      "control": "Pode agir",
+      "readLong": "Somente leitura",
+      "controlLong": "Ler e agir",
+      "change": "Mudar o que os agentes podem fazer"
+    },
+    "activity": {
+      "title": "Atividade recente",
+      "clear": "Limpar atividade recente",
+      "capture": "Captura",
+      "snapshot": "Leitura",
+      "verify": "Verificação",
+      "click": "Clique",
+      "drag": "Arrastar",
+      "scroll": "Rolagem",
+      "type": "Digitação",
+      "key": "Tecla",
+      "hold-key": "Tecla pressionada",
+      "set-value": "Valor",
+      "restore": "Restaurar",
+      "menu": "Menu",
+      "set-frame": "Mover janela",
+      "launch": "Abrir app",
+      "clipboard-read": "Ler área de transferência",
+      "clipboard-write": "Escrever na área de transferência",
+      "outcome": {
+        "done": "feito",
+        "refused": "recusado",
+        "failed": "falhou"
+      }
+    },
+    "share": "Compartilhar uma janela…",
+    "openSettings": "Abrir ajustes detalhados",
+    "picker": {
+      "title": "Compartilhar uma janela com os agentes",
+      "description": "Os agentes de qualquer conversa podem ler as janelas que você compartilhar, e clicar e digitar naquelas em que você deixar que ajam. O compartilhamento termina quando você o interrompe, a janela fecha ou fica sem uso pelo tempo definido nos ajustes.",
+      "count": "{count, plural, one {# janela} other {# janelas}}",
+      "sharedCount": "{count, plural, one {# compartilhada} other {# compartilhadas}}",
+      "loading": "Carregando janelas…",
+      "refresh": "Atualizar",
+      "empty": "Nenhuma janela encontrada. Se deveria haver alguma, verifique as permissões no painel Uso do computador.",
+      "noScreenRecording": "O codeg-computer-helper ainda não tem Gravação de Tela: os títulos e as imagens das janelas não podem ser mostrados, e os agentes não conseguem ler as janelas.",
+      "unnamedApp": "App desconhecido",
+      "untitled": "Janela sem título",
+      "minimized": "Minimizada",
+      "hidden": "Oculta",
+      "notGrantable": {
+        "codeg": "Janela do codeg",
+        "blocklisted": "Na lista de nunca compartilhar",
+        "unidentified": "Não é possível identificar o app"
+      },
+      "shareRead": "Deixar os agentes lerem",
+      "shareControl": "Deixar os agentes lerem e agirem nela",
+      "stopSharing": "Parar de compartilhar",
+      "levelNone": "Não",
+      "levelRead": "Ler",
+      "levelControl": "Agir",
+      "levelLabel": "O que os agentes podem fazer com {app}",
+      "wholeApp": "App inteiro",
+      "wholeAppHint": "Todas as janelas de {app}, inclusive as que abrir depois, além de seus menus e atalhos",
+      "appLevelLabel": "O que os agentes podem fazer com todo o {app}",
+      "viaApp": "Com o app",
+      "screenTitle": "Tela inteira",
+      "screenHint": "Todas as janelas que você pode compartilhar, inclusive as que abrirem depois, e os atalhos próprios da área de trabalho. As janelas do codeg e a lista de nunca compartilhar continuam cobertas.",
+      "screenLevelLabel": "O que os agentes podem fazer com a tela inteira",
+      "viaScreen": "Com a tela",
+      "shareAll": "Compartilhar todas",
+      "shareAllRead": "Deixar os agentes lerem todas",
+      "shareAllControl": "Deixar os agentes lerem e agirem em todas",
+      "stopSharingAll": "Parar de compartilhar todas",
+      "skipped": "{count, plural, one {# janela não pôde ser compartilhada; talvez tenha sido fechada.} other {# janelas não puderam ser compartilhadas; talvez tenham sido fechadas.}}",
+      "unshareable": "{count, plural, one {# janela não pode ser compartilhada} other {# janelas não podem ser compartilhadas}}",
+      "noneShareable": "Nenhuma destas janelas pode ser compartilhada.",
+      "codegWhy": "As janelas do codeg nunca são compartilhadas: um agente que pudesse operar o codeg poderia aprovar os próprios pedidos ou compartilhar mais janelas consigo mesmo. O mesmo vale para outras cópias do codeg."
+    },
+    "settings": {
+      "pageTitle": "Uso do computador",
+      "pageDescription": "Deixe os agentes verem e usarem as janelas da área de trabalho que você compartilhar com eles.",
+      "switch": {
+        "label": "Ativar o uso do computador",
+        "hint": "Os agentes podem listar seus apps e janelas, ler as janelas que você compartilhar e clicar e digitar naquelas em que você deixar que ajam. Nenhuma janela pode ser lida até você compartilhá-la pela barra de status.",
+        "failed": "Não foi possível alternar o uso do computador"
+      },
+      "driver": {
+        "title": "Driver",
+        "description": "O uso do computador lê e age nas janelas por meio do cua-driver, um programa de código aberto. O codeg executa apenas a versão que verificou, {version}, e a baixa na primeira vez em que for necessária.",
+        "loading": "Verificando…",
+        "unsupported": "O cua-driver não tem build para esta plataforma.",
+        "installing": "Instalando…",
+        "downloadingOf": "Baixando… {done} / {total} MB",
+        "downloadingSoFar": "Baixando… {done} MB",
+        "uninstalling": "Desinstalando…",
+        "installed": "Instalado · {version}",
+        "outdated": "A versão {installed} está instalada; este codeg usa a {version}.",
+        "notInstalled": "Não instalado. É baixado na primeira vez em que o uso do computador precisar dele, ou você pode instalá-lo agora.",
+        "install": "Instalar",
+        "upgrade": "Atualizar para {version}",
+        "uninstall": "Desinstalar",
+        "installDone": "cua-driver instalado",
+        "uninstallDone": "cua-driver desinstalado",
+        "confirmTitle": "Desinstalar o cua-driver?",
+        "confirmDescription": "O uso do computador será desligado e todas as janelas deixarão de ser compartilhadas. Ao religá-lo, o driver será baixado novamente.",
+        "cancel": "Cancelar"
+      },
+      "permissions": {
+        "title": "Permissões",
+        "description": "O macOS pede estas permissões para o codeg-computer-helper. Conceda uma nos Ajustes do Sistema e volte: isto se atualiza sozinho.",
+        "off": "Ligue o uso do computador para verificar e conceder permissões.",
+        "accessibilityHint": "Ler o conteúdo das janelas e agir nelas.",
+        "screenRecordingHint": "Fazer capturas e ler os títulos das janelas."
+      },
+      "title": "Compartilhar, entrada e parar",
+      "description": "Por quanto tempo uma janela continua compartilhada, quais apps nunca são compartilhados, o atalho e a barra flutuante que param todo o compartilhamento de uma vez, e se os agentes podem trazer uma janela para a frente para agir nela.",
+      "ttl": {
+        "label": "Parar de compartilhar janelas sem uso após",
+        "hint": "Uma janela compartilhada deixa de ser compartilhada quando nenhum agente a lê por esse tempo.",
+        "minutes": "{minutes} minutos",
+        "never": "Nunca (até eu parar)"
+      },
+      "blocklist": {
+        "label": "Aplicativos nunca compartilhados",
+        "hint": "As janelas deles não podem ser compartilhadas com agentes. Remova os padrões de que não precisa ou adicione um aplicativo por identificador de pacote (com.example.app), nome de executável (app.exe) ou caminho completo.",
+        "placeholder": "com.example.app",
+        "add": "Adicionar",
+        "remove": "Remover {name}",
+        "restore": "Restaurar padrão",
+        "restoreConfirmTitle": "Restaurar a lista padrão?",
+        "restoreConfirmAdded": "{count, plural, one {O aplicativo que você adicionou sai da lista.} other {Os # aplicativos que você adicionou saem da lista.}}",
+        "restoreConfirmRemoved": "{count, plural, one {O aplicativo padrão que você removeu volta para a lista.} other {Os # aplicativos padrão que você removeu voltam para a lista.}}",
+        "restoreConfirmSave": "A mudança vale quando você salvar.",
+        "cancel": "Cancelar",
+        "custom": "Adicionado por você",
+        "duplicate": "Já está na lista.",
+        "removedCount": "{count, plural, one {# aplicativo padrão removido.} other {# aplicativos padrão removidos.}}",
+        "items": {
+          "systemSettings": "Ajustes do Sistema",
+          "credentialPrompts": "Pedidos de senha e autorização do sistema",
+          "keychain": "Acesso às Chaves",
+          "passwords": "Senhas"
+        }
+      },
+      "stopKey": {
+        "label": "Atalho para parar",
+        "hint": "Para de compartilhar todas as janelas a partir de qualquer app, como o botão Parar de compartilhar. Enquanto o uso do computador estiver ligado, estas teclas pertencem ao codeg, então escolha teclas que você não usa em outro lugar.",
+        "recording": "Pressione as teclas…",
+        "recordHint": "Segure Ctrl e outro modificador (Alt ou Shift) e pressione uma tecla. Esc cancela.",
+        "recordHintMac": "Segure ⌃ ou ⌘ e outro modificador e pressione uma tecla. Esc cancela.",
+        "off": "Desligado",
+        "useDefault": "Padrão",
+        "turnOff": "Desligar",
+        "statusActive": "Ativo: pressione em qualquer lugar para parar de compartilhar todas as janelas.",
+        "statusIdle": "Vale enquanto o uso do computador estiver ligado.",
+        "statusOff": "Desligado: só os botões Parar de compartilhar param o compartilhamento.",
+        "statusFailed": "Inativo: provavelmente outro app usa estas teclas. Escolha outras.",
+        "problem": {
+          "unsupportedKey": "Essa tecla não pode ser usada. Escolha uma letra, um dígito, F1–F12, Esc ou uma tecla de pontuação.",
+          "weakModifiers": "Segure pelo menos dois modificadores, um deles Ctrl (ou ⌘ num Mac).",
+          "metaOffMac": "A tecla Windows não pode fazer parte dele."
+        }
+      },
+      "strip": {
+        "label": "Barra flutuante de parada",
+        "hint": "Enquanto alguma janela estiver compartilhada, uma barra flutua sobre todas as janelas dizendo o que os agentes podem fazer, com um botão Parar de compartilhar. Desligada, você ainda pode parar de compartilhar pelo painel de Uso do computador na barra de status ou com o atalho para parar."
+      },
+      "foreground": {
+        "label": "Permitir que agentes tragam janelas para a frente",
+        "hint": "Alguns apps não aceitam teclas nem digitação enquanto estão em segundo plano — no Windows, nenhum baseado no Chromium, como Edge, Chrome e VS Code. Com isto ativado, um agente pode trazer para a frente, por uma única ação, uma janela em que você o deixa agir, e depois voltar para a janela em que você estava (no Linux, a janela fica na frente). Você verá a janela vir para a frente; o que você digitar nesse momento pode ir para ela, e um clique pode mover o ponteiro do mouse."
+      },
+      "delivery": {
+        "label": "Modo de entrada padrão",
+        "hint": "Como cliques, rolagem, digitação e teclas dos agentes chegam a uma janela quando eles não pedem um nem outro. Segundo plano deixa a janela onde está e o ponteiro e o teclado com você; Primeiro plano traz a janela para a frente a cada ação.",
+        "hintOff": "Sempre Segundo plano enquanto os agentes não puderem trazer janelas para a frente.",
+        "background": "Segundo plano",
+        "foreground": "Primeiro plano"
+      },
+      "launch": {
+        "label": "Permitir que os agentes abram aplicativos e movam janelas",
+        "hint": "Com isto ativado, um agente pode iniciar em segundo plano um aplicativo instalado — nunca o codeg nem um dos aplicativos nunca compartilhados — e mover ou redimensionar uma janela em que você o deixa agir. Iniciar um aplicativo não compartilha nenhuma das janelas dele: isso continua sendo decisão sua."
+      },
+      "clipboard": {
+        "label": "Permitir que os agentes usem a área de transferência",
+        "hint": "Com isto ativado, um agente pode colocar texto na área de transferência para colá-lo e reler o que copiou de uma janela que você compartilhou com ele. O que você mesmo copia nunca é lido para um agente, e um agente só pode colar o que ele mesmo colocou lá."
+      },
+      "screen": {
+        "label": "Oferecer a tela inteira",
+        "hint": "Com isto ativado, o seletor de compartilhamento oferece a tela inteira: os agentes veem uma única imagem dela e podem clicar em qualquer ponto, e todas as janelas que você pode compartilhar vão junto, além dos atalhos próprios da área de trabalho. As janelas do codeg e a lista de nunca compartilhar continuam cobertas. Desativar encerra o compartilhamento da tela."
+      },
+      "boundary": "No macOS, as permissões vão para o codeg-computer-helper, que só o codeg pode usar, então o shell dos agentes não pode. O Windows e o Linux não têm essa separação: lá, estes ajustes decidem o que os agentes recebem pelo codeg, não o que os programas do seu computador podem fazer.",
+      "save": "Salvar",
+      "saving": "Salvando…",
+      "saved": "Ajustes de uso do computador salvos",
+      "saveFailed": "Falha ao salvar os ajustes de uso do computador",
+      "loadFailed": "Falha ao carregar: {detail}"
+    }
   },
   "LogsSettings": {
     "loading": "Carregando…",
@@ -5553,6 +5803,8 @@
     "baseBranchDefault": "Branch atual quando a tarefa iniciar",
     "baseBranchHint": "A tarefa parte deste branch e o merge a devolve para ele.",
     "agentInheritedHint": "Herdado das configurações de tarefas; altere para personalizar esta tarefa",
+    "agentNoDefaultHint": "Não há agente padrão nas configurações de tarefas; o agente selecionado será salvo com a tarefa",
+    "agentInheritedUnavailableHint": "O agente {agent} das configurações de tarefas não está disponível; o agente selecionado será salvo com a tarefa",
     "agentOverrideReset": "Voltar a herdar",
     "sectionTarget": "Destino",
     "errorTitle": "O título é obrigatório",

@@ -143,6 +143,11 @@ struct SessionModelInfo {
 struct SessionMetrics {
     #[serde(default)]
     input_tokens: Option<u64>,
+    /// Excludes reasoning tokens since cline 3.0.66 (upstream #14426 subtracts
+    /// them so its own totals stop counting them twice), and neither session
+    /// file records the reasoning count, so a reasoning model's output reads
+    /// lower here than in older transcripts: a 50-token completion with 30 of
+    /// reasoning is stored as 50 by 3.0.65 and as 20 by 3.0.67.
     #[serde(default)]
     output_tokens: Option<u64>,
     #[serde(default)]

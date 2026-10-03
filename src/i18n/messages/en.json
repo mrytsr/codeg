@@ -53,7 +53,8 @@
       "office_tools": "Office Tools",
       "skill_packs": "Skill Packs",
       "collaboration": "Collaboration",
-      "browser": "Browser",
+      "browser": "Browser Use",
+      "computer_use": "Computer Use",
       "quick_messages": "Quick Messages",
       "logs": "Runtime Logs"
     }
@@ -3047,7 +3048,7 @@
           "downloadFailed": "{agent} download failed: {message}",
           "sessionLoadResourceNotFound": "{agent} session failed to load. Reload to retry, or start a new conversation.",
           "sessionLoadUnavailable": "{agent} couldn't restore this session — it may have ended or the agent stopped. Reload to retry, or start a new conversation.",
-          "sessionLoadBusy": "This history is held open by the session forked from it. Close that session, then reload to open this one.",
+          "sessionLoadBusy": "This session is open elsewhere. If another {agent} client (the app, the CLI or an IDE extension) has it, close it there or quit that client, then reload. If you just forked it, reload in about a minute.",
           "sessionArchived": "The previous session was archived on the {agent} side. Run {command} in a terminal to restore it and reload, or start a new conversation.",
           "turnFailedRefusal": "{agent} refused to continue this turn. This often indicates a backend or gateway error — check the agent's logs.",
           "turnFailedMaxTokens": "{agent} reached the maximum token limit for this turn.",
@@ -4775,6 +4776,7 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "restoreFailed": "Couldn't reopen remote workspace \"{name}\"",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
   },
@@ -5077,6 +5079,11 @@
       "short": "Run its own code on a page you shared — without asking, unless you ask it to.",
       "hint": "Let agents run their own JavaScript on a page you’ve shared. Off by default, and needs the switch above. Turning it on means snippets run without asking, so this switch is where the decision is made; Settings → Built-in browser can put each snippet in front of you instead."
     },
+    "computer": {
+      "label": "See and use your desktop's windows",
+      "short": "List apps and windows; read the ones you share, act on the ones you allow.",
+      "hint": "Lets an agent list the applications and windows on your desktop, read the windows you share with it — a screenshot, its contents, whether it shows what it expects — and click, type and press keys in the ones you share for acting. Nothing is readable until you share a window from the Computer use panel in the status bar, and nothing can be acted on unless you also let agents act on it; sharing ends when the window closes, after a while unused, or when you stop it, and Stop agents in that panel halts every agent at once. Input goes to the window in the background; for an action that will not go in the background, an agent may bring the window to the front, which you can switch off in Computer use settings. Desktop app only; on macOS it needs permissions granted to codeg-computer-helper. Preview."
+    },
     "automations": {
       "label": "Create automations",
       "short": "Create and manage scheduled automations.",
@@ -5239,6 +5246,249 @@
     "clearConfirmDescriptionProfile": "Cookies, caches and site storage of the profile {name} will be removed. Open tabs stay open, but you will be signed out of sites.",
     "signInUaTitle": "Google sign-in compatibility",
     "signInUaHint": "Google refuses to sign in from embedded browsers. When on, tabs present a Firefox identity to Google's sign-in pages only (accounts.google.com); everywhere else they identify as the engine they run in, never as Firefox. Embedded tabs only, not the separate-window surface; when a sign-in page redirects you to another site, the first request there still carries the sign-in identity."
+  },
+  "ComputerUse": {
+    "title": "Computer use",
+    "preview": "Preview",
+    "refresh": "Refresh",
+    "tooltipShared": "Computer use · {count, plural, one {# window shared} other {# windows shared}}",
+    "stop": "Stop sharing",
+    "stopHint": "Stop sharing every window now, and cut off whatever agents are doing. Share a window again whenever you want them back.",
+    "indicator": {
+      "actOne": "Agents can act on {app}",
+      "actMany": "Agents can act on {count, plural, one {# window} other {# windows}}",
+      "readOne": "Agents can see {app}",
+      "readMany": "Agents can see {count, plural, one {# window} other {# windows}}",
+      "readScreen": "Agents can see the entire screen",
+      "actScreen": "Agents can act on the entire screen",
+      "recent": "{action} in {app}",
+      "stop": "Stop sharing",
+      "stopWithKey": "Stop sharing every window ({key})"
+    },
+    "codegGranted": "codeg itself has Accessibility or Screen Recording, so agents' shells can use it without anything being shared. Unless you need it, turn it off for codeg in System Settings.",
+    "backend": {
+      "idle": "Not started",
+      "downloading": "Downloading the driver…",
+      "starting": "Starting the helper…",
+      "ready": "Ready",
+      "failed": "Failed"
+    },
+    "driver": "cua-driver {version}",
+    "devBuild": "Development build: the helper doesn't check which program calls it.",
+    "devTag": "development build",
+    "permissions": {
+      "accessibility": "Accessibility",
+      "screenRecording": "Screen Recording",
+      "granted": "Granted",
+      "request": "Grant…",
+      "why": "Turn on codeg-computer-helper in System Settings — not codeg. Screen Recording lets it see windows; Accessibility lets it read and act on them.",
+      "devRebuild": "Each rebuild of the helper voids its old grant: remove the old codeg-computer-helper from the list first, then grant again.",
+      "notListed": "If codeg-computer-helper isn't in the list, drag it in from the Finder:",
+      "reveal": "Show in Finder"
+    },
+    "shared": {
+      "title": "{count, plural, =0 {No windows shared} one {# window shared} other {# windows shared}}",
+      "empty": "Agents can list your windows but read none of them until you share one.",
+      "stop": "Stop",
+      "wholeApp": "Whole app · {count, plural, =0 {no windows open} one {# window} other {# windows}}",
+      "screen": "Entire screen",
+      "screenWindows": "{count, plural, =0 {no windows yet} one {# window} other {# windows}}"
+    },
+    "level": {
+      "read": "Can read",
+      "control": "Can act",
+      "readLong": "Read only",
+      "controlLong": "Read and act",
+      "change": "Change what agents may do"
+    },
+    "activity": {
+      "title": "Recent activity",
+      "clear": "Clear recent activity",
+      "capture": "Screenshot",
+      "snapshot": "Read",
+      "verify": "Check",
+      "click": "Click",
+      "drag": "Drag",
+      "scroll": "Scroll",
+      "type": "Type",
+      "key": "Key",
+      "hold-key": "Hold key",
+      "set-value": "Set value",
+      "restore": "Restore",
+      "menu": "Menu",
+      "set-frame": "Move window",
+      "launch": "Open app",
+      "clipboard-read": "Read clipboard",
+      "clipboard-write": "Write clipboard",
+      "outcome": {
+        "done": "done",
+        "refused": "refused",
+        "failed": "failed"
+      }
+    },
+    "share": "Share a window…",
+    "openSettings": "Open full settings",
+    "picker": {
+      "title": "Share a window with agents",
+      "description": "Agents in every conversation can read the windows you share, and click and type in the ones you let them act on. Sharing ends when you stop it, the window closes, or it goes unused for the time set in Settings.",
+      "count": "{count, plural, one {# window} other {# windows}}",
+      "sharedCount": "{count, plural, one {# shared} other {# shared}}",
+      "loading": "Loading windows…",
+      "refresh": "Refresh",
+      "empty": "No windows found. If you expected some, check the permissions in the Computer use panel.",
+      "noScreenRecording": "codeg-computer-helper doesn't have Screen Recording yet: window titles and pictures can't be shown, and agents can't read windows.",
+      "unnamedApp": "Unknown app",
+      "untitled": "Untitled window",
+      "minimized": "Minimized",
+      "hidden": "Hidden",
+      "notGrantable": {
+        "codeg": "codeg's window",
+        "blocklisted": "On the never-share list",
+        "unidentified": "Can't tell which app this is"
+      },
+      "shareRead": "Let agents read it",
+      "shareControl": "Let agents read and act on it",
+      "stopSharing": "Stop sharing",
+      "levelNone": "Off",
+      "levelRead": "Read",
+      "levelControl": "Act",
+      "levelLabel": "What agents may do with {app}",
+      "wholeApp": "Whole app",
+      "wholeAppHint": "Every window of {app}, including ones it opens later, plus its menus and its own shortcuts",
+      "appLevelLabel": "What agents may do with all of {app}",
+      "viaApp": "With the app",
+      "screenTitle": "Entire screen",
+      "screenHint": "Every window you can share, including ones that open later, and the desktop's own shortcuts. codeg's windows and the never-share list stay painted over.",
+      "screenLevelLabel": "What agents may do with the entire screen",
+      "viaScreen": "With the screen",
+      "shareAll": "Share all",
+      "shareAllRead": "Let agents read all of them",
+      "shareAllControl": "Let agents read and act on all of them",
+      "stopSharingAll": "Stop sharing all",
+      "skipped": "{count, plural, one {# window could not be shared; it may have closed.} other {# windows could not be shared; they may have closed.}}",
+      "unshareable": "{count, plural, one {# window can't be shared} other {# windows can't be shared}}",
+      "noneShareable": "None of these windows can be shared.",
+      "codegWhy": "codeg's windows are never shared: an agent that could operate codeg could approve its own requests or share more windows with itself. The same goes for other copies of codeg."
+    },
+    "settings": {
+      "pageTitle": "Computer use",
+      "pageDescription": "Let agents see and use the desktop windows you share with them.",
+      "switch": {
+        "label": "Enable computer use",
+        "hint": "Agents can list your apps and windows, read the windows you share, and click and type in the ones you let them act on. No window can be read until you share it from the status bar.",
+        "failed": "Could not switch computer use"
+      },
+      "driver": {
+        "title": "Driver",
+        "description": "Computer use reads and acts on windows through cua-driver, an open-source program. codeg runs only the release it has checked, {version}, and downloads it the first time it is needed.",
+        "loading": "Checking…",
+        "unsupported": "cua-driver has no build for this platform.",
+        "installing": "Installing…",
+        "downloadingOf": "Downloading… {done} / {total} MB",
+        "downloadingSoFar": "Downloading… {done} MB",
+        "uninstalling": "Uninstalling…",
+        "installed": "Installed · {version}",
+        "outdated": "{installed} is installed; this codeg runs {version}.",
+        "notInstalled": "Not installed. It is downloaded the first time computer use needs it, or you can install it now.",
+        "install": "Install",
+        "upgrade": "Upgrade to {version}",
+        "uninstall": "Uninstall",
+        "installDone": "cua-driver installed",
+        "uninstallDone": "cua-driver uninstalled",
+        "confirmTitle": "Uninstall cua-driver?",
+        "confirmDescription": "Computer use will be switched off and every window will stop being shared. Switching it back on downloads the driver again.",
+        "cancel": "Cancel"
+      },
+      "permissions": {
+        "title": "Permissions",
+        "description": "macOS asks for these for codeg-computer-helper. Grant one in System Settings and come back: this updates by itself.",
+        "off": "Switch computer use on to check and grant permissions.",
+        "accessibilityHint": "Read windows' contents and act on them.",
+        "screenRecordingHint": "Take screenshots and read window titles."
+      },
+      "title": "Sharing, input and stopping",
+      "description": "How long a shared window stays shared, which apps can never be shared, the shortcut and floating bar that stop all sharing at once, and whether agents may bring a window to the front to act on it.",
+      "ttl": {
+        "label": "Stop sharing unused windows after",
+        "hint": "A shared window stops being shared when no agent has read it for this long.",
+        "minutes": "{minutes} minutes",
+        "never": "Never (until I stop it)"
+      },
+      "blocklist": {
+        "label": "Apps that are never shared",
+        "hint": "Their windows can't be shared with agents. Remove the defaults you don't need, or add an app by bundle ID (com.example.app), executable name (app.exe) or full path.",
+        "placeholder": "com.example.app",
+        "add": "Add",
+        "remove": "Remove {name}",
+        "restore": "Restore defaults",
+        "restoreConfirmTitle": "Restore the default list?",
+        "restoreConfirmAdded": "{count, plural, one {The app you added comes off the list.} other {The # apps you added come off the list.}}",
+        "restoreConfirmRemoved": "{count, plural, one {The default app you removed goes back on the list.} other {The # default apps you removed go back on the list.}}",
+        "restoreConfirmSave": "The change takes effect when you save.",
+        "cancel": "Cancel",
+        "custom": "Added by you",
+        "duplicate": "Already on the list.",
+        "removedCount": "{count, plural, one {# default app removed.} other {# default apps removed.}}",
+        "items": {
+          "systemSettings": "System Settings",
+          "credentialPrompts": "System password and authorization prompts",
+          "keychain": "Keychain Access",
+          "passwords": "Passwords"
+        }
+      },
+      "stopKey": {
+        "label": "Stop shortcut",
+        "hint": "Stops sharing every window from any app, like the Stop sharing button. While computer use is on these keys belong to codeg, so pick ones you don't use elsewhere.",
+        "recording": "Press keys…",
+        "recordHint": "Hold Ctrl and one more modifier (Alt or Shift), then press a key. Esc cancels.",
+        "recordHintMac": "Hold ⌃ or ⌘ and one more modifier, then press a key. Esc cancels.",
+        "off": "Off",
+        "useDefault": "Default",
+        "turnOff": "Turn off",
+        "statusActive": "Active: press it anywhere to stop sharing every window.",
+        "statusIdle": "Takes effect while computer use is switched on.",
+        "statusOff": "Off: only the Stop sharing buttons stop sharing.",
+        "statusFailed": "Not active: another app is probably using these keys. Choose others.",
+        "problem": {
+          "unsupportedKey": "That key can't be used. Choose a letter, a digit, F1–F12, Esc or a punctuation key.",
+          "weakModifiers": "Hold at least two modifiers, one of them Ctrl (or ⌘ on a Mac).",
+          "metaOffMac": "The Windows key can't be part of it."
+        }
+      },
+      "strip": {
+        "label": "Floating stop bar",
+        "hint": "While any window is shared, a bar floats above all windows saying what agents may do, with a Stop sharing button. Turned off, you can still stop sharing from the Computer use popover in the status bar or with the stop shortcut."
+      },
+      "foreground": {
+        "label": "Let agents bring windows to the front",
+        "hint": "Some apps take no keys or typing while they're in the background — on Windows, any built on Chromium, such as Edge, Chrome and VS Code. With this on, an agent may bring a window you let it act on to the front for one action, then switch back to the window you were in (on Linux, it stays in front). You'll see the window come forward; anything you type at that moment may go to it, and a click may move your mouse pointer."
+      },
+      "delivery": {
+        "label": "Default input mode",
+        "hint": "How agents' clicks, scrolling, typing and keys reach a window when they don't ask for either. Background leaves the window where it is and your pointer and keyboard to you; Foreground brings the window to the front for every action.",
+        "hintOff": "Always Background while agents may not bring windows to the front.",
+        "background": "Background",
+        "foreground": "Foreground"
+      },
+      "launch": {
+        "label": "Let agents open applications and move windows",
+        "hint": "With this on, an agent may start an installed application in the background — never codeg or one of the apps that are never shared — and move or resize a window you let it act on. Starting an application shares none of its windows: that is still yours to decide."
+      },
+      "clipboard": {
+        "label": "Let agents use the clipboard",
+        "hint": "With this on, an agent may put text on the clipboard to paste it, and read back what it copied out of a window you shared with it. What you copied yourself is never read for an agent, and an agent can paste only what it put there itself."
+      },
+      "screen": {
+        "label": "Offer the entire screen",
+        "hint": "With this on, the share picker offers the entire screen: agents see one picture of all of it and can click anywhere on it, and every window you can share goes with it, along with the desktop's own shortcuts. codeg's windows and the never-share list stay painted over. Turning this off ends the screen's sharing."
+      },
+      "boundary": "On macOS the permissions go to codeg-computer-helper, which only codeg can use, so agents' shells can't. Windows and Linux have no such separation: there these settings decide what agents get through codeg, not what programs on your computer can do.",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Computer use settings saved",
+      "saveFailed": "Failed to save computer use settings",
+      "loadFailed": "Failed to load: {detail}"
+    }
   },
   "LogsSettings": {
     "loading": "Loading…",
@@ -5553,6 +5803,8 @@
     "baseBranchDefault": "Current branch when the task starts",
     "baseBranchHint": "The task branches from here, and merging lands it back on this branch.",
     "agentInheritedHint": "Inherited from task settings — change it to override for this task",
+    "agentNoDefaultHint": "No default agent in task settings — the selected agent will be saved with the task",
+    "agentInheritedUnavailableHint": "{agent} from task settings isn't available — the selected agent will be saved with the task",
     "agentOverrideReset": "Reset to inherited",
     "sectionTarget": "Target",
     "errorTitle": "Title is required",

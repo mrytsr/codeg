@@ -622,3 +622,125 @@ async fn model_provider_update_and_set_enabled_match_web_wire_shape() {
     let body: Value = resp.json();
     assert_eq!(body[0]["enabled"], true);
 }
+
+// Computer use
+//
+// Served only by a codeg-server its operator let share the screen it runs on
+// (`CODEG_COMPUTER_USE`): everywhere else every call is refused, and
+// `computer_available` says so up front. Nothing here reaches a helper — no
+// screen is read in a test.
+// ────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn computer_use_is_refused_where_it_is_not_served() {
+    let (server, _data, _static) = build_test_server().await;
+    let auth = format!("Bearer {TEST_TOKEN}");
+    let resp = server
+        .post("/api/computer_available")
+        .add_header("authorization", auth.clone())
+        .json(&json!({}))
+        .await;
+    assert_eq!(resp.status_code(), 200);
+    let body: Value = resp.json();
+    assert_eq!(body["available"], false, "got {body}");
+    assert!(body["platform"].is_string(), "got {body}");
+    for (route, args) in [
+        ("/api/computer_status", json!({})),
+        ("/api/computer_shared_state", json!({})),
+        (
+            "/api/computer_share_window",
+            json!({ "targetId": "w1", "level": "control" }),
+        ),
+        ("/api/computer_share_screen", json!({ "level": "read" })),
+        ("/api/computer_stop", json!({})),
+    ] {
+        let resp = server
+            .post(route)
+            .add_header("authorization", auth.clone())
+            .json(&args)
+            .await;
+        assert_eq!(resp.status_code(), 422, "{route}");
+        let body: Value = resp.json();
+        assert!(
+            body["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("CODEG_COMPUTER_USE")),
+            "{route}: {body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn computer_use_requires_a_token() {
+    let (server, _data, _static) = build_test_server().await;
+    for route in ["/api/computer_available", "/api/computer_share_screen"] {
+        let resp = server.post(route).json(&json!({ "level": "read" })).await;
+        assert_eq!(resp.status_code(), 401, "{route}");
+    }
+}
+
+/// A server let share its screen answers its web clients from its own
+/// service — what is shared, and refusals of its own (here: computer use is
+/// switched off, which a share needs first).
+#[tokio::test]
+async fn a_server_that_shares_its_screen_answers_its_web_clients() {
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let static_dir = tempfile::tempdir().expect("static dir");
+    let db = fresh_in_memory_db().await;
+    let state = Arc::new(AppState::new_for_test(db, data_dir.path().to_path_buf()));
+    let service = codeg_lib::commands::computer::ComputerService::start(
+        codeg_lib::commands::computer::ComputerHost::Server {
+            broadcaster: state.event_broadcaster.clone(),
+            emitter: state.emitter.clone(),
+        },
+        state.computer_tools_config.clone(),
+    );
+    assert!(state.computer_service.set(service).is_ok());
+    assert!(state.computer_tools_config.is_served());
+    let router = build_router(
+        state,
+        TEST_TOKEN.to_string(),
+        static_dir.path().to_path_buf(),
+        Arc::new(ShutdownSignal::new()),
+    );
+    let server = TestServer::new(router).expect("test server");
+    let auth = format!("Bearer {TEST_TOKEN}");
+
+    let resp = server
+        .post("/api/computer_available")
+        .add_header("authorization", auth.clone())
+        .json(&json!({}))
+        .await;
+    assert_eq!(resp.json::<Value>()["available"], true);
+
+    let resp = server
+        .post("/api/computer_shared_state")
+        .add_header("authorization", auth.clone())
+        .json(&json!({}))
+        .await;
+    assert_eq!(resp.status_code(), 200);
+    assert_eq!(resp.json::<Value>(), json!({ "shared": [], "apps": [] }));
+
+    let resp = server
+        .post("/api/computer_share_screen")
+        .add_header("authorization", auth.clone())
+        .json(&json!({ "level": "read" }))
+        .await;
+    assert_eq!(resp.status_code(), 422);
+    let body: Value = resp.json();
+    assert!(
+        body["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("switched off") || m.contains("not offered on Linux")),
+        "got {body}"
+    );
+
+    let resp = server
+        .post("/api/computer_stop_key_status")
+        .add_header("authorization", auth)
+        .json(&json!({}))
+        .await;
+    assert_eq!(resp.status_code(), 200);
+    assert_eq!(resp.json::<Value>(), json!({}));
+}
+}

@@ -53,7 +53,8 @@
       "office_tools": "办公工具",
       "skill_packs": "技能包",
       "collaboration": "协作",
-      "browser": "浏览器",
+      "browser": "浏览器操作",
+      "computer_use": "电脑操作",
       "quick_messages": "快捷消息",
       "logs": "运行日志"
     }
@@ -3047,7 +3048,7 @@
           "downloadFailed": "{agent} 下载失败：{message}",
           "sessionLoadResourceNotFound": "{agent} 会话加载失败，可重新加载重试，或开始新会话。",
           "sessionLoadUnavailable": "{agent} 无法恢复此会话，它可能已结束或 agent 已停止。可重新加载重试，或开始新会话。",
-          "sessionLoadBusy": "这份历史正被从它分叉出来的会话占用。关掉那个会话，再重新加载即可打开。",
+          "sessionLoadBusy": "这个会话正在别处打开。如果是另一个 {agent} 客户端（桌面应用、CLI 或 IDE 扩展）开着它，先在那边关闭它或退出那个客户端，再重新加载；如果刚从它分叉过，约一分钟后重新加载即可。",
           "sessionArchived": "原会话已在 {agent} 侧归档，可在终端运行 {command} 找回历史后重载，或直接开始新会话。",
           "turnFailedRefusal": "{agent} 拒绝继续本轮回复，通常意味着后端或网关出错，请检查代理日志。",
           "turnFailedMaxTokens": "{agent} 已达到本轮回复的最大 Token 限制。",
@@ -4775,6 +4776,7 @@
     "saveFailed": "保存远端连接失败",
     "deleteFailed": "删除远端连接失败",
     "openFailed": "打开远端工作区失败",
+    "restoreFailed": "无法重新打开远端工作区“{name}”",
     "connectionLoadFailed": "加载远端连接失败：{message}",
     "connectionExpired": "远端连接“{name}”已失效。请更新 Token 后重新加载此窗口。"
   },
@@ -5077,6 +5079,11 @@
       "short": "在你共享的页面上运行它自己写的代码，默认不询问。",
       "hint": "允许智能体在你共享的页面上运行它自己写的 JavaScript。默认关闭，并且需要先打开上面那个开关。打开它就意味着代码不经询问直接运行，所以决定权就在这个开关上；如果想逐段过目，可在「设置 → 内置浏览器」里改成每次都问你。"
     },
+    "computer": {
+      "label": "查看和操作桌面窗口",
+      "short": "列出应用和窗口，读取你共享的窗口，操作你允许的窗口。",
+      "hint": "让智能体列出桌面上的应用和窗口，读取你共享给它的窗口——截图、窗口内容、以及是否已出现预期的状态——并在你允许操作的窗口里点击、输入和按键。在你从状态栏的「电脑操作」面板共享某个窗口之前，任何窗口都不可读；除非你还允许操作，否则任何窗口都不能被操作。窗口关闭、闲置一段时间或你停止共享时，共享即结束；面板里的「停止智能体」会立即停下所有智能体。输入在后台送达窗口；遇到后台收不到输入的应用，智能体可以把窗口切到前台完成操作，可在电脑操作设置里关闭。仅限桌面版；在 macOS 上需要为 codeg-computer-helper 授予权限。预览功能。"
+    },
     "automations": {
       "label": "创建自动化",
       "short": "创建和管理定时自动化。",
@@ -5239,6 +5246,249 @@
     "clearConfirmDescriptionProfile": "将删除配置文件 {name} 的 Cookie、缓存和站点存储。已打开的标签页会保留，但各网站的登录状态会失效。",
     "signInUaTitle": "Google 登录兼容",
     "signInUaHint": "Google 拒绝在内嵌浏览器中登录。开启后，标签页只对 Google 的登录页面（accounts.google.com）呈现 Firefox 身份；其他地方一律以自身所在引擎的身份示人，不会冒充 Firefox。仅对嵌入式标签页生效，独立窗口不适用；登录页把你跳转到别的站点时，到那里的第一个请求仍带着登录身份。"
+  },
+  "ComputerUse": {
+    "title": "电脑操作",
+    "preview": "预览",
+    "refresh": "刷新",
+    "tooltipShared": "电脑操作 · {count, plural, other {已共享 # 个窗口}}",
+    "stop": "停止共享",
+    "stopHint": "立即停止共享所有窗口，并中断智能体正在进行的操作。之后需要时，再重新共享窗口即可。",
+    "indicator": {
+      "actOne": "智能体可操作「{app}」",
+      "actMany": "智能体可操作 {count, plural, other {# 个窗口}}",
+      "readOne": "智能体可查看「{app}」",
+      "readMany": "智能体可查看 {count, plural, other {# 个窗口}}",
+      "readScreen": "智能体可查看整个屏幕",
+      "actScreen": "智能体可操作整个屏幕",
+      "recent": "{app}：{action}",
+      "stop": "停止共享",
+      "stopWithKey": "停止共享所有窗口（{key}）"
+    },
+    "codegGranted": "codeg 本身拥有「辅助功能」或「屏幕录制」权限，智能体的命令行可以不经共享直接使用它。如非必要，请在系统设置中为 codeg 关闭。",
+    "backend": {
+      "idle": "未启动",
+      "downloading": "正在下载驱动…",
+      "starting": "正在启动 helper…",
+      "ready": "就绪",
+      "failed": "失败"
+    },
+    "driver": "cua-driver {version}",
+    "devBuild": "开发版：helper 不校验调用它的程序。",
+    "devTag": "开发版",
+    "permissions": {
+      "accessibility": "辅助功能",
+      "screenRecording": "屏幕录制",
+      "granted": "已授权",
+      "request": "去授权",
+      "why": "请在系统设置中打开 codeg-computer-helper 的开关（不是 codeg）。「屏幕录制」用于查看窗口画面，「辅助功能」用于读取和操作窗口。",
+      "devRebuild": "每次重新编译 helper，旧授权都会失效：请先从列表中删掉旧的 codeg-computer-helper，再重新授权。",
+      "notListed": "如果列表里没有 codeg-computer-helper，可以从访达把它拖进去：",
+      "reveal": "在访达中显示"
+    },
+    "shared": {
+      "title": "{count, plural, =0 {未共享窗口} other {已共享 # 个窗口}}",
+      "empty": "智能体能列出你的窗口，但在你共享之前读不到任何一个。",
+      "stop": "停止",
+      "wholeApp": "整个应用 · {count, plural, =0 {没有打开的窗口} other {# 个窗口}}",
+      "screen": "整个屏幕",
+      "screenWindows": "{count, plural, =0 {暂无窗口} other {# 个窗口}}"
+    },
+    "level": {
+      "read": "可读取",
+      "control": "可操作",
+      "readLong": "仅读取",
+      "controlLong": "读取并操作",
+      "change": "更改智能体可做的事"
+    },
+    "activity": {
+      "title": "最近活动",
+      "clear": "清空最近活动",
+      "capture": "截图",
+      "snapshot": "读取",
+      "verify": "检查",
+      "click": "点击",
+      "drag": "拖拽",
+      "scroll": "滚动",
+      "type": "输入",
+      "key": "按键",
+      "hold-key": "按住按键",
+      "set-value": "设值",
+      "restore": "恢复窗口",
+      "menu": "菜单",
+      "set-frame": "移动窗口",
+      "launch": "打开应用",
+      "clipboard-read": "读取剪贴板",
+      "clipboard-write": "写入剪贴板",
+      "outcome": {
+        "done": "完成",
+        "refused": "被拒",
+        "failed": "失败"
+      }
+    },
+    "share": "共享窗口…",
+    "openSettings": "打开详细设置",
+    "picker": {
+      "title": "把窗口共享给智能体",
+      "description": "所有对话中的智能体都能读取你共享的窗口，并在你允许操作的窗口里点击和输入。你停止共享、窗口关闭，或闲置超过设置中的时长后，共享即结束。",
+      "count": "{count, plural, other {# 个窗口}}",
+      "sharedCount": "{count, plural, other {已共享 # 个}}",
+      "loading": "正在加载窗口…",
+      "refresh": "刷新",
+      "empty": "没有找到窗口。如果应该有，请检查「电脑操作」面板中的权限。",
+      "noScreenRecording": "codeg-computer-helper 还没有「屏幕录制」权限：看不到窗口标题和画面，智能体也读不了窗口。",
+      "unnamedApp": "未知应用",
+      "untitled": "无标题窗口",
+      "minimized": "已最小化",
+      "hidden": "已隐藏",
+      "notGrantable": {
+        "codeg": "codeg 的窗口",
+        "blocklisted": "在永不共享名单中",
+        "unidentified": "无法识别所属应用"
+      },
+      "shareRead": "允许智能体读取",
+      "shareControl": "允许智能体读取并操作",
+      "stopSharing": "停止共享",
+      "levelNone": "不共享",
+      "levelRead": "可读取",
+      "levelControl": "可操作",
+      "levelLabel": "智能体对 {app} 的权限",
+      "wholeApp": "整个应用",
+      "wholeAppHint": "{app} 的所有窗口（包括之后打开的），以及它的菜单和快捷键",
+      "appLevelLabel": "智能体对整个 {app} 的权限",
+      "viaApp": "随应用共享",
+      "screenTitle": "整个屏幕",
+      "screenHint": "所有可共享的窗口（包括之后打开的），以及桌面本身的快捷键。codeg 自己的窗口和永不共享名单中的应用始终会被遮盖。",
+      "screenLevelLabel": "智能体对整个屏幕的权限",
+      "viaScreen": "随屏幕共享",
+      "shareAll": "全部共享",
+      "shareAllRead": "全部允许读取",
+      "shareAllControl": "全部允许读取并操作",
+      "stopSharingAll": "全部停止共享",
+      "skipped": "{count, plural, other {有 # 个窗口没能共享，可能已经关闭。}}",
+      "unshareable": "{count, plural, other {# 个窗口不能共享}}",
+      "noneShareable": "这些窗口都不能共享。",
+      "codegWhy": "codeg 的窗口永远不能共享：能操作 codeg 的智能体可以替自己批准请求，或给自己共享更多窗口。其他 codeg 实例的窗口也一样。"
+    },
+    "settings": {
+      "pageTitle": "电脑操作",
+      "pageDescription": "让智能体查看并操作你共享给它的桌面窗口。",
+      "switch": {
+        "label": "启用电脑操作",
+        "hint": "开启后，智能体可以列出应用和窗口，读取你共享的窗口，并在你允许操作的窗口里点击和输入。你从状态栏共享之前，任何窗口都不可读。",
+        "failed": "切换电脑操作失败"
+      },
+      "driver": {
+        "title": "驱动",
+        "description": "电脑操作通过开源的 cua-driver 读取和操作窗口。codeg 只运行经过核对的 {version} 版本，首次需要时自动下载。",
+        "loading": "正在检查…",
+        "unsupported": "cua-driver 没有适用于此平台的版本。",
+        "installing": "正在安装…",
+        "downloadingOf": "正在下载… {done} / {total} MB",
+        "downloadingSoFar": "正在下载… {done} MB",
+        "uninstalling": "正在卸载…",
+        "installed": "已安装 · {version}",
+        "outdated": "已安装 {installed}，当前 codeg 使用 {version}。",
+        "notInstalled": "未安装。首次使用电脑操作时会自动下载，也可以现在安装。",
+        "install": "安装",
+        "upgrade": "升级到 {version}",
+        "uninstall": "卸载",
+        "installDone": "cua-driver 已安装",
+        "uninstallDone": "cua-driver 已卸载",
+        "confirmTitle": "卸载 cua-driver？",
+        "confirmDescription": "电脑操作会被关闭，所有窗口停止共享。重新开启时会再次下载驱动。",
+        "cancel": "取消"
+      },
+      "permissions": {
+        "title": "系统权限",
+        "description": "macOS 需要为 codeg-computer-helper 授权。在系统设置里授权后回到这里，状态会自动更新。",
+        "off": "开启电脑操作后，可以在这里查看和授予权限。",
+        "accessibilityHint": "读取窗口内容并操作窗口。",
+        "screenRecordingHint": "截图和读取窗口标题。"
+      },
+      "title": "共享、输入与停止",
+      "description": "共享的窗口多久后停止共享、哪些应用永不共享、随时停止所有共享的快捷键和悬浮停止条，以及智能体能否把窗口切到前台来操作。",
+      "ttl": {
+        "label": "窗口闲置多久后停止共享",
+        "hint": "共享的窗口在这么长时间内没有被任何智能体读取，就会停止共享。",
+        "minutes": "{minutes} 分钟",
+        "never": "永不（直到我停止）"
+      },
+      "blocklist": {
+        "label": "永不共享的应用",
+        "hint": "这些应用的窗口不能共享给智能体。不需要的默认项可以移除，也可以按 bundle 标识（com.example.app）、可执行文件名（app.exe）或完整路径添加应用。",
+        "placeholder": "com.example.app",
+        "add": "添加",
+        "remove": "移除 {name}",
+        "restore": "恢复默认",
+        "restoreConfirmTitle": "恢复默认名单？",
+        "restoreConfirmAdded": "{count, plural, other {你添加的 # 个应用会从名单中移除。}}",
+        "restoreConfirmRemoved": "{count, plural, other {你移除的 # 个默认应用会重新加回名单。}}",
+        "restoreConfirmSave": "保存后生效。",
+        "cancel": "取消",
+        "custom": "你添加的",
+        "duplicate": "已经在名单里了。",
+        "removedCount": "{count, plural, other {已移除 # 个默认应用。}}",
+        "items": {
+          "systemSettings": "系统设置",
+          "credentialPrompts": "系统密码与授权弹窗",
+          "keychain": "钥匙串访问",
+          "passwords": "密码"
+        }
+      },
+      "stopKey": {
+        "label": "停止快捷键",
+        "hint": "在任何应用中按下即可停止共享所有窗口，效果同「停止共享」按钮。电脑操作开启时这组按键归 codeg 使用，请选一组别处不用的组合。",
+        "recording": "请按下按键…",
+        "recordHint": "按住 Ctrl 和另一个修饰键（Alt 或 Shift），再按一个键。按 Esc 取消。",
+        "recordHintMac": "按住 ⌃ 或 ⌘ 和另一个修饰键，再按一个键。按 Esc 取消。",
+        "off": "已关闭",
+        "useDefault": "默认",
+        "turnOff": "关闭",
+        "statusActive": "已生效：在任何地方按下即可停止共享所有窗口。",
+        "statusIdle": "开启电脑操作后生效。",
+        "statusOff": "已关闭：只能用「停止共享」按钮停止共享。",
+        "statusFailed": "未生效：这组按键可能已被其他应用占用，请换一组。",
+        "problem": {
+          "unsupportedKey": "不能使用这个键。请选择字母、数字、F1–F12、Esc 或标点键。",
+          "weakModifiers": "至少按住两个修饰键，其中一个是 Ctrl（Mac 上也可以是 ⌘）。",
+          "metaOffMac": "不能包含 Windows 键。"
+        }
+      },
+      "strip": {
+        "label": "悬浮停止条",
+        "hint": "共享窗口期间，在所有窗口上方悬浮一条提示条，写明智能体能做什么，并带「停止共享」按钮。关闭后，仍可在状态栏的「电脑操作」气泡里或用停止快捷键停止共享。"
+      },
+      "foreground": {
+        "label": "允许智能体把窗口切到前台",
+        "hint": "有些应用在后台收不到按键和打字——在 Windows 上，凡是基于 Chromium 的应用都是如此，比如 Edge、Chrome 和 VS Code。开启后，智能体可以把你允许它操作的窗口切到前台完成一次操作，再切回你原来所在的窗口（在 Linux 上窗口会留在前台）。你会看到窗口跳到前面；那一刻你敲的字可能会进到这个窗口，点击也可能移动你的鼠标指针。"
+      },
+      "delivery": {
+        "label": "默认操作方式",
+        "hint": "智能体没有指定时，点击、滚动、打字和按键如何送达窗口。后台：窗口留在原处，鼠标和键盘仍归你用；前台：每次操作都把窗口切到前台。",
+        "hintOff": "不允许把窗口切到前台时，始终为后台。",
+        "background": "后台",
+        "foreground": "前台"
+      },
+      "launch": {
+        "label": "允许智能体打开应用和移动窗口",
+        "hint": "开启后，智能体可以在后台启动已安装的应用（codeg 和永不共享的应用除外），也可以移动你允许它操作的窗口或调整其大小。启动应用不会共享它的任何窗口，是否共享仍由你决定。"
+      },
+      "clipboard": {
+        "label": "允许智能体使用剪贴板",
+        "hint": "开启后，智能体可以把文本放到剪贴板上再粘贴，也可以读回它自己从你共享的窗口中复制的内容。你自己复制的内容永远不会读给智能体，智能体也只能粘贴它自己放到剪贴板上的内容。"
+      },
+      "screen": {
+        "label": "允许共享整个屏幕",
+        "hint": "开启后，共享选择器中会出现「整个屏幕」：智能体能看到整屏画面并在任意位置点击，所有可共享的窗口也随之共享，连同桌面本身的快捷键。codeg 自己的窗口和永不共享名单中的应用始终会被遮盖。关闭此项会结束整个屏幕的共享。"
+      },
+      "boundary": "在 macOS 上，权限授予 codeg-computer-helper，只有 codeg 能使用，智能体的命令行用不了。Windows 和 Linux 没有这层隔离：这里的设置决定的是智能体通过 codeg 能拿到什么，而不是电脑上的程序能做什么。",
+      "save": "保存",
+      "saving": "保存中…",
+      "saved": "电脑操作设置已保存",
+      "saveFailed": "保存电脑操作设置失败",
+      "loadFailed": "加载失败：{detail}"
+    }
   },
   "LogsSettings": {
     "loading": "加载中…",
@@ -5553,6 +5803,8 @@
     "baseBranchDefault": "任务开始时的当前分支",
     "baseBranchHint": "任务从该分支拉出工作树，合并时也落回该分支。",
     "agentInheritedHint": "继承自任务设置，修改后仅对本任务生效",
+    "agentNoDefaultHint": "任务设置中没有默认 agent，当前选中的 agent 将随任务保存",
+    "agentInheritedUnavailableHint": "任务设置中的 {agent} 不可用，当前选中的 agent 将随任务保存",
     "agentOverrideReset": "恢复继承",
     "sectionTarget": "目标",
     "errorTitle": "请输入标题",

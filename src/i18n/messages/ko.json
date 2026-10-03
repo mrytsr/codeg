@@ -53,7 +53,8 @@
       "office_tools": "오피스 도구",
       "skill_packs": "스킬 팩",
       "collaboration": "협업",
-      "browser": "브라우저",
+      "browser": "브라우저 사용",
+      "computer_use": "컴퓨터 사용",
       "quick_messages": "빠른 메시지",
       "logs": "실행 로그"
     }
@@ -3047,7 +3048,7 @@
           "downloadFailed": "{agent} 다운로드 실패: {message}",
           "sessionLoadResourceNotFound": "{agent} 세션 불러오기에 실패했습니다. 다시 불러와 재시도하거나 새 대화를 시작하세요.",
           "sessionLoadUnavailable": "{agent}에서 이 세션을 복원할 수 없습니다. 세션이 종료되었거나 에이전트가 중지되었을 수 있습니다. 다시 불러와 재시도하거나 새 대화를 시작하세요.",
-          "sessionLoadBusy": "이 기록은 여기서 분기된 세션이 열어 두고 있습니다. 해당 세션을 닫은 뒤 다시 불러오세요.",
+          "sessionLoadBusy": "이 세션이 다른 곳에서 열려 있습니다. 다른 {agent} 클라이언트(데스크톱 앱, CLI 또는 IDE 확장 프로그램)에서 열려 있다면 그쪽에서 닫거나 해당 클라이언트를 종료한 뒤 다시 불러오세요. 방금 이 세션에서 분기했다면 1분쯤 뒤에 다시 불러오세요.",
           "sessionArchived": "이전 세션은 {agent} 측에서 보관되었습니다. 터미널에서 {command}을(를) 실행해 복원한 뒤 다시 불러오거나 새 대화를 시작하세요.",
           "turnFailedRefusal": "{agent}이(가) 이번 턴을 계속하지 않았습니다. 백엔드나 게이트웨이 오류일 수 있습니다. 에이전트 로그를 확인하세요.",
           "turnFailedMaxTokens": "{agent}이(가) 이번 턴의 최대 토큰 한도에 도달했습니다.",
@@ -4755,6 +4756,7 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "restoreFailed": "원격 워크스페이스 \"{name}\"을(를) 다시 열 수 없습니다",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
   },
@@ -5077,6 +5079,11 @@
       "short": "공유한 페이지에서 자체 코드를 실행합니다. 기본값은 묻지 않고 실행입니다.",
       "hint": "공유한 페이지에서 에이전트가 직접 작성한 JavaScript를 실행할 수 있게 합니다. 기본값은 꺼짐이며 위 스위치가 켜져 있어야 합니다. 켜면 코드가 묻지 않고 실행되므로 판단은 이 스위치에서 하게 됩니다. 하나씩 확인하고 싶다면 설정 → 내장 브라우저에서 바꿀 수 있습니다."
     },
+    "computer": {
+      "label": "데스크톱 창 보기 및 조작",
+      "short": "앱과 창을 나열하고, 공유한 창을 읽고, 허용한 창을 조작합니다.",
+      "hint": "에이전트가 데스크톱의 앱과 창을 나열하고, 공유한 창을 읽고——스크린샷, 창 내용, 기대한 상태인지 여부——조작을 허용한 창에서 클릭, 입력, 키 누르기를 할 수 있게 합니다. 상태 표시줄의 「컴퓨터 사용」 패널에서 창을 공유하기 전에는 어떤 창도 읽을 수 없고, 조작도 허용하지 않으면 어떤 창도 조작되지 않습니다. 창이 닫히거나 한동안 사용되지 않거나 공유를 중지하면 공유가 끝나며, 패널의 「에이전트 중지」로 모든 에이전트를 즉시 멈출 수 있습니다. 입력은 백그라운드로 창에 전달됩니다. 백그라운드로는 전달되지 않는 조작에서는 에이전트가 창을 앞으로 가져올 수 있으며, 컴퓨터 사용 설정에서 끌 수 있습니다. 데스크톱 앱 전용입니다. macOS에서는 codeg-computer-helper에 권한을 부여해야 합니다. 미리 보기."
+    },
     "automations": {
       "label": "자동화 만들기",
       "short": "예약 자동화를 만들고 관리합니다.",
@@ -5239,6 +5246,249 @@
     "clearConfirmDescriptionProfile": "프로필 {name}의 쿠키, 캐시, 사이트 저장소가 삭제됩니다. 열린 탭은 유지되지만 각 사이트에서 로그아웃됩니다.",
     "signInUaTitle": "Google 로그인 호환",
     "signInUaHint": "Google은 내장 브라우저에서의 로그인을 거부합니다. 켜면 탭이 Google 로그인 페이지(accounts.google.com)에만 Firefox로 표시되고, 그 밖의 곳에서는 실제로 실행 중인 엔진으로 식별되며 Firefox를 사칭하지 않습니다.내장 탭에만 적용되며 별도 창에는 적용되지 않습니다. 로그인 페이지가 다른 사이트로 리디렉션하면 그곳으로 가는 첫 요청에는 로그인 식별 정보가 그대로 남습니다."
+  },
+  "ComputerUse": {
+    "title": "컴퓨터 사용",
+    "preview": "미리 보기",
+    "refresh": "새로 고침",
+    "tooltipShared": "컴퓨터 사용 · {count, plural, other {창 #개 공유 중}}",
+    "stop": "공유 중지",
+    "stopHint": "모든 창의 공유를 지금 중지하고 에이전트가 하던 작업을 중단합니다. 필요하면 창을 다시 공유하세요.",
+    "indicator": {
+      "actOne": "에이전트가 {app}을(를) 조작할 수 있음",
+      "actMany": "에이전트가 {count, plural, other {창 #개}}를 조작할 수 있음",
+      "readOne": "에이전트가 {app}을(를) 볼 수 있음",
+      "readMany": "에이전트가 {count, plural, other {창 #개}}를 볼 수 있음",
+      "readScreen": "에이전트가 전체 화면을 볼 수 있음",
+      "actScreen": "에이전트가 전체 화면을 조작할 수 있음",
+      "recent": "{app}: {action}",
+      "stop": "공유 중지",
+      "stopWithKey": "모든 창의 공유 중지 ({key})"
+    },
+    "codegGranted": "codeg 자체에 「손쉬운 사용」 또는 「화면 기록」 권한이 있어, 에이전트의 셸이 공유 없이 이를 사용할 수 있습니다. 필요하지 않다면 시스템 설정에서 codeg의 권한을 끄세요.",
+    "backend": {
+      "idle": "시작 안 됨",
+      "downloading": "드라이버 다운로드 중…",
+      "starting": "헬퍼 시작 중…",
+      "ready": "준비됨",
+      "failed": "실패"
+    },
+    "driver": "cua-driver {version}",
+    "devBuild": "개발 빌드: 헬퍼가 호출하는 프로그램을 확인하지 않습니다.",
+    "devTag": "개발 빌드",
+    "permissions": {
+      "accessibility": "손쉬운 사용",
+      "screenRecording": "화면 기록",
+      "granted": "허용됨",
+      "request": "권한 부여…",
+      "why": "시스템 설정에서 codeg-computer-helper를 켜세요(codeg가 아닙니다). 화면 기록은 창 화면을 보는 데, 손쉬운 사용은 창을 읽고 조작하는 데 쓰입니다.",
+      "devRebuild": "helper를 다시 빌드할 때마다 이전 권한이 무효가 됩니다. 목록에서 이전 codeg-computer-helper를 먼저 제거한 뒤 다시 권한을 부여하세요.",
+      "notListed": "목록에 codeg-computer-helper가 없으면 Finder에서 목록으로 끌어다 놓으세요:",
+      "reveal": "Finder에서 보기"
+    },
+    "shared": {
+      "title": "{count, plural, =0 {공유 중인 창 없음} other {창 #개 공유 중}}",
+      "empty": "에이전트는 창 목록을 볼 수 있지만, 공유하기 전에는 어떤 창도 읽을 수 없습니다.",
+      "stop": "중지",
+      "wholeApp": "앱 전체 · {count, plural, =0 {열린 창 없음} other {창 #개}}",
+      "screen": "전체 화면",
+      "screenWindows": "{count, plural, =0 {아직 창 없음} other {창 #개}}"
+    },
+    "level": {
+      "read": "읽기 가능",
+      "control": "조작 가능",
+      "readLong": "읽기만",
+      "controlLong": "읽기 및 조작",
+      "change": "에이전트가 할 수 있는 일 변경"
+    },
+    "activity": {
+      "title": "최근 활동",
+      "clear": "최근 활동 지우기",
+      "capture": "스크린샷",
+      "snapshot": "읽기",
+      "verify": "확인",
+      "click": "클릭",
+      "drag": "드래그",
+      "scroll": "스크롤",
+      "type": "입력",
+      "key": "키",
+      "hold-key": "키 누르고 있기",
+      "set-value": "값 설정",
+      "restore": "창 복원",
+      "menu": "메뉴",
+      "set-frame": "창 이동",
+      "launch": "앱 열기",
+      "clipboard-read": "클립보드 읽기",
+      "clipboard-write": "클립보드 쓰기",
+      "outcome": {
+        "done": "완료",
+        "refused": "거부됨",
+        "failed": "실패"
+      }
+    },
+    "share": "창 공유…",
+    "openSettings": "상세 설정 열기",
+    "picker": {
+      "title": "에이전트와 창 공유",
+      "description": "모든 대화의 에이전트가 공유한 창을 읽을 수 있고, 조작을 허용한 창에서는 클릭하고 입력할 수 있습니다. 공유를 중지하거나, 창이 닫히거나, 설정한 시간 동안 사용되지 않으면 공유가 끝납니다.",
+      "count": "{count, plural, other {창 #개}}",
+      "sharedCount": "{count, plural, other {#개 공유 중}}",
+      "loading": "창을 불러오는 중…",
+      "refresh": "새로 고침",
+      "empty": "창을 찾지 못했습니다. 있어야 한다면 컴퓨터 사용 패널에서 권한을 확인하세요.",
+      "noScreenRecording": "codeg-computer-helper에 아직 '화면 기록' 권한이 없습니다. 창 제목과 화면을 보여 줄 수 없고, 에이전트도 창을 읽을 수 없습니다.",
+      "unnamedApp": "알 수 없는 앱",
+      "untitled": "제목 없는 창",
+      "minimized": "최소화됨",
+      "hidden": "숨겨짐",
+      "notGrantable": {
+        "codeg": "codeg의 창",
+        "blocklisted": "공유 금지 목록에 있음",
+        "unidentified": "어떤 앱인지 확인할 수 없음"
+      },
+      "shareRead": "에이전트가 읽도록 허용",
+      "shareControl": "에이전트가 읽고 조작하도록 허용",
+      "stopSharing": "공유 중지",
+      "levelNone": "끔",
+      "levelRead": "읽기",
+      "levelControl": "조작",
+      "levelLabel": "에이전트가 {app}에서 할 수 있는 일",
+      "wholeApp": "앱 전체",
+      "wholeAppHint": "{app}의 모든 창(나중에 여는 창 포함)과 메뉴, 단축키",
+      "appLevelLabel": "에이전트가 {app} 전체에서 할 수 있는 일",
+      "viaApp": "앱과 함께 공유",
+      "screenTitle": "전체 화면",
+      "screenHint": "공유할 수 있는 모든 창(나중에 여는 창 포함)과 데스크톱 자체의 단축키. codeg의 창과 공유 금지 목록의 앱은 항상 가려집니다.",
+      "screenLevelLabel": "에이전트가 전체 화면에서 할 수 있는 일",
+      "viaScreen": "화면과 함께 공유",
+      "shareAll": "모두 공유",
+      "shareAllRead": "모두 에이전트가 읽도록 허용",
+      "shareAllControl": "모두 에이전트가 읽고 조작하도록 허용",
+      "stopSharingAll": "모두 공유 중지",
+      "skipped": "{count, plural, other {창 #개를 공유하지 못했습니다. 닫혔을 수 있습니다.}}",
+      "unshareable": "{count, plural, other {공유할 수 없는 창 #개}}",
+      "noneShareable": "공유할 수 있는 창이 없습니다.",
+      "codegWhy": "codeg의 창은 절대 공유되지 않습니다. codeg를 조작할 수 있는 에이전트는 자신의 요청을 스스로 승인하거나 자신에게 창을 더 공유할 수 있기 때문입니다. 다른 codeg의 창도 마찬가지입니다."
+    },
+    "settings": {
+      "pageTitle": "컴퓨터 사용",
+      "pageDescription": "공유한 데스크톱 창을 에이전트가 보고 조작할 수 있게 합니다.",
+      "switch": {
+        "label": "컴퓨터 사용 켜기",
+        "hint": "에이전트가 앱과 창을 나열하고, 공유한 창을 읽고, 조작을 허용한 창에서 클릭하고 입력할 수 있습니다. 상태 표시줄에서 공유하기 전에는 어떤 창도 읽을 수 없습니다.",
+        "failed": "컴퓨터 사용을 전환하지 못했습니다"
+      },
+      "driver": {
+        "title": "드라이버",
+        "description": "컴퓨터 사용은 오픈 소스 프로그램인 cua-driver를 통해 창을 읽고 조작합니다. codeg는 확인을 거친 릴리스 {version}만 실행하며, 처음 필요할 때 다운로드합니다.",
+        "loading": "확인 중…",
+        "unsupported": "cua-driver에는 이 플랫폼용 빌드가 없습니다.",
+        "installing": "설치 중…",
+        "downloadingOf": "다운로드 중… {done} / {total} MB",
+        "downloadingSoFar": "다운로드 중… {done} MB",
+        "uninstalling": "제거 중…",
+        "installed": "설치됨 · {version}",
+        "outdated": "{installed}이(가) 설치되어 있습니다. 이 codeg는 {version}을(를) 사용합니다.",
+        "notInstalled": "설치되지 않았습니다. 컴퓨터 사용에 처음 필요할 때 다운로드되며, 지금 설치할 수도 있습니다.",
+        "install": "설치",
+        "upgrade": "{version}(으)로 업그레이드",
+        "uninstall": "제거",
+        "installDone": "cua-driver를 설치했습니다",
+        "uninstallDone": "cua-driver를 제거했습니다",
+        "confirmTitle": "cua-driver를 제거할까요?",
+        "confirmDescription": "컴퓨터 사용이 꺼지고 모든 창의 공유가 끝납니다. 다시 켜면 드라이버를 다시 다운로드합니다.",
+        "cancel": "취소"
+      },
+      "permissions": {
+        "title": "권한",
+        "description": "macOS에서는 codeg-computer-helper에 권한을 부여해야 합니다. 시스템 설정에서 부여한 뒤 여기로 돌아오면 자동으로 갱신됩니다.",
+        "off": "컴퓨터 사용을 켜면 여기에서 권한을 확인하고 부여할 수 있습니다.",
+        "accessibilityHint": "창 내용을 읽고 조작합니다.",
+        "screenRecordingHint": "스크린샷을 찍고 창 제목을 읽습니다."
+      },
+      "title": "공유, 입력과 중지",
+      "description": "공유한 창이 얼마나 오래 공유되는지, 절대 공유하지 않을 앱, 모든 공유를 한 번에 멈추는 단축키와 떠 있는 중지 막대, 그리고 에이전트가 창을 앞으로 가져와 조작할 수 있는지 여부.",
+      "ttl": {
+        "label": "사용되지 않는 창의 공유를 중지할 시간",
+        "hint": "공유 중인 창을 이 시간 동안 어떤 에이전트도 읽지 않으면 공유가 중지됩니다.",
+        "minutes": "{minutes}분",
+        "never": "안 함 (직접 중지할 때까지)"
+      },
+      "blocklist": {
+        "label": "공유하지 않는 앱",
+        "hint": "이 앱들의 창은 에이전트와 공유할 수 없습니다. 필요 없는 기본 항목은 제거할 수 있고, 번들 식별자(com.example.app), 실행 파일 이름(app.exe) 또는 전체 경로로 앱을 추가할 수도 있습니다.",
+        "placeholder": "com.example.app",
+        "add": "추가",
+        "remove": "{name} 제거",
+        "restore": "기본값으로 복원",
+        "restoreConfirmTitle": "기본 목록으로 복원할까요?",
+        "restoreConfirmAdded": "{count, plural, other {직접 추가한 앱 #개가 목록에서 빠집니다.}}",
+        "restoreConfirmRemoved": "{count, plural, other {제거한 기본 앱 #개가 목록에 다시 추가됩니다.}}",
+        "restoreConfirmSave": "저장하면 적용됩니다.",
+        "cancel": "취소",
+        "custom": "직접 추가함",
+        "duplicate": "이미 목록에 있습니다.",
+        "removedCount": "{count, plural, other {기본 앱 #개를 제거했습니다.}}",
+        "items": {
+          "systemSettings": "시스템 설정",
+          "credentialPrompts": "시스템 암호 및 권한 확인 창",
+          "keychain": "키체인 접근",
+          "passwords": "암호"
+        }
+      },
+      "stopKey": {
+        "label": "중지 단축키",
+        "hint": "어느 앱에서든 공유 중지 버튼처럼 모든 창의 공유를 중지합니다. 컴퓨터 사용이 켜져 있는 동안 이 키는 codeg가 사용하므로, 다른 곳에서 쓰지 않는 조합을 고르세요.",
+        "recording": "키를 누르세요…",
+        "recordHint": "Ctrl과 다른 보조 키(Alt 또는 Shift)를 누른 채 키를 누르세요. Esc로 취소합니다.",
+        "recordHintMac": "⌃ 또는 ⌘과 다른 보조 키를 누른 채 키를 누르세요. Esc로 취소합니다.",
+        "off": "꺼짐",
+        "useDefault": "기본값",
+        "turnOff": "끄기",
+        "statusActive": "활성: 어디서든 누르면 모든 창의 공유가 중지됩니다.",
+        "statusIdle": "컴퓨터 사용을 켜면 적용됩니다.",
+        "statusOff": "꺼짐: 공유 중지 버튼으로만 공유를 중지할 수 있습니다.",
+        "statusFailed": "비활성: 다른 앱이 이 키를 쓰고 있는 것 같습니다. 다른 조합을 고르세요.",
+        "problem": {
+          "unsupportedKey": "이 키는 쓸 수 없습니다. 영문자, 숫자, F1–F12, Esc 또는 문장 부호 키를 고르세요.",
+          "weakModifiers": "보조 키를 두 개 이상 누르세요. 그중 하나는 Ctrl(Mac에서는 ⌘도 가능)이어야 합니다.",
+          "metaOffMac": "Windows 키는 포함할 수 없습니다."
+        }
+      },
+      "strip": {
+        "label": "떠 있는 중지 막대",
+        "hint": "창을 공유하는 동안 에이전트가 할 수 있는 일과 공유 중지 버튼을 담은 막대를 모든 창 위에 띄웁니다. 꺼도 상태 표시줄의 컴퓨터 사용 팝오버나 중지 단축키로 공유를 중지할 수 있습니다."
+      },
+      "foreground": {
+        "label": "에이전트가 창을 앞으로 가져오도록 허용",
+        "hint": "어떤 앱은 백그라운드에서 키 입력이나 타이핑을 받지 않습니다. Windows에서는 Edge, Chrome, VS Code처럼 Chromium 기반 앱이 모두 그렇습니다. 켜면 에이전트가 조작을 허용한 창을 한 번의 조작 동안만 앞으로 가져온 뒤, 사용하던 창으로 다시 돌아갑니다(Linux에서는 그 창이 앞에 남습니다). 창이 앞으로 나오는 것이 보이고, 그 순간 입력한 내용이 그 창으로 들어갈 수 있으며, 클릭할 때 마우스 포인터가 움직일 수도 있습니다."
+      },
+      "delivery": {
+        "label": "기본 입력 방식",
+        "hint": "에이전트가 지정하지 않을 때 클릭, 스크롤, 타이핑, 키 입력을 창에 전달하는 방식입니다. 백그라운드: 창은 그대로 두고 마우스와 키보드는 계속 사용할 수 있습니다. 포그라운드: 조작할 때마다 창을 앞으로 가져옵니다.",
+        "hintOff": "창을 앞으로 가져오는 것을 허용하지 않은 동안에는 항상 백그라운드입니다.",
+        "background": "백그라운드",
+        "foreground": "포그라운드"
+      },
+      "launch": {
+        "label": "에이전트가 앱을 열고 창을 옮기도록 허용",
+        "hint": "켜면 에이전트가 설치된 앱을 백그라운드에서 실행할 수 있습니다(codeg와 공유하지 않는 앱 제외). 또한 조작을 허용한 창을 옮기거나 크기를 바꿀 수 있습니다. 앱을 실행해도 그 창은 공유되지 않으며, 공유 여부는 여전히 사용자가 정합니다."
+      },
+      "clipboard": {
+        "label": "에이전트가 클립보드를 사용하도록 허용",
+        "hint": "켜면 에이전트가 텍스트를 클립보드에 넣어 붙여넣거나, 공유한 창에서 직접 복사한 내용을 다시 읽을 수 있습니다. 사용자가 직접 복사한 내용은 에이전트에게 읽히지 않으며, 에이전트는 자신이 넣은 내용만 붙여넣을 수 있습니다."
+      },
+      "screen": {
+        "label": "전체 화면 공유 허용",
+        "hint": "켜면 공유 선택기에 '전체 화면'이 나타납니다. 에이전트는 화면 전체를 한 장의 그림으로 보고 어디든 클릭할 수 있으며, 공유할 수 있는 모든 창과 데스크톱 자체의 단축키도 함께 공유됩니다. codeg의 창과 공유 금지 목록의 앱은 항상 가려집니다. 끄면 전체 화면 공유가 끝납니다."
+      },
+      "boundary": "macOS에서는 권한이 codeg-computer-helper에 부여되고 codeg만 사용할 수 있으므로, 에이전트의 셸은 사용할 수 없습니다. Windows와 Linux에는 이런 분리가 없습니다. 그곳에서 이 설정은 codeg를 통해 에이전트에게 무엇을 넘길지를 정할 뿐, 컴퓨터의 프로그램이 할 수 있는 일을 정하지는 않습니다.",
+      "save": "저장",
+      "saving": "저장 중…",
+      "saved": "컴퓨터 사용 설정을 저장했습니다",
+      "saveFailed": "컴퓨터 사용 설정을 저장하지 못했습니다",
+      "loadFailed": "불러오기 실패: {detail}"
+    }
   },
   "LogsSettings": {
     "loading": "불러오는 중…",
@@ -5553,6 +5803,8 @@
     "baseBranchDefault": "작업이 시작될 때의 현재 브랜치",
     "baseBranchHint": "작업은 이 브랜치에서 갈라져 나오고, 병합도 이 브랜치로 돌아갑니다.",
     "agentInheritedHint": "작업 설정에서 상속됨 — 변경하면 이 작업에만 적용됩니다",
+    "agentNoDefaultHint": "작업 설정에 기본 에이전트가 없습니다 — 선택한 에이전트가 이 작업에 저장됩니다",
+    "agentInheritedUnavailableHint": "작업 설정의 기본 에이전트({agent})를 사용할 수 없습니다 — 선택한 에이전트가 이 작업에 저장됩니다",
     "agentOverrideReset": "상속으로 되돌리기",
     "sectionTarget": "대상",
     "errorTitle": "제목을 입력하세요",

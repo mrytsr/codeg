@@ -72,10 +72,11 @@ pub(crate) fn task_notification_summary_regex() -> &'static Regex {
 }
 
 /// The `<tool-use-id>` of the launching tool call, carried by every async
-/// sub-agent `<task-notification>`. Lets the background watcher tie a settlement
-/// back to the exact launch card without a separate ack→id map (both ids are
-/// siblings in the notification record). Background-shell notifications don't
-/// carry this tag.
+/// sub-agent `<task-notification>` and by a background shell's (the `Bash` call
+/// that started it). Lets the background watcher tie a settlement back to the
+/// exact launch card without a separate ack→id map (both ids are siblings in the
+/// notification record). An MCP call moved to the background notifies without
+/// one.
 pub(crate) fn task_notification_tool_use_id_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"(?s)<tool-use-id>(.*?)</tool-use-id>").unwrap())

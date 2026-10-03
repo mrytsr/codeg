@@ -53,7 +53,8 @@
       "office_tools": "Office-Tools",
       "skill_packs": "Skill-Pakete",
       "collaboration": "Zusammenarbeit",
-      "browser": "Browser",
+      "browser": "Browsernutzung",
+      "computer_use": "Computernutzung",
       "quick_messages": "Schnellnachrichten",
       "logs": "Laufzeitprotokolle"
     }
@@ -3047,7 +3048,7 @@
           "downloadFailed": "{agent}-Download fehlgeschlagen: {message}",
           "sessionLoadResourceNotFound": "{agent}-Sitzung konnte nicht geladen werden. Neu laden, um es erneut zu versuchen, oder eine neue Konversation starten.",
           "sessionLoadUnavailable": "{agent} konnte diese Sitzung nicht wiederherstellen – sie wurde möglicherweise beendet oder der Agent wurde gestoppt. Neu laden, um es erneut zu versuchen, oder eine neue Konversation starten.",
-          "sessionLoadBusy": "Dieser Verlauf wird von der daraus abgezweigten Sitzung offen gehalten. Schließe diese Sitzung und lade neu, um ihn zu öffnen.",
+          "sessionLoadBusy": "Diese Sitzung ist an anderer Stelle geöffnet. Hat ein anderer {agent}-Client (App, CLI oder IDE-Erweiterung) sie offen, schließe sie dort oder beende diesen Client und lade dann neu. Hast du sie gerade verzweigt, lade in etwa einer Minute neu.",
           "sessionArchived": "Die vorherige Sitzung wurde auf {agent}-Seite archiviert. Führe {command} im Terminal aus, um sie wiederherzustellen und neu zu laden, oder starte eine neue Unterhaltung.",
           "turnFailedRefusal": "{agent} hat die Fortsetzung dieser Runde abgelehnt. Häufig deutet das auf einen Backend- oder Gateway-Fehler hin. Bitte prüfen Sie die Agent-Logs.",
           "turnFailedMaxTokens": "{agent} hat das Token-Limit für diese Runde erreicht.",
@@ -4755,6 +4756,7 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "restoreFailed": "Remote-Arbeitsbereich „{name}“ konnte nicht erneut geöffnet werden",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
   },
@@ -5077,6 +5079,11 @@
       "short": "Führt eigenen Code auf einer freigegebenen Seite aus — ohne Nachfrage.",
       "hint": "Erlaubt Agenten, eigenes JavaScript auf einer von dir geteilten Seite auszuführen. Standardmäßig aus und nur zusammen mit dem Schalter darüber. Einschalten heißt, dass Codeausschnitte ohne Nachfrage laufen – die Entscheidung fällt also an diesem Schalter; unter Einstellungen → Integrierter Browser kannst du dir stattdessen jeden Ausschnitt zeigen lassen."
     },
+    "computer": {
+      "label": "Fenster des Desktops sehen und bedienen",
+      "short": "Apps und Fenster auflisten; freigegebene lesen, erlaubte bedienen.",
+      "hint": "Lässt einen Agenten die Anwendungen und Fenster auf deinem Desktop auflisten, die Fenster lesen, die du für ihn freigibst – ein Bildschirmfoto, den Inhalt, ob es zeigt, was erwartet wird –, und in denen klicken, tippen und Tasten drücken, die du zum Handeln freigibst. Nichts ist lesbar, bis du im Bereich „Computernutzung“ in der Statusleiste ein Fenster freigibst, und in keinem Fenster wird gehandelt, wenn du das nicht auch erlaubst; die Freigabe endet, wenn das Fenster geschlossen wird, nach einer Weile ohne Nutzung oder wenn du sie beendest, und „Agenten anhalten“ in diesem Bereich hält alle auf einmal an. Eingaben erreichen das Fenster im Hintergrund; für eine Aktion, die im Hintergrund nicht ankommt, darf ein Agent das Fenster nach vorn holen – das lässt sich in den Einstellungen zur Computernutzung abschalten. Nur in der Desktop-App; unter macOS sind Berechtigungen für codeg-computer-helper nötig. Vorschau."
+    },
     "automations": {
       "label": "Automatisierungen erstellen",
       "short": "Erstellt und verwaltet geplante Automationen.",
@@ -5239,6 +5246,249 @@
     "clearConfirmDescriptionProfile": "Cookies, Caches und Website-Daten des Profils {name} werden entfernt. Offene Tabs bleiben offen, aber du wirst bei Websites abgemeldet.",
     "signInUaTitle": "Kompatibilität mit der Google-Anmeldung",
     "signInUaHint": "Google verweigert die Anmeldung aus eingebetteten Browsern. Wenn eingeschaltet, geben sich Tabs nur gegenüber Googles Anmeldeseiten (accounts.google.com) als Firefox aus; überall sonst geben sie sich als die Engine aus, in der sie laufen, nie als Firefox. Nur in eingebetteten Tabs, nicht im separaten Fenster; leitet eine Anmeldeseite auf eine andere Website weiter, trägt die erste Anfrage dort noch die Anmeldekennung."
+  },
+  "ComputerUse": {
+    "title": "Computernutzung",
+    "preview": "Vorschau",
+    "refresh": "Aktualisieren",
+    "tooltipShared": "Computernutzung · {count, plural, one {# Fenster freigegeben} other {# Fenster freigegeben}}",
+    "stop": "Freigabe beenden",
+    "stopHint": "Beendet sofort die Freigabe aller Fenster und bricht ab, was Agenten gerade tun. Gib ein Fenster erneut frei, wenn sie weitermachen sollen.",
+    "indicator": {
+      "actOne": "Agenten können in {app} handeln",
+      "actMany": "Agenten können in {count, plural, one {# Fenster} other {# Fenstern}} handeln",
+      "readOne": "Agenten können {app} sehen",
+      "readMany": "Agenten können {count, plural, one {# Fenster} other {# Fenster}} sehen",
+      "readScreen": "Agenten können den ganzen Bildschirm sehen",
+      "actScreen": "Agenten können auf dem ganzen Bildschirm handeln",
+      "recent": "{action} in {app}",
+      "stop": "Freigabe beenden",
+      "stopWithKey": "Freigabe aller Fenster beenden ({key})"
+    },
+    "codegGranted": "codeg selbst hat Bedienungshilfen oder Bildschirmaufnahme – die Shells der Agenten können das ohne jede Freigabe nutzen. Schalte es für codeg in den Systemeinstellungen aus, wenn du es nicht brauchst.",
+    "backend": {
+      "idle": "Nicht gestartet",
+      "downloading": "Treiber wird geladen …",
+      "starting": "Helfer wird gestartet …",
+      "ready": "Bereit",
+      "failed": "Fehlgeschlagen"
+    },
+    "driver": "cua-driver {version}",
+    "devBuild": "Entwicklungs-Build: Der Helfer prüft nicht, welches Programm ihn aufruft.",
+    "devTag": "Entwicklungs-Build",
+    "permissions": {
+      "accessibility": "Bedienungshilfen",
+      "screenRecording": "Bildschirmaufnahme",
+      "granted": "Erteilt",
+      "request": "Erteilen…",
+      "why": "Aktiviere codeg-computer-helper in den Systemeinstellungen – nicht codeg. Bildschirmaufnahme lässt ihn Fenster sehen, Bedienungshilfen lassen ihn sie lesen und darin handeln.",
+      "devRebuild": "Jeder Neubau des Helfers macht seine alte Berechtigung ungültig: Entferne zuerst den alten codeg-computer-helper aus der Liste und erteile sie dann erneut.",
+      "notListed": "Fehlt codeg-computer-helper in der Liste, zieh ihn aus dem Finder hinein:",
+      "reveal": "Im Finder zeigen"
+    },
+    "shared": {
+      "title": "{count, plural, =0 {Keine Fenster freigegeben} one {# Fenster freigegeben} other {# Fenster freigegeben}}",
+      "empty": "Agenten können deine Fenster auflisten, aber keines lesen, bis du eines freigibst.",
+      "stop": "Beenden",
+      "wholeApp": "Ganze App · {count, plural, =0 {kein Fenster offen} one {# Fenster} other {# Fenster}}",
+      "screen": "Ganzer Bildschirm",
+      "screenWindows": "{count, plural, =0 {noch kein Fenster} one {# Fenster} other {# Fenster}}"
+    },
+    "level": {
+      "read": "Darf lesen",
+      "control": "Darf handeln",
+      "readLong": "Nur lesen",
+      "controlLong": "Lesen und handeln",
+      "change": "Ändern, was Agenten dürfen"
+    },
+    "activity": {
+      "title": "Letzte Aktivität",
+      "clear": "Letzte Aktivität löschen",
+      "capture": "Bildschirmfoto",
+      "snapshot": "Lesen",
+      "verify": "Prüfen",
+      "click": "Klick",
+      "drag": "Ziehen",
+      "scroll": "Scrollen",
+      "type": "Eingabe",
+      "key": "Taste",
+      "hold-key": "Taste halten",
+      "set-value": "Wert setzen",
+      "restore": "Wiederherstellen",
+      "menu": "Menü",
+      "set-frame": "Fenster verschieben",
+      "launch": "Anwendung öffnen",
+      "clipboard-read": "Zwischenablage lesen",
+      "clipboard-write": "In Zwischenablage legen",
+      "outcome": {
+        "done": "erledigt",
+        "refused": "abgelehnt",
+        "failed": "fehlgeschlagen"
+      }
+    },
+    "share": "Fenster freigeben …",
+    "openSettings": "Alle Einstellungen öffnen",
+    "picker": {
+      "title": "Ein Fenster für Agenten freigeben",
+      "description": "Agenten in jeder Unterhaltung können die Fenster lesen, die du freigibst, und in denen klicken und tippen, in denen du sie handeln lässt. Eine Freigabe endet, wenn du sie beendest, das Fenster geschlossen wird oder es so lange ungenutzt bleibt wie in den Einstellungen festgelegt.",
+      "count": "{count, plural, one {# Fenster} other {# Fenster}}",
+      "sharedCount": "{count, plural, one {# freigegeben} other {# freigegeben}}",
+      "loading": "Fenster werden geladen …",
+      "refresh": "Aktualisieren",
+      "empty": "Keine Fenster gefunden. Wenn es welche geben sollte, prüfe die Berechtigungen im Bereich Computernutzung.",
+      "noScreenRecording": "codeg-computer-helper hat noch keine Bildschirmaufnahme: Fenstertitel und -bilder können nicht angezeigt werden, und Agenten können keine Fenster lesen.",
+      "unnamedApp": "Unbekannte App",
+      "untitled": "Fenster ohne Titel",
+      "minimized": "Minimiert",
+      "hidden": "Ausgeblendet",
+      "notGrantable": {
+        "codeg": "Fenster von codeg",
+        "blocklisted": "Auf der Sperrliste",
+        "unidentified": "App nicht identifizierbar"
+      },
+      "shareRead": "Agenten lesen lassen",
+      "shareControl": "Agenten lesen und handeln lassen",
+      "stopSharing": "Freigabe beenden",
+      "levelNone": "Aus",
+      "levelRead": "Lesen",
+      "levelControl": "Handeln",
+      "levelLabel": "Was Agenten mit {app} dürfen",
+      "wholeApp": "Ganze App",
+      "wholeAppHint": "Alle Fenster von {app}, auch später geöffnete, dazu ihre Menüs und Tastenkürzel",
+      "appLevelLabel": "Was Agenten mit ganz {app} dürfen",
+      "viaApp": "Mit der App",
+      "screenTitle": "Ganzer Bildschirm",
+      "screenHint": "Alle Fenster, die du freigeben kannst, auch später geöffnete, und die Tastenkürzel des Desktops selbst. codegs Fenster und die Sperrliste bleiben übermalt.",
+      "screenLevelLabel": "Was Agenten mit dem ganzen Bildschirm dürfen",
+      "viaScreen": "Mit dem Bildschirm",
+      "shareAll": "Alle freigeben",
+      "shareAllRead": "Agenten alle lesen lassen",
+      "shareAllControl": "Agenten alle lesen und darin handeln lassen",
+      "stopSharingAll": "Alle Freigaben beenden",
+      "skipped": "{count, plural, one {# Fenster konnte nicht freigegeben werden; es wurde vielleicht geschlossen.} other {# Fenster konnten nicht freigegeben werden; sie wurden vielleicht geschlossen.}}",
+      "unshareable": "{count, plural, one {# Fenster lässt sich nicht freigeben} other {# Fenster lassen sich nicht freigeben}}",
+      "noneShareable": "Keines dieser Fenster lässt sich freigeben.",
+      "codegWhy": "Fenster von codeg werden nie freigegeben: Ein Agent, der codeg bedienen könnte, könnte seine eigenen Anfragen genehmigen oder sich weitere Fenster freigeben. Dasselbe gilt für andere codeg-Instanzen."
+    },
+    "settings": {
+      "pageTitle": "Computernutzung",
+      "pageDescription": "Lass Agenten die Desktop-Fenster sehen und bedienen, die du für sie freigibst.",
+      "switch": {
+        "label": "Computernutzung aktivieren",
+        "hint": "Agenten können deine Apps und Fenster auflisten, freigegebene Fenster lesen und in denen klicken und tippen, in denen du sie handeln lässt. Kein Fenster ist lesbar, bevor du es über die Statusleiste freigibst.",
+        "failed": "Computernutzung konnte nicht umgeschaltet werden"
+      },
+      "driver": {
+        "title": "Treiber",
+        "description": "Die Computernutzung liest und bedient Fenster über cua-driver, ein Open-Source-Programm. codeg führt nur die geprüfte Version {version} aus und lädt sie beim ersten Bedarf herunter.",
+        "loading": "Wird geprüft …",
+        "unsupported": "cua-driver hat keinen Build für diese Plattform.",
+        "installing": "Wird installiert …",
+        "downloadingOf": "Wird heruntergeladen … {done} / {total} MB",
+        "downloadingSoFar": "Wird heruntergeladen … {done} MB",
+        "uninstalling": "Wird deinstalliert …",
+        "installed": "Installiert · {version}",
+        "outdated": "{installed} ist installiert; dieses codeg verwendet {version}.",
+        "notInstalled": "Nicht installiert. Er wird heruntergeladen, sobald die Computernutzung ihn zum ersten Mal braucht, oder du installierst ihn jetzt.",
+        "install": "Installieren",
+        "upgrade": "Auf {version} aktualisieren",
+        "uninstall": "Deinstallieren",
+        "installDone": "cua-driver installiert",
+        "uninstallDone": "cua-driver deinstalliert",
+        "confirmTitle": "cua-driver deinstallieren?",
+        "confirmDescription": "Die Computernutzung wird ausgeschaltet und alle Freigaben enden. Beim erneuten Einschalten wird der Treiber wieder heruntergeladen.",
+        "cancel": "Abbrechen"
+      },
+      "permissions": {
+        "title": "Berechtigungen",
+        "description": "macOS verlangt sie für codeg-computer-helper. Erteile sie in den Systemeinstellungen und kehre zurück – die Anzeige aktualisiert sich von selbst.",
+        "off": "Schalte die Computernutzung ein, um Berechtigungen zu prüfen und zu erteilen.",
+        "accessibilityHint": "Fensterinhalte lesen und darin handeln.",
+        "screenRecordingHint": "Bildschirmfotos machen und Fenstertitel lesen."
+      },
+      "title": "Freigeben, Eingabe und Anhalten",
+      "description": "Wie lange ein Fenster freigegeben bleibt, welche Apps nie freigegeben werden, das Tastenkürzel und die schwebende Leiste, die alle Freigaben auf einmal beenden, und ob Agenten ein Fenster nach vorn holen dürfen, um darin zu handeln.",
+      "ttl": {
+        "label": "Freigabe ungenutzter Fenster beenden nach",
+        "hint": "Ein freigegebenes Fenster wird nicht mehr geteilt, wenn es so lange kein Agent gelesen hat.",
+        "minutes": "{minutes} Minuten",
+        "never": "Nie (bis ich sie beende)"
+      },
+      "blocklist": {
+        "label": "Nie freigegebene Anwendungen",
+        "hint": "Ihre Fenster können nicht für Agenten freigegeben werden. Entferne Standardeinträge, die du nicht brauchst, oder füge eine Anwendung per Bundle-ID (com.example.app), Programmname (app.exe) oder vollständigem Pfad hinzu.",
+        "placeholder": "com.example.app",
+        "add": "Hinzufügen",
+        "remove": "{name} entfernen",
+        "restore": "Standard wiederherstellen",
+        "restoreConfirmTitle": "Standardliste wiederherstellen?",
+        "restoreConfirmAdded": "{count, plural, one {Die von dir hinzugefügte Anwendung wird von der Liste entfernt.} other {Die # von dir hinzugefügten Anwendungen werden von der Liste entfernt.}}",
+        "restoreConfirmRemoved": "{count, plural, one {Der entfernte Standardeintrag kommt wieder auf die Liste.} other {Die # entfernten Standardeinträge kommen wieder auf die Liste.}}",
+        "restoreConfirmSave": "Die Änderung gilt, sobald du speicherst.",
+        "cancel": "Abbrechen",
+        "custom": "Von dir hinzugefügt",
+        "duplicate": "Steht schon auf der Liste.",
+        "removedCount": "{count, plural, one {# Standardeintrag entfernt.} other {# Standardeinträge entfernt.}}",
+        "items": {
+          "systemSettings": "Systemeinstellungen",
+          "credentialPrompts": "Passwort- und Berechtigungsabfragen des Systems",
+          "keychain": "Schlüsselbundverwaltung",
+          "passwords": "Passwörter"
+        }
+      },
+      "stopKey": {
+        "label": "Tastenkürzel zum Anhalten",
+        "hint": "Beendet die Freigabe aller Fenster aus jeder App heraus, wie die Schaltfläche „Freigabe beenden“. Solange die Computernutzung eingeschaltet ist, gehören diese Tasten codeg – wähle also welche, die du sonst nicht verwendest.",
+        "recording": "Tasten drücken …",
+        "recordHint": "Strg und eine weitere Sondertaste (Alt oder Umschalt) halten, dann eine Taste drücken. Esc bricht ab.",
+        "recordHintMac": "⌃ oder ⌘ und eine weitere Sondertaste halten, dann eine Taste drücken. Esc bricht ab.",
+        "off": "Aus",
+        "useDefault": "Standard",
+        "turnOff": "Ausschalten",
+        "statusActive": "Aktiv: Überall drücken, um die Freigabe aller Fenster zu beenden.",
+        "statusIdle": "Wirkt, solange die Computernutzung eingeschaltet ist.",
+        "statusOff": "Aus: Nur die Schaltflächen „Freigabe beenden“ beenden die Freigabe.",
+        "statusFailed": "Nicht aktiv: Vermutlich verwendet eine andere App diese Tasten. Wähle andere.",
+        "problem": {
+          "unsupportedKey": "Diese Taste geht nicht. Wähle einen Buchstaben, eine Ziffer, F1–F12, Esc oder eine Satzzeichentaste.",
+          "weakModifiers": "Halte mindestens zwei Sondertasten, eine davon Strg (oder ⌘ auf einem Mac).",
+          "metaOffMac": "Die Windows-Taste darf nicht dazugehören."
+        }
+      },
+      "strip": {
+        "label": "Schwebende Stopp-Leiste",
+        "hint": "Solange ein Fenster freigegeben ist, schwebt über allen Fenstern eine Leiste, die sagt, was Agenten dürfen, mit der Schaltfläche „Freigabe beenden“. Ausgeschaltet kannst du Freigaben weiterhin im Computernutzungs-Popover der Statusleiste oder mit dem Tastenkürzel zum Anhalten beenden."
+      },
+      "foreground": {
+        "label": "Agenten dürfen Fenster nach vorn holen",
+        "hint": "Manche Apps nehmen im Hintergrund keine Tasten und keine Texteingabe an – unter Windows alle, die auf Chromium aufbauen, etwa Edge, Chrome und VS Code. Ist dies aktiv, darf ein Agent ein Fenster, in dem er handeln darf, für eine Aktion nach vorn holen und danach zu deinem vorherigen Fenster zurückwechseln (unter Linux bleibt das Fenster vorn). Du siehst das Fenster nach vorn kommen; was du in dem Moment tippst, kann darin landen, und ein Klick kann deinen Mauszeiger bewegen."
+      },
+      "delivery": {
+        "label": "Standard-Eingabemodus",
+        "hint": "Wie Klicks, Scrollen, Texteingabe und Tasten von Agenten ein Fenster erreichen, wenn sie nichts anderes verlangen. Hintergrund lässt das Fenster, wo es ist, und Maus und Tastatur dir; Vordergrund holt das Fenster für jede Aktion nach vorn.",
+        "hintOff": "Immer Hintergrund, solange Agenten keine Fenster nach vorn holen dürfen.",
+        "background": "Hintergrund",
+        "foreground": "Vordergrund"
+      },
+      "launch": {
+        "label": "Agenten Anwendungen öffnen und Fenster verschieben lassen",
+        "hint": "Ist dies aktiv, darf ein Agent eine installierte Anwendung im Hintergrund starten – nie codeg oder eine der nie freigegebenen – und ein Fenster, in dem er handeln darf, verschieben oder in der Größe ändern. Das Starten einer Anwendung gibt keines ihrer Fenster frei: Das entscheidest weiterhin du."
+      },
+      "clipboard": {
+        "label": "Agenten die Zwischenablage nutzen lassen",
+        "hint": "Ist dies aktiv, darf ein Agent Text in die Zwischenablage legen, um ihn einzusetzen, und zurücklesen, was er selbst aus einem für ihn freigegebenen Fenster kopiert hat. Was du selbst kopierst, wird nie für einen Agenten gelesen, und ein Agent kann nur einsetzen, was er selbst dort abgelegt hat."
+      },
+      "screen": {
+        "label": "Ganzen Bildschirm anbieten",
+        "hint": "Ist dies aktiv, bietet die Freigabeauswahl den ganzen Bildschirm an: Agenten sehen ein Bild des gesamten Bildschirms und können überall darauf klicken, und alle Fenster, die du freigeben kannst, gehen mit, ebenso die Tastenkürzel des Desktops selbst. codegs Fenster und die Sperrliste bleiben übermalt. Ausschalten beendet die Freigabe des Bildschirms."
+      },
+      "boundary": "Unter macOS gehen die Berechtigungen an codeg-computer-helper, den nur codeg nutzen kann – die Shells der Agenten können es nicht. Windows und Linux haben keine solche Trennung: Dort legen diese Einstellungen fest, was Agenten über codeg bekommen, nicht was Programme auf deinem Rechner tun können.",
+      "save": "Speichern",
+      "saving": "Wird gespeichert …",
+      "saved": "Einstellungen zur Computernutzung gespeichert",
+      "saveFailed": "Einstellungen zur Computernutzung konnten nicht gespeichert werden",
+      "loadFailed": "Laden fehlgeschlagen: {detail}"
+    }
   },
   "LogsSettings": {
     "loading": "Wird geladen…",
@@ -5553,6 +5803,8 @@
     "baseBranchDefault": "Aktueller Branch beim Start der Aufgabe",
     "baseBranchHint": "Die Aufgabe zweigt von diesem Branch ab und wird beim Mergen wieder dorthin übernommen.",
     "agentInheritedHint": "Aus den Aufgaben-Einstellungen geerbt — Änderungen gelten nur für diese Aufgabe",
+    "agentNoDefaultHint": "Kein Standard-Agent in den Aufgaben-Einstellungen — der ausgewählte Agent wird mit der Aufgabe gespeichert",
+    "agentInheritedUnavailableHint": "{agent} aus den Aufgaben-Einstellungen ist nicht verfügbar — der ausgewählte Agent wird mit der Aufgabe gespeichert",
     "agentOverrideReset": "Wieder erben",
     "sectionTarget": "Ziel",
     "errorTitle": "Titel ist erforderlich",
