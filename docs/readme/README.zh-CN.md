@@ -3,10 +3,10 @@
 </h1>
 
 <p align="center">
-  <a href="https://github.com/xintaofei/codeg"><img src="https://img.shields.io/github/stars/xintaofei/codeg?style=flat&color=e91e63" alt="GitHub stars" /></a>
-  <a href="https://github.com/xintaofei/codeg/releases/latest"><img src="https://img.shields.io/github/v/release/xintaofei/codeg?style=flat&color=e91e63" alt="Latest release" /></a>
-  <a href="https://github.com/xintaofei/codeg/releases"><img src="https://img.shields.io/github/downloads/xintaofei/codeg/total?style=flat&color=e91e63" alt="Total downloads" /></a>
-  <a href="../../LICENSE"><img src="https://img.shields.io/github/license/xintaofei/codeg?style=flat&color=e91e63" alt="License" /></a>
+  <a href="https://github.com/spacering-net/codeg"><img src="https://img.shields.io/github/stars/spacering-net/codeg?style=flat&color=e91e63" alt="GitHub stars" /></a>
+  <a href="https://github.com/spacering-net/codeg/releases/latest"><img src="https://img.shields.io/github/v/release/spacering-net/codeg?style=flat&color=e91e63" alt="Latest release" /></a>
+  <a href="https://github.com/spacering-net/codeg/releases"><img src="https://img.shields.io/github/downloads/spacering-net/codeg/total?style=flat&color=e91e63" alt="Total downloads" /></a>
+  <a href="../../LICENSE"><img src="https://img.shields.io/github/license/spacering-net/codeg?style=flat&color=e91e63" alt="License" /></a>
   <a href="https://docs.codeg.app"><img src="https://img.shields.io/badge/docs-docs.codeg.app-3451b2?style=flat" alt="Documentation" /></a>
   <a href="https://docs.codeg.app/zh/getting-started/installation"><img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20Docker%20%7C%20iOS%20%7C%20Android-03a9f4?style=flat" alt="Platforms: macOS, Windows, Linux, Docker, iOS, Android" /></a>
 </p>
@@ -20,7 +20,7 @@
   把所有 AI 编码智能体收进同一个地方 —— 并让它们协同工作。
 </p>
 
-<h3 align="center"><a href="https://github.com/xintaofei/codeg/releases/latest"><ins>下载 Codeg</ins></a> · <a href="https://docs.codeg.app/zh"><ins>使用文档</ins></a></h3>
+<h3 align="center"><a href="https://github.com/spacering-net/codeg/releases/latest"><ins>下载 Codeg</ins></a> · <a href="https://docs.codeg.app/zh"><ins>使用文档</ins></a></h3>
 
 <p align="center">
   <picture>
@@ -269,7 +269,7 @@ Codeg 可以作为桌面应用运行，也可以作为用任意浏览器访问�
 - **[外观自定义](https://docs.codeg.app/zh/reference/settings/appearance)** — 十二套主题都能逐个色彩 token 重新调色，还有壁纸、圆角与自定义 CSS——界面支持十种语言
 - **[备份与同步](https://docs.codeg.app/zh/reference/settings/system#backup-restore)** — 可加密的备份，以及通过文件或你自己的 WebDAV 服务器在多台机器之间同步配置
 - **[URL Scheme](../../docs/url-scheme.md)** — 用 `codeg://session/<id>` 从其它应用直接打开一个会话（桌面端）
-- **还有更多** — 几乎每个版本都有新东西；完整清单见 [发布说明](https://github.com/xintaofei/codeg/releases)
+- **还有更多** — 几乎每个版本都有新东西；完整清单见 [发布说明](https://github.com/spacering-net/codeg/releases)
 
 ## 🤖 支持的智能体
 
@@ -298,19 +298,19 @@ Codeg 通过 [Agent Client Protocol](https://agentclientprotocol.com) 与每个�
 
 ## 📦 安装
 
-**桌面端** — macOS、Windows 与 Linux 的安装包都在 [Releases](https://github.com/xintaofei/codeg/releases/latest)，安装步骤见 [安装](https://docs.codeg.app/zh/getting-started/installation)。
+**桌面端** — macOS、Windows 与 Linux 的安装包都在 [Releases](https://github.com/spacering-net/codeg/releases/latest)，安装步骤见 [安装](https://docs.codeg.app/zh/getting-started/installation)。
 
 **服务器** — 无界面运行 Codeg，用任意浏览器访问。Linux 或 macOS：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xintaofei/codeg/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/spacering-net/codeg/main/install.sh | bash
 CODEG_STATIC_DIR=/usr/local/share/codeg/web codeg-server
 ```
 
 Windows（PowerShell）：
 
 ```powershell
-irm https://raw.githubusercontent.com/xintaofei/codeg/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/spacering-net/codeg/main/install.ps1 | iex
 $env:CODEG_STATIC_DIR="$env:LOCALAPPDATA\codeg-server\web"; codeg-server
 ```
 
@@ -333,26 +333,26 @@ Compose、预编译二进制、源码构建与就地升级见 [部署](https://d
     <img src="../images/weixin-light.jpg" alt="WeChat" width="200" />
   </picture>
 
-- **问题反馈** — 遇到 bug，或者缺了什么功能？[提交 issue](https://github.com/xintaofei/codeg/issues)。
+- **问题反馈** — 遇到 bug，或者缺了什么功能？[提交 issue](https://github.com/spacering-net/codeg/issues)。
 - **隐私** — 默认本地优先：解析、存储与项目操作都在你的机器上完成，Web 模式与服务器模式均使用令牌认证。详见 [隐私与安全](https://docs.codeg.app/zh/reference/privacy)。
 - **LinuxDO** — 感谢 [LinuxDO](https://linux.do) 社区的支持。
-- **支持我们** — [给仓库点个 Star](https://github.com/xintaofei/codeg)，关注后续进展。
+- **支持我们** — [给仓库点个 Star](https://github.com/spacering-net/codeg)，关注后续进展。
 
 ## 🤝 参与贡献
 
 欢迎提交 issue 与 pull request。想自己构建 Codeg，可以从 [开发](https://docs.codeg.app/zh/reference/development) 与 [架构](https://docs.codeg.app/zh/reference/architecture) 开始。
 
-<a href="https://github.com/xintaofei/codeg/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=xintaofei/codeg" alt="Codeg 贡献者" />
+<a href="https://github.com/spacering-net/codeg/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=spacering-net/codeg" alt="Codeg 贡献者" />
 </a>
 
 ## ⭐ Star 历史
 
-<a href="https://www.star-history.com/?repos=xintaofei%2Fcodeg&type=date&releases=&legend=bottom-right">
+<a href="https://www.star-history.com/?repos=spacering-net%2Fcodeg&type=date&releases=&legend=bottom-right">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xintaofei/codeg&type=date&theme=dark&legend=bottom-right" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xintaofei/codeg&type=date&legend=bottom-right" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xintaofei/codeg&type=date&legend=bottom-right" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=spacering-net/codeg&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=spacering-net/codeg&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=spacering-net/codeg&type=date&legend=bottom-right" />
  </picture>
 </a>
 

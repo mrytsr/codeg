@@ -1,7 +1,7 @@
 #
 # Codeg Server installer for Windows
 # Usage:
-#   irm https://raw.githubusercontent.com/xintaofei/codeg/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/spacering-net/codeg/main/install.ps1 | iex
 #   .\install.ps1 -Version v0.5.0
 #
 
@@ -12,7 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Repo = "xintaofei/codeg"
+$Repo = "spacering-net/codeg"
 $Artifact = "codeg-server-windows-x64"
 
 # Where the server goes when no -InstallDir is given. Not

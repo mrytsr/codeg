@@ -4619,6 +4619,97 @@
       "deleted": "已删除快捷消息"
     }
   },
+  "ConversationTags": {
+    "tags": "标签",
+    "moreTags": "另有 {count} 个标签",
+    "addTags": "添加标签",
+    "editTags": "编辑标签",
+    "global": "全局",
+    "noTagsYet": "还没有标签",
+    "newTag": "新建标签…",
+    "manageTags": "管理标签…",
+    "branchChip": "分支：{branch}",
+    "picker": {
+      "searchPlaceholder": "搜索或新建标签…",
+      "noResults": "没有匹配的标签",
+      "empty": "还没有标签，输入名称即可新建。",
+      "createGlobal": "新建全局标签“{name}”",
+      "createInFolder": "在 {folder} 中新建“{name}”",
+      "otherFolders": "其他文件夹"
+    },
+    "form": {
+      "createTitle": "新建标签",
+      "editTitle": "编辑标签",
+      "name": "名称",
+      "namePlaceholder": "例如：bug、待评审、灵感",
+      "color": "颜色",
+      "customColor": "自定义颜色",
+      "scope": "可用范围",
+      "scopeGlobal": "所有会话",
+      "scopeFolder": "仅 {folder}",
+      "create": "创建",
+      "save": "保存",
+      "cancel": "取消"
+    },
+    "editor": {
+      "empty": "这里还没有标签。",
+      "add": "新建标签",
+      "edit": "编辑标签“{name}”",
+      "delete": "删除标签“{name}”",
+      "dragToReorder": "拖动以调整“{name}”的顺序",
+      "deleteTitle": "删除这个标签？",
+      "deleteDescription": "“{name}”将从所有带有它的会话上移除，且无法撤销。",
+      "deleteConfirm": "删除",
+      "deleteCancel": "取消",
+      "loadFailed": "无法加载标签"
+    },
+    "manager": {
+      "title": "管理标签",
+      "description": "用彩色标签标记会话，再在侧边栏按标签筛选。",
+      "branchTitle": "分支标签",
+      "branchDescription": "把每个会话创建时所在的 git 分支作为标签，显示在会话标题后面。",
+      "branchShow": "显示",
+      "branchLoadFailed": "无法加载分支标签设置",
+      "globalTitle": "全局标签",
+      "globalDescription": "可用于所有会话，包括聊天模式。",
+      "folderTitle": "文件夹标签",
+      "folderDescription": "仅可用于所选文件夹的会话，包括其工作树中的会话。",
+      "folderPlaceholder": "选择文件夹",
+      "noFolders": "还没有文件夹。在工作区中打开一个文件夹后即可为它设置专属标签。"
+    },
+    "filter": {
+      "button": "按标签筛选",
+      "searchPlaceholder": "搜索标签…",
+      "match": "匹配",
+      "matchAny": "任一",
+      "matchAll": "全部",
+      "matchAnyHint": "带有任一所选标签的会话",
+      "matchAllHint": "带有全部所选标签的会话",
+      "modeAll": "全部匹配",
+      "modeAny": "任一匹配",
+      "clear": "清除筛选",
+      "noTags": "还没有标签。可以在会话的菜单中添加。",
+      "noResults": "没有匹配的标签",
+      "active": "已按标签筛选",
+      "noMatches": "没有带这些标签的会话",
+      "remove": "从筛选中移除“{name}”"
+    },
+    "toasts": {
+      "assignFailed": "无法更新会话的标签",
+      "createFailed": "无法创建标签",
+      "deleteFailed": "无法删除标签",
+      "reorderFailed": "无法保存标签顺序",
+      "branchTagFailed": "无法保存分支标签"
+    },
+    "errors": {
+      "emptyName": "请输入标签名称",
+      "duplicateName": "这里已有名为“{name}”的标签",
+      "invalidColor": "请选择有效的颜色",
+      "folderNotTaggable": "此文件夹不能拥有专属标签",
+      "notApplicable": "该标签属于其他文件夹",
+      "tagNotFound": "该标签已不存在"
+    }
+  },
   "Pet": {
     "badge": {
       "running": "{count} 个运行中",
@@ -6642,7 +6733,17 @@
       "invalidUrl": "不是有效的地址",
       "profile": "配置文件：{name}",
       "profileMenuLabel": "在其他配置文件中打开此页",
-      "profileDefault": "默认"
+      "profileDefault": "默认",
+      "device": "设备：{name}",
+      "deviceMenuLabel": "设备类型",
+      "deviceDesktop": "桌面",
+      "deviceTablet": "平板",
+      "devicePhone": "手机",
+      "deviceFill": "铺满面板",
+      "deviceCustom": "自定义",
+      "deviceWidth": "宽度",
+      "deviceHeight": "高度",
+      "deviceLaidOut": "面板太小：按 {size} 排版"
     },
     "status": {
       "popupDenied": "已拦截弹窗：{host}",

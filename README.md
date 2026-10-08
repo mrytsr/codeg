@@ -3,10 +3,10 @@
 </h1>
 
 <p align="center">
-  <a href="https://github.com/xintaofei/codeg"><img src="https://img.shields.io/github/stars/xintaofei/codeg?style=flat&color=e91e63" alt="GitHub stars" /></a>
-  <a href="https://github.com/xintaofei/codeg/releases/latest"><img src="https://img.shields.io/github/v/release/xintaofei/codeg?style=flat&color=e91e63" alt="Latest release" /></a>
-  <a href="https://github.com/xintaofei/codeg/releases"><img src="https://img.shields.io/github/downloads/xintaofei/codeg/total?style=flat&color=e91e63" alt="Total downloads" /></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/github/license/xintaofei/codeg?style=flat&color=e91e63" alt="License" /></a>
+  <a href="https://github.com/spacering-net/codeg"><img src="https://img.shields.io/github/stars/spacering-net/codeg?style=flat&color=e91e63" alt="GitHub stars" /></a>
+  <a href="https://github.com/spacering-net/codeg/releases/latest"><img src="https://img.shields.io/github/v/release/spacering-net/codeg?style=flat&color=e91e63" alt="Latest release" /></a>
+  <a href="https://github.com/spacering-net/codeg/releases"><img src="https://img.shields.io/github/downloads/spacering-net/codeg/total?style=flat&color=e91e63" alt="Total downloads" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/spacering-net/codeg?style=flat&color=e91e63" alt="License" /></a>
   <a href="https://docs.codeg.app"><img src="https://img.shields.io/badge/docs-docs.codeg.app-3451b2?style=flat" alt="Documentation" /></a>
   <a href="https://docs.codeg.app/getting-started/installation"><img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20Docker%20%7C%20iOS%20%7C%20Android-03a9f4?style=flat" alt="Platforms: macOS, Windows, Linux, Docker, iOS, Android" /></a>
 </p>
@@ -20,7 +20,7 @@
   Run every AI coding agent in one place — and let them work together.
 </p>
 
-<h3 align="center"><a href="https://github.com/xintaofei/codeg/releases/latest"><ins>Download Codeg</ins></a> · <a href="https://docs.codeg.app"><ins>Documentation</ins></a></h3>
+<h3 align="center"><a href="https://github.com/spacering-net/codeg/releases/latest"><ins>Download Codeg</ins></a> · <a href="https://docs.codeg.app"><ins>Documentation</ins></a></h3>
 
 <p align="center">
   <picture>
@@ -269,7 +269,7 @@ An editor, live and side-by-side diffs, a full git client with a three-pane merg
 - **[Make It Yours](https://docs.codeg.app/reference/settings/appearance)** — twelve themes you can recolor token by token, wallpapers, corner radius, and custom CSS — in any of ten interface languages
 - **[Backup & Sync](https://docs.codeg.app/reference/settings/system#backup-restore)** — encrypted backups, and configuration sync between machines through a file or your own WebDAV server
 - **[URL Scheme](./docs/url-scheme.md)** — `codeg://session/<id>` opens a conversation from another app (desktop)
-- **And more** — nearly every release adds something; the [release notes](https://github.com/xintaofei/codeg/releases) are the full list
+- **And more** — nearly every release adds something; the [release notes](https://github.com/spacering-net/codeg/releases) are the full list
 
 ## 🤖 Supported Agents
 
@@ -298,19 +298,19 @@ Not on the list? Pick any agent from the public ACP registry or paste its distri
 
 ## 📦 Install
 
-**Desktop** — installers for macOS, Windows, and Linux are on [Releases](https://github.com/xintaofei/codeg/releases/latest); setup steps in [Installation](https://docs.codeg.app/getting-started/installation).
+**Desktop** — installers for macOS, Windows, and Linux are on [Releases](https://github.com/spacering-net/codeg/releases/latest); setup steps in [Installation](https://docs.codeg.app/getting-started/installation).
 
 **Server** — run Codeg headless and reach it from any browser. On Linux or macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xintaofei/codeg/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/spacering-net/codeg/main/install.sh | bash
 CODEG_STATIC_DIR=/usr/local/share/codeg/web codeg-server
 ```
 
 On Windows, in PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/xintaofei/codeg/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/spacering-net/codeg/main/install.ps1 | iex
 $env:CODEG_STATIC_DIR="$env:LOCALAPPDATA\codeg-server\web"; codeg-server
 ```
 
@@ -333,26 +333,26 @@ Compose, prebuilt binaries, source builds, and in-place updates are covered in [
     <img src="./docs/images/weixin-light.jpg" alt="WeChat" width="200" />
   </picture>
 
-- **Issues** — found a bug or missing a feature? [Open an issue](https://github.com/xintaofei/codeg/issues).
+- **Issues** — found a bug or missing a feature? [Open an issue](https://github.com/spacering-net/codeg/issues).
 - **Privacy** — local-first: parsing, storage, and project operations stay on your machine, and web and server modes are guarded by token authentication. Details in [Privacy & Security](https://docs.codeg.app/reference/privacy).
 - **LinuxDO** — thanks to the [LinuxDO](https://linux.do) community for their support.
-- **Show support** — [star the repo](https://github.com/xintaofei/codeg) to follow along.
+- **Show support** — [star the repo](https://github.com/spacering-net/codeg) to follow along.
 
 ## 🤝 Contributing
 
 Issues and pull requests are welcome. To build Codeg yourself, start with [Development](https://docs.codeg.app/reference/development) and [Architecture](https://docs.codeg.app/reference/architecture).
 
-<a href="https://github.com/xintaofei/codeg/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=xintaofei/codeg" alt="Codeg contributors" />
+<a href="https://github.com/spacering-net/codeg/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=spacering-net/codeg" alt="Codeg contributors" />
 </a>
 
 ## ⭐ Star History
 
-<a href="https://www.star-history.com/?repos=xintaofei%2Fcodeg&type=date&releases=&legend=bottom-right">
+<a href="https://www.star-history.com/?repos=spacering-net%2Fcodeg&type=date&releases=&legend=bottom-right">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xintaofei/codeg&type=date&theme=dark&legend=bottom-right" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xintaofei/codeg&type=date&legend=bottom-right" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xintaofei/codeg&type=date&legend=bottom-right" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=spacering-net/codeg&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=spacering-net/codeg&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=spacering-net/codeg&type=date&legend=bottom-right" />
  </picture>
 </a>
 

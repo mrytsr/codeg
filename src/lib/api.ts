@@ -95,6 +95,8 @@ import type {
   FolderHistoryEntry,
   FolderDetail,
   FolderGroupDetail,
+  ConversationBranchTag,
+  ConversationTagDetail,
   SidebarLayoutEntry,
   FolderLinkDetail,
   FolderLinkPlan,
@@ -2328,6 +2330,71 @@ export async function setFolderGroup(
   groupId: number | null
 ): Promise<void> {
   return getTransport().call("set_folder_group", { folderId, groupId })
+}
+
+export async function listConversationTags(): Promise<ConversationTagDetail[]> {
+  return getTransport().call("list_conversation_tags", {})
+}
+
+/** Create a tag. `folderId: null` makes it global; a folder id scopes it to
+ *  that folder's family (a worktree child resolves to its root). */
+export async function createConversationTag(args: {
+  folderId: number | null
+  name: string
+  color: string
+}): Promise<ConversationTagDetail> {
+  return getTransport().call("create_conversation_tag", args)
+}
+
+/** Rename and/or recolour a tag. An omitted field is left alone. */
+export async function updateConversationTag(
+  tagId: number,
+  patch: { name?: string; color?: string }
+): Promise<ConversationTagDetail> {
+  return getTransport().call("update_conversation_tag", { tagId, ...patch })
+}
+
+/** Delete a tag; it comes off every conversation that carried it. */
+export async function deleteConversationTag(tagId: number): Promise<void> {
+  return getTransport().call("delete_conversation_tag", { tagId })
+}
+
+/** Persist one scope's order after a drag: its complete list, first to last. */
+export async function reorderConversationTags(tagIds: number[]): Promise<void> {
+  return getTransport().call("reorder_conversation_tags", { tagIds })
+}
+
+/** The branch tag setting: off, in its default colour, until first saved. */
+export async function getConversationBranchTag(): Promise<ConversationBranchTag> {
+  return getTransport().call("get_conversation_branch_tag", {})
+}
+
+/** Save the branch tag setting whole; resolves to it as stored (the colour
+ *  normalized). */
+export async function updateConversationBranchTag(
+  setting: ConversationBranchTag
+): Promise<ConversationBranchTag> {
+  return getTransport().call("update_conversation_branch_tag", {
+    enabled: setting.enabled,
+    color: setting.color,
+  })
+}
+
+/**
+ * Put tags on / take tags off one conversation — a delta, so two windows
+ * toggling different tags at once both land. Resolves to the conversation's
+ * fresh summary (the same one broadcast on `conversation://changed`).
+ */
+export async function updateConversationTags(args: {
+  conversationId: number
+  add?: number[]
+  remove?: number[]
+}): Promise<DbConversationSummary> {
+  return getTransport().call("update_conversation_tags", {
+    conversationId: args.conversationId,
+    add: args.add ?? [],
+    remove: args.remove ?? [],
+  })
 }
 
 export async function updateFolderColor(

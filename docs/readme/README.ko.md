@@ -3,10 +3,10 @@
 </h1>
 
 <p align="center">
-  <a href="https://github.com/xintaofei/codeg"><img src="https://img.shields.io/github/stars/xintaofei/codeg?style=flat&color=e91e63" alt="GitHub stars" /></a>
-  <a href="https://github.com/xintaofei/codeg/releases/latest"><img src="https://img.shields.io/github/v/release/xintaofei/codeg?style=flat&color=e91e63" alt="Latest release" /></a>
-  <a href="https://github.com/xintaofei/codeg/releases"><img src="https://img.shields.io/github/downloads/xintaofei/codeg/total?style=flat&color=e91e63" alt="Total downloads" /></a>
-  <a href="../../LICENSE"><img src="https://img.shields.io/github/license/xintaofei/codeg?style=flat&color=e91e63" alt="License" /></a>
+  <a href="https://github.com/spacering-net/codeg"><img src="https://img.shields.io/github/stars/spacering-net/codeg?style=flat&color=e91e63" alt="GitHub stars" /></a>
+  <a href="https://github.com/spacering-net/codeg/releases/latest"><img src="https://img.shields.io/github/v/release/spacering-net/codeg?style=flat&color=e91e63" alt="Latest release" /></a>
+  <a href="https://github.com/spacering-net/codeg/releases"><img src="https://img.shields.io/github/downloads/spacering-net/codeg/total?style=flat&color=e91e63" alt="Total downloads" /></a>
+  <a href="../../LICENSE"><img src="https://img.shields.io/github/license/spacering-net/codeg?style=flat&color=e91e63" alt="License" /></a>
   <a href="https://docs.codeg.app"><img src="https://img.shields.io/badge/docs-docs.codeg.app-3451b2?style=flat" alt="Documentation" /></a>
   <a href="https://docs.codeg.app/getting-started/installation"><img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20Docker%20%7C%20iOS%20%7C%20Android-03a9f4?style=flat" alt="Platforms: macOS, Windows, Linux, Docker, iOS, Android" /></a>
 </p>
@@ -20,7 +20,7 @@
   모든 AI 코딩 에이전트를 한곳에서 실행하고, 서로 협업하게 만듭니다.
 </p>
 
-<h3 align="center"><a href="https://github.com/xintaofei/codeg/releases/latest"><ins>Codeg 다운로드</ins></a> · <a href="https://docs.codeg.app"><ins>문서</ins></a></h3>
+<h3 align="center"><a href="https://github.com/spacering-net/codeg/releases/latest"><ins>Codeg 다운로드</ins></a> · <a href="https://docs.codeg.app"><ins>문서</ins></a></h3>
 
 <p align="center">
   <picture>
@@ -269,7 +269,7 @@ Codeg를 데스크톱 앱으로, 어떤 브라우저에서든 여는 자체 호�
 - **[내 취향대로](https://docs.codeg.app/reference/settings/appearance)** — 토큰 단위로 색을 바꿀 수 있는 열두 가지 테마, 배경화면, 모서리 둥글기, 사용자 지정 CSS — 열 가지 인터페이스 언어 중 어느 언어로든
 - **[백업과 동기화](https://docs.codeg.app/reference/settings/system#backup-restore)** — 암호화된 백업, 그리고 파일이나 직접 운영하는 WebDAV 서버를 통한 컴퓨터 간 설정 동기화
 - **[URL 스킴](../../docs/url-scheme.md)** — `codeg://session/<id>`로 다른 앱에서 대화를 엽니다(데스크톱)
-- **그 밖에도** — 거의 모든 릴리스마다 새로운 것이 더해집니다. 전체 목록은 [릴리스 노트](https://github.com/xintaofei/codeg/releases)에 있습니다
+- **그 밖에도** — 거의 모든 릴리스마다 새로운 것이 더해집니다. 전체 목록은 [릴리스 노트](https://github.com/spacering-net/codeg/releases)에 있습니다
 
 ## 🤖 지원 에이전트
 
@@ -298,19 +298,19 @@ Codeg는 모든 에이전트와 [Agent Client Protocol](https://agentclientproto
 
 ## 📦 설치
 
-**데스크톱** — [Releases](https://github.com/xintaofei/codeg/releases/latest)에서 macOS, Windows, Linux용 설치 프로그램을 내려받은 뒤 [설치](https://docs.codeg.app/getting-started/installation) 안내를 따르세요.
+**데스크톱** — [Releases](https://github.com/spacering-net/codeg/releases/latest)에서 macOS, Windows, Linux용 설치 프로그램을 내려받은 뒤 [설치](https://docs.codeg.app/getting-started/installation) 안내를 따르세요.
 
 **서버** — Codeg를 헤드리스로 실행하고 어떤 브라우저에서든 접속합니다. Linux 또는 macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xintaofei/codeg/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/spacering-net/codeg/main/install.sh | bash
 CODEG_STATIC_DIR=/usr/local/share/codeg/web codeg-server
 ```
 
 Windows(PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/xintaofei/codeg/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/spacering-net/codeg/main/install.ps1 | iex
 $env:CODEG_STATIC_DIR="$env:LOCALAPPDATA\codeg-server\web"; codeg-server
 ```
 
@@ -333,26 +333,26 @@ Compose, 사전 빌드 바이너리, 소스 빌드, 제자리 업데이트는 [�
     <img src="../images/weixin-light.jpg" alt="WeChat" width="200" />
   </picture>
 
-- **이슈** — 버그를 찾았거나 원하는 기능이 없나요? [이슈를 열어 주세요](https://github.com/xintaofei/codeg/issues).
+- **이슈** — 버그를 찾았거나 원하는 기능이 없나요? [이슈를 열어 주세요](https://github.com/spacering-net/codeg/issues).
 - **개인정보 보호** — 로컬 우선: 파싱, 저장, 프로젝트 작업은 내 컴퓨터 안에서 이루어지고, 웹 모드와 서버 모드는 토큰 기반 인증으로 보호됩니다. 자세한 내용은 [개인정보 보호 및 보안](https://docs.codeg.app/reference/privacy)을 참고하세요.
 - **LinuxDO** — [LinuxDO](https://linux.do) 커뮤니티의 지원에 감사드립니다.
-- **응원하기** — [저장소에 스타를 눌러](https://github.com/xintaofei/codeg) 진행 상황을 함께 지켜봐 주세요.
+- **응원하기** — [저장소에 스타를 눌러](https://github.com/spacering-net/codeg) 진행 상황을 함께 지켜봐 주세요.
 
 ## 🤝 기여하기
 
 이슈와 풀 리퀘스트를 환영합니다. Codeg를 직접 빌드하려면 [개발](https://docs.codeg.app/reference/development)과 [아키텍처](https://docs.codeg.app/reference/architecture)부터 살펴보세요.
 
-<a href="https://github.com/xintaofei/codeg/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=xintaofei/codeg" alt="Codeg 기여자" />
+<a href="https://github.com/spacering-net/codeg/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=spacering-net/codeg" alt="Codeg 기여자" />
 </a>
 
 ## ⭐ 스타 히스토리
 
-<a href="https://www.star-history.com/?repos=xintaofei%2Fcodeg&type=date&releases=&legend=bottom-right">
+<a href="https://www.star-history.com/?repos=spacering-net%2Fcodeg&type=date&releases=&legend=bottom-right">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xintaofei/codeg&type=date&theme=dark&legend=bottom-right" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xintaofei/codeg&type=date&legend=bottom-right" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xintaofei/codeg&type=date&legend=bottom-right" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=spacering-net/codeg&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=spacering-net/codeg&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=spacering-net/codeg&type=date&legend=bottom-right" />
  </picture>
 </a>
 

@@ -4599,6 +4599,97 @@
       "deleted": "تم حذف الرسالة السريعة"
     }
   },
+  "ConversationTags": {
+    "tags": "الوسوم",
+    "moreTags": "{count} وسوم أخرى",
+    "addTags": "إضافة وسوم",
+    "editTags": "تعديل الوسوم",
+    "global": "عامة",
+    "noTagsYet": "لا توجد وسوم بعد",
+    "newTag": "وسم جديد…",
+    "manageTags": "إدارة الوسوم…",
+    "branchChip": "الفرع: {branch}",
+    "picker": {
+      "searchPlaceholder": "ابحث عن وسم أو أنشئ وسمًا…",
+      "noResults": "لا توجد وسوم مطابقة",
+      "empty": "لا توجد وسوم بعد. اكتب اسمًا لإنشاء وسم.",
+      "createGlobal": "إنشاء الوسم العام «{name}»",
+      "createInFolder": "إنشاء «{name}» في {folder}",
+      "otherFolders": "مجلدات أخرى"
+    },
+    "form": {
+      "createTitle": "وسم جديد",
+      "editTitle": "تعديل الوسم",
+      "name": "الاسم",
+      "namePlaceholder": "مثلًا: bug، مراجعة، فكرة",
+      "color": "اللون",
+      "customColor": "لون مخصص",
+      "scope": "متاح في",
+      "scopeGlobal": "كل المحادثات",
+      "scopeFolder": "{folder} فقط",
+      "create": "إنشاء",
+      "save": "حفظ",
+      "cancel": "إلغاء"
+    },
+    "editor": {
+      "empty": "لا توجد وسوم هنا بعد.",
+      "add": "وسم جديد",
+      "edit": "تعديل الوسم «{name}»",
+      "delete": "حذف الوسم «{name}»",
+      "dragToReorder": "اسحب لإعادة ترتيب «{name}»",
+      "deleteTitle": "حذف هذا الوسم؟",
+      "deleteDescription": "ستتم إزالة «{name}» من كل المحادثات التي تحمله. لا يمكن التراجع عن ذلك.",
+      "deleteConfirm": "حذف",
+      "deleteCancel": "إلغاء",
+      "loadFailed": "تعذّر تحميل الوسوم"
+    },
+    "manager": {
+      "title": "إدارة الوسوم",
+      "description": "ضع وسومًا ملونة على المحادثات، ثم صفِّ الشريط الجانبي بحسبها.",
+      "branchTitle": "وسم الفرع",
+      "branchDescription": "يعرض فرع Git الذي بدأت عليه كل محادثة كوسم بعد عنوانها.",
+      "branchShow": "إظهار",
+      "branchLoadFailed": "تعذّر تحميل إعداد وسم الفرع",
+      "globalTitle": "الوسوم العامة",
+      "globalDescription": "متاحة في كل المحادثات، بما فيها وضع الدردشة.",
+      "folderTitle": "وسوم المجلد",
+      "folderDescription": "متاحة فقط في محادثات المجلد المختار، بما فيها أشجار العمل التابعة له.",
+      "folderPlaceholder": "اختر مجلدًا",
+      "noFolders": "لا توجد مجلدات بعد. افتح مجلدًا في مساحة العمل لتمنحه وسومه الخاصة."
+    },
+    "filter": {
+      "button": "تصفية حسب الوسوم",
+      "searchPlaceholder": "ابحث في الوسوم…",
+      "match": "المطابقة",
+      "matchAny": "أيٌّ منها",
+      "matchAll": "كلها",
+      "matchAnyHint": "المحادثات التي تحمل وسمًا واحدًا على الأقل من الوسوم المختارة",
+      "matchAllHint": "المحادثات التي تحمل كل الوسوم المختارة",
+      "modeAll": "كلها معًا",
+      "modeAny": "أيٌّ منها",
+      "clear": "مسح التصفية",
+      "noTags": "لا توجد وسوم بعد. أضف وسمًا من قائمة أي محادثة.",
+      "noResults": "لا توجد وسوم مطابقة",
+      "active": "مُصفّى حسب الوسوم",
+      "noMatches": "لا توجد محادثات تحمل هذه الوسوم",
+      "remove": "إزالة «{name}» من التصفية"
+    },
+    "toasts": {
+      "assignFailed": "تعذّر تحديث وسوم المحادثة",
+      "createFailed": "تعذّر إنشاء الوسم",
+      "deleteFailed": "تعذّر حذف الوسم",
+      "reorderFailed": "تعذّر حفظ ترتيب الوسوم",
+      "branchTagFailed": "تعذّر حفظ وسم الفرع"
+    },
+    "errors": {
+      "emptyName": "أدخل اسمًا للوسم",
+      "duplicateName": "يوجد هنا وسم باسم «{name}» بالفعل",
+      "invalidColor": "اختر لونًا صالحًا",
+      "folderNotTaggable": "لا يمكن أن تكون لهذا المجلد وسوم خاصة",
+      "notApplicable": "هذا الوسم يخص مجلدًا آخر",
+      "tagNotFound": "هذا الوسم لم يعد موجودًا"
+    }
+  },
   "Pet": {
     "badge": {
       "running": "{count} قيد التشغيل",
@@ -6642,7 +6733,17 @@
       "invalidUrl": "عنوان غير صالح",
       "profile": "الملف الشخصي: {name}",
       "profileMenuLabel": "فتح هذه الصفحة في ملف شخصي آخر",
-      "profileDefault": "الافتراضي"
+      "profileDefault": "الافتراضي",
+      "device": "الجهاز: {name}",
+      "deviceMenuLabel": "العرض كـ",
+      "deviceDesktop": "سطح المكتب",
+      "deviceTablet": "جهاز لوحي",
+      "devicePhone": "هاتف",
+      "deviceFill": "اللوحة بالكامل",
+      "deviceCustom": "مخصص",
+      "deviceWidth": "العرض",
+      "deviceHeight": "الارتفاع",
+      "deviceLaidOut": "اللوحة صغيرة جدًا: التخطيط بحجم {size}"
     },
     "status": {
       "popupDenied": "تم حظر نافذة منبثقة: {host}",

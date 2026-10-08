@@ -4599,6 +4599,97 @@
       "deleted": "已刪除快捷訊息"
     }
   },
+  "ConversationTags": {
+    "tags": "標籤",
+    "moreTags": "另有 {count} 個標籤",
+    "addTags": "新增標籤",
+    "editTags": "編輯標籤",
+    "global": "全域",
+    "noTagsYet": "還沒有標籤",
+    "newTag": "新增標籤…",
+    "manageTags": "管理標籤…",
+    "branchChip": "分支：{branch}",
+    "picker": {
+      "searchPlaceholder": "搜尋或新增標籤…",
+      "noResults": "沒有符合的標籤",
+      "empty": "還沒有標籤，輸入名稱即可新增。",
+      "createGlobal": "新增全域標籤「{name}」",
+      "createInFolder": "在 {folder} 中新增「{name}」",
+      "otherFolders": "其他資料夾"
+    },
+    "form": {
+      "createTitle": "新增標籤",
+      "editTitle": "編輯標籤",
+      "name": "名稱",
+      "namePlaceholder": "例如：bug、待審查、靈感",
+      "color": "顏色",
+      "customColor": "自訂顏色",
+      "scope": "可用範圍",
+      "scopeGlobal": "所有會話",
+      "scopeFolder": "僅 {folder}",
+      "create": "建立",
+      "save": "儲存",
+      "cancel": "取消"
+    },
+    "editor": {
+      "empty": "這裡還沒有標籤。",
+      "add": "新增標籤",
+      "edit": "編輯標籤「{name}」",
+      "delete": "刪除標籤「{name}」",
+      "dragToReorder": "拖曳以調整「{name}」的順序",
+      "deleteTitle": "刪除這個標籤？",
+      "deleteDescription": "「{name}」將從所有帶有它的會話上移除，且無法復原。",
+      "deleteConfirm": "刪除",
+      "deleteCancel": "取消",
+      "loadFailed": "無法載入標籤"
+    },
+    "manager": {
+      "title": "管理標籤",
+      "description": "用彩色標籤標記會話，再在側邊欄依標籤篩選。",
+      "branchTitle": "分支標籤",
+      "branchDescription": "將每個會話建立時所在的 git 分支作為標籤，顯示在會話標題後面。",
+      "branchShow": "顯示",
+      "branchLoadFailed": "無法載入分支標籤設定",
+      "globalTitle": "全域標籤",
+      "globalDescription": "可用於所有會話，包括聊天模式。",
+      "folderTitle": "資料夾標籤",
+      "folderDescription": "僅可用於所選資料夾的會話，包括其工作樹中的會話。",
+      "folderPlaceholder": "選擇資料夾",
+      "noFolders": "還沒有資料夾。在工作區中開啟一個資料夾後即可為它設定專屬標籤。"
+    },
+    "filter": {
+      "button": "依標籤篩選",
+      "searchPlaceholder": "搜尋標籤…",
+      "match": "符合",
+      "matchAny": "任一",
+      "matchAll": "全部",
+      "matchAnyHint": "帶有任一所選標籤的會話",
+      "matchAllHint": "帶有全部所選標籤的會話",
+      "modeAll": "全部符合",
+      "modeAny": "任一符合",
+      "clear": "清除篩選",
+      "noTags": "還沒有標籤。可以在會話的選單中新增。",
+      "noResults": "沒有符合的標籤",
+      "active": "已依標籤篩選",
+      "noMatches": "沒有帶這些標籤的會話",
+      "remove": "從篩選中移除「{name}」"
+    },
+    "toasts": {
+      "assignFailed": "無法更新會話的標籤",
+      "createFailed": "無法建立標籤",
+      "deleteFailed": "無法刪除標籤",
+      "reorderFailed": "無法儲存標籤順序",
+      "branchTagFailed": "無法儲存分支標籤"
+    },
+    "errors": {
+      "emptyName": "請輸入標籤名稱",
+      "duplicateName": "這裡已有名為「{name}」的標籤",
+      "invalidColor": "請選擇有效的顏色",
+      "folderNotTaggable": "此資料夾不能擁有專屬標籤",
+      "notApplicable": "該標籤屬於其他資料夾",
+      "tagNotFound": "該標籤已不存在"
+    }
+  },
   "Pet": {
     "badge": {
       "running": "{count} 個執行中",
@@ -6642,7 +6733,17 @@
       "invalidUrl": "不是有效的網址",
       "profile": "設定檔：{name}",
       "profileMenuLabel": "在其他設定檔中開啟此頁",
-      "profileDefault": "預設"
+      "profileDefault": "預設",
+      "device": "裝置：{name}",
+      "deviceMenuLabel": "裝置類型",
+      "deviceDesktop": "桌面",
+      "deviceTablet": "平板",
+      "devicePhone": "手機",
+      "deviceFill": "填滿面板",
+      "deviceCustom": "自訂",
+      "deviceWidth": "寬度",
+      "deviceHeight": "高度",
+      "deviceLaidOut": "面板太小：以 {size} 排版"
     },
     "status": {
       "popupDenied": "已攔截彈出視窗：{host}",

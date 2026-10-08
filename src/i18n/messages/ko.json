@@ -4599,6 +4599,97 @@
       "deleted": "빠른 메시지가 삭제되었습니다"
     }
   },
+  "ConversationTags": {
+    "tags": "태그",
+    "moreTags": "태그 {count}개 더",
+    "addTags": "태그 추가",
+    "editTags": "태그 편집",
+    "global": "전역",
+    "noTagsYet": "아직 태그가 없습니다",
+    "newTag": "새 태그…",
+    "manageTags": "태그 관리…",
+    "branchChip": "브랜치: {branch}",
+    "picker": {
+      "searchPlaceholder": "태그 검색 또는 만들기…",
+      "noResults": "일치하는 태그가 없습니다",
+      "empty": "아직 태그가 없습니다. 이름을 입력하면 만들 수 있습니다.",
+      "createGlobal": "전역 태그 “{name}” 만들기",
+      "createInFolder": "{folder}에 “{name}” 만들기",
+      "otherFolders": "다른 폴더"
+    },
+    "form": {
+      "createTitle": "새 태그",
+      "editTitle": "태그 편집",
+      "name": "이름",
+      "namePlaceholder": "예: bug, 리뷰 대기, 아이디어",
+      "color": "색상",
+      "customColor": "사용자 지정 색상",
+      "scope": "사용 범위",
+      "scopeGlobal": "모든 대화",
+      "scopeFolder": "{folder}에서만",
+      "create": "만들기",
+      "save": "저장",
+      "cancel": "취소"
+    },
+    "editor": {
+      "empty": "아직 태그가 없습니다.",
+      "add": "새 태그",
+      "edit": "태그 “{name}” 편집",
+      "delete": "태그 “{name}” 삭제",
+      "dragToReorder": "드래그하여 “{name}” 순서 변경",
+      "deleteTitle": "이 태그를 삭제할까요?",
+      "deleteDescription": "“{name}” 태그가 붙은 모든 대화에서 이 태그가 제거됩니다. 되돌릴 수 없습니다.",
+      "deleteConfirm": "삭제",
+      "deleteCancel": "취소",
+      "loadFailed": "태그를 불러오지 못했습니다"
+    },
+    "manager": {
+      "title": "태그 관리",
+      "description": "대화에 색상 태그를 붙이고 사이드바를 태그로 필터링할 수 있습니다.",
+      "branchTitle": "브랜치 태그",
+      "branchDescription": "각 대화를 시작한 Git 브랜치를 제목 뒤에 태그로 표시합니다.",
+      "branchShow": "표시",
+      "branchLoadFailed": "브랜치 태그 설정을 불러오지 못했습니다",
+      "globalTitle": "전역 태그",
+      "globalDescription": "채팅 모드를 포함한 모든 대화에서 사용할 수 있습니다.",
+      "folderTitle": "폴더 태그",
+      "folderDescription": "선택한 폴더의 대화(워크트리 포함)에서만 사용할 수 있습니다.",
+      "folderPlaceholder": "폴더 선택",
+      "noFolders": "아직 폴더가 없습니다. 작업 공간에서 폴더를 열면 전용 태그를 만들 수 있습니다."
+    },
+    "filter": {
+      "button": "태그로 필터링",
+      "searchPlaceholder": "태그 검색…",
+      "match": "조건",
+      "matchAny": "하나라도",
+      "matchAll": "모두",
+      "matchAnyHint": "선택한 태그 중 하나라도 있는 대화",
+      "matchAllHint": "선택한 태그가 모두 있는 대화",
+      "modeAll": "모두 일치",
+      "modeAny": "하나라도 일치",
+      "clear": "필터 지우기",
+      "noTags": "아직 태그가 없습니다. 대화 메뉴에서 추가할 수 있습니다.",
+      "noResults": "일치하는 태그가 없습니다",
+      "active": "태그로 필터링됨",
+      "noMatches": "이 태그가 붙은 대화가 없습니다",
+      "remove": "필터에서 “{name}” 제거"
+    },
+    "toasts": {
+      "assignFailed": "대화의 태그를 업데이트하지 못했습니다",
+      "createFailed": "태그를 만들지 못했습니다",
+      "deleteFailed": "태그를 삭제하지 못했습니다",
+      "reorderFailed": "태그 순서를 저장하지 못했습니다",
+      "branchTagFailed": "브랜치 태그를 저장하지 못했습니다"
+    },
+    "errors": {
+      "emptyName": "태그 이름을 입력하세요",
+      "duplicateName": "이름이 “{name}”인 태그가 이미 있습니다",
+      "invalidColor": "올바른 색상을 선택하세요",
+      "folderNotTaggable": "이 폴더에는 전용 태그를 만들 수 없습니다",
+      "notApplicable": "이 태그는 다른 폴더의 태그입니다",
+      "tagNotFound": "이 태그는 더 이상 존재하지 않습니다"
+    }
+  },
   "Pet": {
     "badge": {
       "running": "실행 중 {count}개",
@@ -6642,7 +6733,17 @@
       "invalidUrl": "올바른 주소가 아닙니다",
       "profile": "프로필: {name}",
       "profileMenuLabel": "이 페이지를 다른 프로필에서 열기",
-      "profileDefault": "기본"
+      "profileDefault": "기본",
+      "device": "기기: {name}",
+      "deviceMenuLabel": "보기 기기",
+      "deviceDesktop": "데스크톱",
+      "deviceTablet": "태블릿",
+      "devicePhone": "휴대폰",
+      "deviceFill": "패널 전체",
+      "deviceCustom": "사용자 지정",
+      "deviceWidth": "너비",
+      "deviceHeight": "높이",
+      "deviceLaidOut": "패널이 너무 작음: {size} 크기로 배치"
     },
     "status": {
       "popupDenied": "팝업 차단됨: {host}",

@@ -4599,6 +4599,97 @@
       "deleted": "Mensagem rápida excluída"
     }
   },
+  "ConversationTags": {
+    "tags": "Etiquetas",
+    "moreTags": "{count, plural, one {mais # etiqueta} other {mais # etiquetas}}",
+    "addTags": "Adicionar etiquetas",
+    "editTags": "Editar etiquetas",
+    "global": "Globais",
+    "noTagsYet": "Ainda não há etiquetas",
+    "newTag": "Nova etiqueta…",
+    "manageTags": "Gerenciar etiquetas…",
+    "branchChip": "Branch: {branch}",
+    "picker": {
+      "searchPlaceholder": "Pesquise ou crie uma etiqueta…",
+      "noResults": "Nenhuma etiqueta correspondente",
+      "empty": "Ainda não há etiquetas. Digite um nome para criar uma.",
+      "createGlobal": "Criar a etiqueta global “{name}”",
+      "createInFolder": "Criar “{name}” em {folder}",
+      "otherFolders": "Outras pastas"
+    },
+    "form": {
+      "createTitle": "Nova etiqueta",
+      "editTitle": "Editar etiqueta",
+      "name": "Nome",
+      "namePlaceholder": "ex.: bug, revisão, ideia",
+      "color": "Cor",
+      "customColor": "Cor personalizada",
+      "scope": "Disponível em",
+      "scopeGlobal": "Todas as conversas",
+      "scopeFolder": "Só em {folder}",
+      "create": "Criar",
+      "save": "Salvar",
+      "cancel": "Cancelar"
+    },
+    "editor": {
+      "empty": "Ainda não há etiquetas aqui.",
+      "add": "Nova etiqueta",
+      "edit": "Editar a etiqueta “{name}”",
+      "delete": "Excluir a etiqueta “{name}”",
+      "dragToReorder": "Arraste para reordenar “{name}”",
+      "deleteTitle": "Excluir esta etiqueta?",
+      "deleteDescription": "“{name}” será removida de todas as conversas que a têm. Não é possível desfazer.",
+      "deleteConfirm": "Excluir",
+      "deleteCancel": "Cancelar",
+      "loadFailed": "Não foi possível carregar as etiquetas"
+    },
+    "manager": {
+      "title": "Gerenciar etiquetas",
+      "description": "Marque conversas com etiquetas coloridas e filtre a barra lateral por elas.",
+      "branchTitle": "Etiqueta de branch",
+      "branchDescription": "Mostra o branch do Git em que cada conversa começou como uma etiqueta depois do título.",
+      "branchShow": "Mostrar",
+      "branchLoadFailed": "Não foi possível carregar a etiqueta de branch",
+      "globalTitle": "Etiquetas globais",
+      "globalDescription": "Disponíveis em todas as conversas, inclusive no modo chat.",
+      "folderTitle": "Etiquetas de pasta",
+      "folderDescription": "Disponíveis só nas conversas da pasta escolhida, inclusive nos worktrees dela.",
+      "folderPlaceholder": "Escolha uma pasta",
+      "noFolders": "Ainda não há pastas. Abra uma no espaço de trabalho para dar a ela etiquetas próprias."
+    },
+    "filter": {
+      "button": "Filtrar por etiquetas",
+      "searchPlaceholder": "Pesquisar etiquetas…",
+      "match": "Corresponder",
+      "matchAny": "Qualquer",
+      "matchAll": "Todas",
+      "matchAnyHint": "Conversas com pelo menos uma das etiquetas escolhidas",
+      "matchAllHint": "Conversas com todas as etiquetas escolhidas",
+      "modeAll": "Todas juntas",
+      "modeAny": "Qualquer uma",
+      "clear": "Limpar filtro",
+      "noTags": "Ainda não há etiquetas. Adicione uma pelo menu de uma conversa.",
+      "noResults": "Nenhuma etiqueta correspondente",
+      "active": "Filtrado por etiquetas",
+      "noMatches": "Nenhuma conversa com estas etiquetas",
+      "remove": "Remover “{name}” do filtro"
+    },
+    "toasts": {
+      "assignFailed": "Não foi possível atualizar as etiquetas da conversa",
+      "createFailed": "Não foi possível criar a etiqueta",
+      "deleteFailed": "Não foi possível excluir a etiqueta",
+      "reorderFailed": "Não foi possível salvar a ordem das etiquetas",
+      "branchTagFailed": "Não foi possível salvar a etiqueta de branch"
+    },
+    "errors": {
+      "emptyName": "Digite um nome para a etiqueta",
+      "duplicateName": "Já existe aqui uma etiqueta chamada “{name}”",
+      "invalidColor": "Escolha uma cor válida",
+      "folderNotTaggable": "Esta pasta não pode ter etiquetas próprias",
+      "notApplicable": "Essa etiqueta pertence a outra pasta",
+      "tagNotFound": "Essa etiqueta não existe mais"
+    }
+  },
   "Pet": {
     "badge": {
       "running": "{count} em execução",
@@ -6642,7 +6733,17 @@
       "invalidUrl": "Endereço inválido",
       "profile": "Perfil: {name}",
       "profileMenuLabel": "Abrir esta página em outro perfil",
-      "profileDefault": "Padrão"
+      "profileDefault": "Padrão",
+      "device": "Dispositivo: {name}",
+      "deviceMenuLabel": "Ver como",
+      "deviceDesktop": "Desktop",
+      "deviceTablet": "Tablet",
+      "devicePhone": "Celular",
+      "deviceFill": "Painel inteiro",
+      "deviceCustom": "Personalizado",
+      "deviceWidth": "Largura",
+      "deviceHeight": "Altura",
+      "deviceLaidOut": "Painel pequeno demais: layout em {size}"
     },
     "status": {
       "popupDenied": "Pop-up bloqueado: {host}",

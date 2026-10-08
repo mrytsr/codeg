@@ -23,6 +23,7 @@ pub mod computer;
 /// the shared codeg-mcp plumbing reads them.
 pub mod computer_tools;
 pub mod config_sync;
+pub mod conversation_tags;
 pub mod conversations;
 pub mod custom_agents;
 pub mod custom_skills;

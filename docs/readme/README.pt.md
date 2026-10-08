@@ -3,10 +3,10 @@
 </h1>
 
 <p align="center">
-  <a href="https://github.com/xintaofei/codeg"><img src="https://img.shields.io/github/stars/xintaofei/codeg?style=flat&color=e91e63" alt="GitHub stars" /></a>
-  <a href="https://github.com/xintaofei/codeg/releases/latest"><img src="https://img.shields.io/github/v/release/xintaofei/codeg?style=flat&color=e91e63" alt="Latest release" /></a>
-  <a href="https://github.com/xintaofei/codeg/releases"><img src="https://img.shields.io/github/downloads/xintaofei/codeg/total?style=flat&color=e91e63" alt="Total downloads" /></a>
-  <a href="../../LICENSE"><img src="https://img.shields.io/github/license/xintaofei/codeg?style=flat&color=e91e63" alt="License" /></a>
+  <a href="https://github.com/spacering-net/codeg"><img src="https://img.shields.io/github/stars/spacering-net/codeg?style=flat&color=e91e63" alt="GitHub stars" /></a>
+  <a href="https://github.com/spacering-net/codeg/releases/latest"><img src="https://img.shields.io/github/v/release/spacering-net/codeg?style=flat&color=e91e63" alt="Latest release" /></a>
+  <a href="https://github.com/spacering-net/codeg/releases"><img src="https://img.shields.io/github/downloads/spacering-net/codeg/total?style=flat&color=e91e63" alt="Total downloads" /></a>
+  <a href="../../LICENSE"><img src="https://img.shields.io/github/license/spacering-net/codeg?style=flat&color=e91e63" alt="License" /></a>
   <a href="https://docs.codeg.app"><img src="https://img.shields.io/badge/docs-docs.codeg.app-3451b2?style=flat" alt="Documentation" /></a>
   <a href="https://docs.codeg.app/getting-started/installation"><img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20Docker%20%7C%20iOS%20%7C%20Android-03a9f4?style=flat" alt="Platforms: macOS, Windows, Linux, Docker, iOS, Android" /></a>
 </p>
@@ -20,7 +20,7 @@
   Rode todos os agentes de IA para programação em um só lugar — e deixe que trabalhem juntos.
 </p>
 
-<h3 align="center"><a href="https://github.com/xintaofei/codeg/releases/latest"><ins>Baixar o Codeg</ins></a> · <a href="https://docs.codeg.app"><ins>Documentação</ins></a></h3>
+<h3 align="center"><a href="https://github.com/spacering-net/codeg/releases/latest"><ins>Baixar o Codeg</ins></a> · <a href="https://docs.codeg.app"><ins>Documentação</ins></a></h3>
 
 <p align="center">
   <picture>
@@ -269,7 +269,7 @@ Um editor, diffs ao vivo e lado a lado, um cliente git completo com um editor de
 - **[Do seu jeito](https://docs.codeg.app/reference/settings/appearance)** — doze temas que você pode recolorir token a token, papéis de parede, raio dos cantos e CSS personalizado — em qualquer um dos dez idiomas da interface
 - **[Backup e sincronização](https://docs.codeg.app/reference/settings/system#backup-restore)** — backups criptografados e sincronização de configuração entre máquinas por meio de um arquivo ou do seu próprio servidor WebDAV
 - **[Esquema de URL](../../docs/url-scheme.md)** — `codeg://session/<id>` abre uma conversa a partir de outro aplicativo (desktop)
-- **E mais** — quase toda versão traz algo novo; as [notas de versão](https://github.com/xintaofei/codeg/releases) são a lista completa
+- **E mais** — quase toda versão traz algo novo; as [notas de versão](https://github.com/spacering-net/codeg/releases) são a lista completa
 
 ## 🤖 Agentes suportados
 
@@ -298,19 +298,19 @@ Não está na lista? Escolha qualquer agente no registro público do ACP ou cole
 
 ## 📦 Instalação
 
-**Desktop** — os instaladores para macOS, Windows e Linux estão em [Releases](https://github.com/xintaofei/codeg/releases/latest); o passo a passo está em [Instalação](https://docs.codeg.app/getting-started/installation).
+**Desktop** — os instaladores para macOS, Windows e Linux estão em [Releases](https://github.com/spacering-net/codeg/releases/latest); o passo a passo está em [Instalação](https://docs.codeg.app/getting-started/installation).
 
 **Servidor** — rode o Codeg sem interface e acesse de qualquer navegador. No Linux ou macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xintaofei/codeg/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/spacering-net/codeg/main/install.sh | bash
 CODEG_STATIC_DIR=/usr/local/share/codeg/web codeg-server
 ```
 
 No Windows, no PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/xintaofei/codeg/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/spacering-net/codeg/main/install.ps1 | iex
 $env:CODEG_STATIC_DIR="$env:LOCALAPPDATA\codeg-server\web"; codeg-server
 ```
 
@@ -333,26 +333,26 @@ Compose, binários pré-compilados, builds a partir do código e atualizações 
     <img src="../images/weixin-light.jpg" alt="WeChat" width="200" />
   </picture>
 
-- **Issues** — encontrou um bug ou sentiu falta de um recurso? [Abra uma issue](https://github.com/xintaofei/codeg/issues).
+- **Issues** — encontrou um bug ou sentiu falta de um recurso? [Abra uma issue](https://github.com/spacering-net/codeg/issues).
 - **Privacidade** — local em primeiro lugar: análise, armazenamento e operações de projeto ficam na sua máquina, e os modos web e servidor são protegidos por autenticação baseada em token. Detalhes em [Privacidade e segurança](https://docs.codeg.app/reference/privacy).
 - **LinuxDO** — obrigado à comunidade [LinuxDO](https://linux.do) pelo apoio.
-- **Apoie o projeto** — [dê uma estrela ao repositório](https://github.com/xintaofei/codeg) para acompanhar o desenvolvimento.
+- **Apoie o projeto** — [dê uma estrela ao repositório](https://github.com/spacering-net/codeg) para acompanhar o desenvolvimento.
 
 ## 🤝 Como contribuir
 
 Issues e pull requests são bem-vindos. Para compilar o Codeg você mesmo, comece por [Desenvolvimento](https://docs.codeg.app/reference/development) e [Arquitetura](https://docs.codeg.app/reference/architecture).
 
-<a href="https://github.com/xintaofei/codeg/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=xintaofei/codeg" alt="Contribuidores do Codeg" />
+<a href="https://github.com/spacering-net/codeg/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=spacering-net/codeg" alt="Contribuidores do Codeg" />
 </a>
 
 ## ⭐ Histórico de estrelas
 
-<a href="https://www.star-history.com/?repos=xintaofei%2Fcodeg&type=date&releases=&legend=bottom-right">
+<a href="https://www.star-history.com/?repos=spacering-net%2Fcodeg&type=date&releases=&legend=bottom-right">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xintaofei/codeg&type=date&theme=dark&legend=bottom-right" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xintaofei/codeg&type=date&legend=bottom-right" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xintaofei/codeg&type=date&legend=bottom-right" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=spacering-net/codeg&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=spacering-net/codeg&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=spacering-net/codeg&type=date&legend=bottom-right" />
  </picture>
 </a>
 

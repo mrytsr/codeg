@@ -2,13 +2,13 @@
 #
 # Codeg Server installer
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/xintaofei/codeg/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/xintaofei/codeg/main/install.sh | bash -s -- --version v0.5.0
+#   curl -fsSL https://raw.githubusercontent.com/spacering-net/codeg/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/spacering-net/codeg/main/install.sh | bash -s -- --version v0.5.0
 #
 
 set -euo pipefail
 
-REPO="xintaofei/codeg"
+REPO="spacering-net/codeg"
 INSTALL_DIR="${CODEG_INSTALL_DIR:-/usr/local/bin}"
 WEB_DIR="${CODEG_WEB_DIR:-/usr/local/share/codeg/web}"
 VERSION=""

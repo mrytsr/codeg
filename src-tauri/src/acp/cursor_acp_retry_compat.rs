@@ -53,7 +53,8 @@
 //! (`(0,w.debugLog)` is `(0,I.cY)`). Nothing else moved: the flag is still
 //! absent, and the run loop still reads it as `d.enableAgentRetries??!1` and
 //! retries only when that or `endless` is set. So the patch still applies; the
-//! anchor and the declarator check accept both outputs.
+//! anchor and the declarator check accept both outputs. `2026.10.01-14929f9`
+//! ships that ES2020 statement byte for byte, in all six archives.
 //!
 //! So nothing about the splice is transcribed by hand any more:
 //!
@@ -98,6 +99,7 @@ const TRIAGED_AFFECTED_VERSIONS: &[&str] = &[
     "2026.09.18-9a7762b",
     "2026.09.26-dd393fe",
     "2026.09.28-64d2043",
+    "2026.10.01-14929f9",
 ];
 
 /// Cursor agent-cli versions whose bundle was inspected and found to already
@@ -815,7 +817,9 @@ mod tests {
     /// `9824` darwin/x64, `6136` both linux, `4360` windows/arm64, `8210`
     /// windows/x64): the first ES2020 build. One object literal with a spread
     /// replaces the `Object.assign` chain, and the debug-log export is
-    /// minified (`I.cY`).
+    /// minified (`I.cY`). `2026.10.01-14929f9` ships the same bytes in all six
+    /// of its archives (`3990` darwin/arm64, `6787` darwin/x64, `6136` both
+    /// linux, `8971` windows/arm64, `9389` windows/x64).
     const REAL_ES2020_RUN_OPTIONS: &str = concat!(
         r#"f=new d.ConversationAction({action:{case:"userMessageAction",value:l}}),"#,
         r#"w={conversationId:this.agentStore.getId(),headers:(0,P.o)(this.agentStore),"#,

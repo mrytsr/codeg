@@ -9,8 +9,13 @@
 //! - Authentication matrix on a representative protected endpoint
 //! - Public endpoint (`get_system_language_settings`) reachable without token
 //! - DB-backed endpoints (`load_folder_history`, `list_open_folders`) return
-//!   the expected JSON shape. `list_folders` is NOT one of them — it parses
-//!   the real home directory and ignores the test DB entirely.
+//!   the expected JSON shape.
+//!
+//! No test here may call `list_folders`, `get_stats`, `get_sidebar_data` or
+//! `list_conversations`, not even just for a status code: they ignore the test
+//! DB and parse every agent's session history under the real home directory.
+//! That is instant on a clean CI runner and over ten minutes on a developer
+//! machine with a few gigabytes of history.
 //!
 //! Not covered: WebSocket attach (separate concern), endpoints that touch the
 //! Tauri webview (those are gated behind `tauri-runtime`).
@@ -53,7 +58,7 @@ async fn build_test_server() -> (TestServer, tempfile::TempDir, tempfile::TempDi
 #[tokio::test]
 async fn protected_endpoint_rejects_missing_token() {
     let (server, _data, _static) = build_test_server().await;
-    let resp = server.post("/api/list_folders").json(&json!({})).await;
+    let resp = server.post("/api/list_open_folders").json(&json!({})).await;
     assert_eq!(resp.status_code(), 401);
 }
 
@@ -61,7 +66,7 @@ async fn protected_endpoint_rejects_missing_token() {
 async fn protected_endpoint_rejects_wrong_token() {
     let (server, _data, _static) = build_test_server().await;
     let resp = server
-        .post("/api/list_folders")
+        .post("/api/list_open_folders")
         .add_header("authorization", "Bearer wrong-token")
         .json(&json!({}))
         .await;
@@ -72,11 +77,13 @@ async fn protected_endpoint_rejects_wrong_token() {
 async fn protected_endpoint_accepts_correct_token() {
     let (server, _data, _static) = build_test_server().await;
     let resp = server
-        .post("/api/list_folders")
+        .post("/api/list_open_folders")
         .add_header("authorization", format!("Bearer {TEST_TOKEN}"))
         .json(&json!({}))
         .await;
     assert_eq!(resp.status_code(), 200);
+    // The handler's own answer from the fresh DB, not just a status code.
+    assert_eq!(resp.json::<Value>(), json!([]));
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -99,11 +106,6 @@ async fn public_language_settings_reachable_without_token() {
 // ────────────────────────────────────────────────────────────────────────────
 // DB-backed endpoint
 // ────────────────────────────────────────────────────────────────────────────
-
-// Note: `/api/list_folders` invokes every parser against the *real* user home
-// directory, so it can't be asserted to-be-empty without elaborate filesystem
-// isolation. We test DB-backed endpoints (`load_folder_history`,
-// `list_open_folders`) instead — those only touch the in-memory SQLite.
 
 #[tokio::test]
 async fn load_folder_history_returns_empty_array_on_fresh_db() {

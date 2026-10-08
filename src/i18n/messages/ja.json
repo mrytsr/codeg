@@ -4599,6 +4599,97 @@
       "deleted": "クイックメッセージを削除しました"
     }
   },
+  "ConversationTags": {
+    "tags": "タグ",
+    "moreTags": "ほか {count} 件のタグ",
+    "addTags": "タグを追加",
+    "editTags": "タグを編集",
+    "global": "グローバル",
+    "noTagsYet": "タグはまだありません",
+    "newTag": "新しいタグ…",
+    "manageTags": "タグを管理…",
+    "branchChip": "ブランチ: {branch}",
+    "picker": {
+      "searchPlaceholder": "タグを検索または作成…",
+      "noResults": "一致するタグはありません",
+      "empty": "タグはまだありません。名前を入力すると作成できます。",
+      "createGlobal": "グローバルタグ「{name}」を作成",
+      "createInFolder": "{folder} に「{name}」を作成",
+      "otherFolders": "ほかのフォルダー"
+    },
+    "form": {
+      "createTitle": "新しいタグ",
+      "editTitle": "タグを編集",
+      "name": "名前",
+      "namePlaceholder": "例：bug、レビュー待ち、アイデア",
+      "color": "色",
+      "customColor": "カスタムカラー",
+      "scope": "使用範囲",
+      "scopeGlobal": "すべての会話",
+      "scopeFolder": "{folder} のみ",
+      "create": "作成",
+      "save": "保存",
+      "cancel": "キャンセル"
+    },
+    "editor": {
+      "empty": "まだタグはありません。",
+      "add": "新しいタグ",
+      "edit": "タグ「{name}」を編集",
+      "delete": "タグ「{name}」を削除",
+      "dragToReorder": "ドラッグして「{name}」を並べ替え",
+      "deleteTitle": "このタグを削除しますか？",
+      "deleteDescription": "「{name}」はこのタグが付いているすべての会話から外されます。元に戻せません。",
+      "deleteConfirm": "削除",
+      "deleteCancel": "キャンセル",
+      "loadFailed": "タグを読み込めませんでした"
+    },
+    "manager": {
+      "title": "タグを管理",
+      "description": "会話に色付きのタグを付けて、サイドバーをタグで絞り込めます。",
+      "branchTitle": "ブランチタグ",
+      "branchDescription": "各会話を開始した Git ブランチを、タイトルの後ろにタグとして表示します。",
+      "branchShow": "表示",
+      "branchLoadFailed": "ブランチタグの設定を読み込めませんでした",
+      "globalTitle": "グローバルタグ",
+      "globalDescription": "チャットモードを含むすべての会話で使えます。",
+      "folderTitle": "フォルダーのタグ",
+      "folderDescription": "選んだフォルダーの会話（そのワークツリーを含む）でのみ使えます。",
+      "folderPlaceholder": "フォルダーを選択",
+      "noFolders": "フォルダーがまだありません。ワークスペースでフォルダーを開くと、専用のタグを設定できます。"
+    },
+    "filter": {
+      "button": "タグで絞り込み",
+      "searchPlaceholder": "タグを検索…",
+      "match": "条件",
+      "matchAny": "いずれか",
+      "matchAll": "すべて",
+      "matchAnyHint": "選んだタグのいずれかが付いた会話",
+      "matchAllHint": "選んだタグがすべて付いた会話",
+      "modeAll": "すべて一致",
+      "modeAny": "いずれか一致",
+      "clear": "絞り込みを解除",
+      "noTags": "タグはまだありません。会話のメニューから追加できます。",
+      "noResults": "一致するタグはありません",
+      "active": "タグで絞り込み中",
+      "noMatches": "これらのタグが付いた会話はありません",
+      "remove": "「{name}」を絞り込みから外す"
+    },
+    "toasts": {
+      "assignFailed": "会話のタグを更新できませんでした",
+      "createFailed": "タグを作成できませんでした",
+      "deleteFailed": "タグを削除できませんでした",
+      "reorderFailed": "タグの順序を保存できませんでした",
+      "branchTagFailed": "ブランチタグを保存できませんでした"
+    },
+    "errors": {
+      "emptyName": "タグ名を入力してください",
+      "duplicateName": "「{name}」という名前のタグはすでにあります",
+      "invalidColor": "有効な色を選んでください",
+      "folderNotTaggable": "このフォルダーには専用のタグを設定できません",
+      "notApplicable": "そのタグは別のフォルダーのものです",
+      "tagNotFound": "そのタグはもう存在しません"
+    }
+  },
   "Pet": {
     "badge": {
       "running": "実行中 {count} 件",
@@ -6642,7 +6733,17 @@
       "invalidUrl": "有効なアドレスではありません",
       "profile": "プロファイル: {name}",
       "profileMenuLabel": "このページを別のプロファイルで開く",
-      "profileDefault": "デフォルト"
+      "profileDefault": "デフォルト",
+      "device": "デバイス: {name}",
+      "deviceMenuLabel": "表示デバイス",
+      "deviceDesktop": "デスクトップ",
+      "deviceTablet": "タブレット",
+      "devicePhone": "スマートフォン",
+      "deviceFill": "ペイン全体",
+      "deviceCustom": "カスタム",
+      "deviceWidth": "幅",
+      "deviceHeight": "高さ",
+      "deviceLaidOut": "ペインが小さすぎます: {size} でレイアウト"
     },
     "status": {
       "popupDenied": "ポップアップをブロックしました: {host}",

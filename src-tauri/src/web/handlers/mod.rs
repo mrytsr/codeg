@@ -11,6 +11,7 @@ pub mod computer_tools;
 pub mod chat_authoring;
 pub mod chat_channel;
 pub mod config_sync;
+pub mod conversation_tags;
 pub mod conversations;
 pub mod custom_skills;
 pub mod delegation;

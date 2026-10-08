@@ -1707,9 +1707,122 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             //
             // (oo) still holds on 0.85.1: 15 `count_tokens` per `session/new`,
             // and #1201 is still open.
+            //
+            // 0.86.0 moves the Claude SDK 0.3.286 → 0.3.287, i.e. CLI 2.1.286 →
+            // **2.1.287**, and the ACP SDK 1.6.0 → 1.7.0; `engines.node` stays
+            // ">=22". Most of its commits build the draft ACP v2 surface, which
+            // stays opt-in (see (ww)); the rest add `/mcp` (#1218) and fix the
+            // cancel, close and context-window paths. The scenario harness
+            // re-run on both tags with codeg's exact `clientCapabilities`
+            // differs in one frame, the same in all 40 scenarios:
+            // `available_commands_update` now ends with the adapter's own `mcp`
+            // entry. `initialize` is the same minus the version. The probes
+            // below ran live against the local fake Anthropic API (no model
+            // call), 0.85.1 and 0.86.0 side by side.
+            //
+            // (oo) is closed: #1258 has the background `getContextUsage` ask
+            // for `detail: "summary"`, and a measured `session/new` sends no
+            // `count_tokens` at all (15 on 0.85.1).
+            //
+            // (xx) **The Fable row is re-spelled `fable`** (CLI 2.1.287). Both
+            // of the CLI's model-row builders now value a Fable row by the
+            // family alias, as Opus, Sonnet and Haiku already were. Through a
+            // gateway the row goes from `claude-fable-5-1` to `fable` under the
+            // same name and description. A Fable pick codeg saved before is
+            // `claude-fable-5-1`, which the selector no longer lists, so every
+            // connect would have dropped it for the default model (Opus there).
+            // `heal_respelled_model_pick` replays it as the one row that names
+            // the same model, and a test pins the measured list.
+            //
+            // (yy) `/mcp` is answered in chat (#1218). The adapter advertises
+            // its own `mcp` command (hint `[reconnect|enable|disable
+            // [<server>|all]]`), replaces Claude Code's one-line summary with a
+            // server list, and runs a reconnect, enable or disable through the
+            // SDK control API, which 2.1.286 refused in an SDK session.
+            // Measured: `/mcp` lists the probe server with its tool count, and
+            // `/mcp reconnect probe` reconnects it. codeg's slash menu lists it
+            // like any other command, and the reply renders as Markdown. The
+            // transcript keeps only the command and Claude Code's own text, and
+            // `parsers::claude` hides a local command with its output, so a
+            // reload shows neither, as for `/usage`. A reconnect starts OAuth
+            // only for a client with URL elicitation, which codeg does not
+            // advertise.
+            //
+            // (zz) The main-thread `agent` option is back (#1250, undoing
+            // 0.77.0's #1112). With a custom agent defined (an `agents/*.md` of
+            // the user, the project or a plugin), `session/new` lists `agent`
+            // with `default` and each custom agent, and a pick applies that
+            // agent's prompt from the next turn (measured: the persona reaches
+            // the system prompt). codeg renders it as any other select and
+            // replays a saved pick through `config_option_rejects_value`, so an
+            // agent no longer defined is skipped. With no custom agent the
+            // option is absent, and an `agent` pick saved before 0.77.0 is still
+            // sent and refused ("Unknown config option: agent", logged).
+            //
+            // (aaa) A resume continues in the transcript's permission mode
+            // (#1218): the mode of the last prompt, unless a plan was exited
+            // after it. Measured: set `acceptEdits`, prompt, resume in a new
+            // process — 0.85.1 comes back in `default`, 0.86.0 in `acceptEdits`.
+            // codeg still sets the saved composer mode at connect when it
+            // differs (`apply_preferred_session_options`), so only a user who
+            // never picked a mode sees the transcript's.
+            //
+            // (bbb) Cancel and close (#1228, #1229, #1242, #1243). A cancel now
+            // drops the user messages it abandons from Claude Code's queue
+            // before the interrupt, so they no longer run after all. Measured
+            // with a prompt queued behind a slow turn: 0.85.1 still sent it to
+            // the model after the cancel, 0.86.0 did not. codeg never queues a
+            // prompt behind a running turn (the `turn_in_flight` gate), so what
+            // it gains is a steer the CLI still holds when the user stops (read
+            // from the source); a steer the CLI has already taken in runs on
+            // both, as measured. `session/close` now answers after the turns it
+            // cancels have ended (5 s at most); codeg's one close is for an idle
+            // fork parent and is never awaited. Read from the source: a held
+            // turn cancelled mid-follow-up now ends at its interrupt's idle,
+            // after the follow-up's flushed output, and a force-cancel that
+            // fires while an update is being sent no longer leaves the turn
+            // open.
+            //
+            // (ccc) Nothing to change in codeg, each checked:
+            //   * #1241 counts a subagent's permission request as the turn
+            //     waiting on the user. Over v1 that only makes a steer sent
+            //     while such a card is open non-interrupting, as the main
+            //     thread's cards already did.
+            //   * #1252 reports an exit code only when the result states one,
+            //     but an AIR client keeps the numbers it always got: 1 for a
+            //     failed or interrupted command, else the code, else 0.
+            //   * An AIR skill command now carries
+            //     `_meta.jetbrains.air.{kind: "skill", skillPath}`. Not adopted:
+            //     the adapter resolves SKILL.md only under the session cwd and
+            //     the home directory, so plugin and bundled skills never carry
+            //     it, and a marker in the slash menu would split codeg's skills
+            //     into two looks.
+            //   * Write/Edit diffs and permission titles change only for the v2
+            //     surface or a `diffPatch` client, and codeg is neither for
+            //     Claude.
+            //   * CLI 2.1.287 offers MCP servers on the 2025-11-25 protocol
+            //     `elicitation: {form, url}` where 2.1.286 sent `{}`. codeg-mcp
+            //     answers 2024-11-05 and reads no client capability, and a probe
+            //     server with the same handshake still lists its tools.
+            //   * A `context: fork` skill typed as `/<skill>` now streams its
+            //     fork, parented to a synthetic `forked-command-<skill>` id that
+            //     no tool call carries. codeg drops parented text whose parent
+            //     never arrived, and shows such tool calls as ordinary cards
+            //     (under an Agent card instead while one is still running, by
+            //     the positional fallback); the main thread's answer still
+            //     arrives once, and the transcript is unchanged.
+            //   * The changelog's "a message sent with priority now no longer
+            //     cancels a running web fetch or web search" does not reach a
+            //     `_session/steering`: on both CLIs a steer still cancels
+            //     WebFetch (`nonExecutionKind: "interrupted"`) and ends
+            //     WebSearch with no results.
+            //   * A 300 KB MCP result is persisted and reported in the same
+            //     `<persisted-output>` form as on 2.1.286.
+            //   * The hand-back header (w), `api_retry` and `latest_per_family`
+            //     are unchanged in 2.1.287.
             distribution: AgentDistribution::Npx {
-                version: "0.85.1",
-                package: "@agentclientprotocol/claude-agent-acp@0.85.1",
+                version: "0.86.0",
+                package: "@agentclientprotocol/claude-agent-acp@0.86.0",
                 cmd: "claude-agent-acp",
                 args: &[],
                 env: &[],
@@ -2657,8 +2770,8 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             name: "OpenClaw",
             description: "OpenClaw is a personal AI assistant you run on your own devices.",
             distribution: AgentDistribution::Npx {
-                version: "2026.9.7",
-                package: "openclaw@2026.9.7",
+                version: "2026.9.8",
+                package: "openclaw@2026.9.8",
                 cmd: "openclaw",
                 args: &["acp"],
                 env: &[],
@@ -2672,7 +2785,7 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
                 // preflight and then hard-fail at launch, so the floor tracks
                 // the LOWEST supported release. (codeg's `node_required` is a
                 // single minimum, so it cannot express the excluded 25.x and
-                // 26.0.x windows.) 2026.9.4 through 2026.9.7 leave that range
+                // 26.0.x windows.) 2026.9.4 through 2026.9.8 leave that range
                 // and those floors untouched (`node-version.mjs` is
                 // byte-identical), and the `supports_mcp: false` anchor still
                 // reads verbatim: `assertSupportedSessionSetup` throws "ACP
@@ -2680,6 +2793,15 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
                 // `dist/server-*.mjs` at the same 3 call sites (`newSession`,
                 // `loadSession`, `resumeSession`), with `acp` registered in
                 // `dist/acp-cli-*.mjs`.
+                //
+                // 2026.9.8 moves nothing codeg touches. Its ACP bridge
+                // (`dist/server-*.mjs`) matches 2026.9.7's line for line apart
+                // from the order and hashed names of its imports;
+                // `dist/acp-cli-*.mjs`, which defines the `--url`, `--session`
+                // and `--reset-session` flags codeg passes, is unchanged; and
+                // `@agentclientprotocol/sdk` stays at 1.4.0. The one launch-path
+                // change is Windows-only: a compile-cache path longer than 200
+                // characters now turns the cache off and says so on stderr.
                 //
                 // 2026.9.7 leaves `initialize` and the update kinds alone and
                 // changes two paths codeg only sees through their output. A
@@ -2713,20 +2835,24 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             name: "Cline",
             description: "Autonomous coding agent CLI",
             // 3.0.66 moved cline's build from Bun 1.3.13 to 1.4.2, and its
-            // darwin binaries pass `codesign --verify --strict`. The earlier
+            // darwin binaries pass `codesign --verify --strict` (3.0.68's
+            // darwin-arm64 binary still does, still on Bun 1.4.2). The earlier
             // pins checked (3.0.55, 3.0.60–3.0.65) all shipped Bun's broken
             // ad-hoc signature (the last, partial page hashed as if
             // zero-padded), and macOS 27 SIGKILLs such a binary when its exit
             // path reads that page (`atexit` → `dladdr`): there even
             // `cline --version` exited 137, and ACP sessions died within a
-            // second of `initialize`. The
-            // ACP surface is unchanged in 3.0.67: `apps/cli/src/acp` has no
-            // diff since 3.0.65, and `initialize` / `session/new` match it but
-            // for the version. What did move for codeg is token accounting;
-            // see `outputTokens` in `parsers::cline`.
+            // second of `initialize`. The ACP surface is unchanged in 3.0.68:
+            // `apps/cli/src` has no diff since 3.0.67 (`apps/cli/src/acp` none
+            // since 3.0.65), and `initialize` / `session/new` match 3.0.67 but
+            // for the version. Its SDK changes are agent-team persistence,
+            // which `--acp` never enables (`enableAgentTeams: false`), and a
+            // model-catalog refresh that moves ten providers' fallback default
+            // model. What moved for codeg in 3.0.66 is token accounting; see
+            // `outputTokens` in `parsers::cline`.
             distribution: AgentDistribution::Npx {
-                version: "3.0.67",
-                package: "cline@3.0.67",
+                version: "3.0.68",
+                package: "cline@3.0.68",
                 cmd: "cline",
                 args: &["--acp"],
                 env: &[],
@@ -2744,42 +2870,50 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             // ad-hoc signature Bun leaves behind — the one macOS 27 kills
             // binaries over (see the Cline entry). 1.18.33's darwin-arm64
             // binary fails `codesign --verify --strict` yet ran, so nothing
-            // had happened to read its bad page. The ACP surface is unchanged:
-            // `acp --help`, `initialize` and `session/new` match 1.18.33.
+            // had happened to read its bad page. 1.18.35's darwin-arm64 and
+            // darwin-x64 binaries carry the same Developer ID signature and
+            // pass that check. The one source change that ships in its binary
+            // is in `session/message-v2.ts`: when the model runs on
+            // `@ai-sdk/xai`, tool-result image attachments other than PNG,
+            // JPEG or WebP are dropped from the request instead of failing it.
+            // The rest is dependency bumps (`@ai-sdk/xai`,
+            // `gitlab-ai-provider`). The ACP surface is unchanged: `initialize`
+            // and `session/new` match 1.18.34 apart from the free OpenCode Zen
+            // models the binary lists.
             distribution: AgentDistribution::Binary {
-                version: "1.18.34",
+                version: "1.18.35",
                 cmd: "opencode",
                 args: &["acp"],
                 env: &[],
                 platforms: &[
                     PlatformBinary {
                         platform: "darwin-aarch64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.34/opencode-darwin-arm64.zip",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.35/opencode-darwin-arm64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "darwin-x86_64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.34/opencode-darwin-x64.zip",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.35/opencode-darwin-x64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "linux-aarch64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.34/opencode-linux-arm64.tar.gz",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.35/opencode-linux-arm64.tar.gz",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "linux-x86_64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.34/opencode-linux-x64.tar.gz",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.35/opencode-linux-x64.tar.gz",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "windows-aarch64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.34/opencode-windows-arm64.zip",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.35/opencode-windows-arm64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "windows-x86_64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.34/opencode-windows-x64.zip",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.18.35/opencode-windows-x64.zip",
                         sha256: None,
                     },
                 ],
@@ -2863,18 +2997,25 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             supports_mcp: true,
             name: "CodeBuddy",
             description: "Tencent Cloud's official AI coding assistant (ACP)",
-            // Since 2.160.0 both bundles `require("esbuild")` unguarded at
-            // load, while `esbuild` is only an OPTIONAL dependency: an install
-            // that drops optional deps dies on `--acp` with "Cannot find module
-            // 'esbuild'" although `--version` still answers. codeg's own
-            // `npm install -g` always passes `--include=optional`, so a managed
-            // install carries it. The `@agentclientprotocol/sdk` and
-            // `@openai/agents-core` dependencies added alongside are type-only
-            // (no `dist/` code loads them), and `initialize` / `session/new`
-            // are unchanged in 2.161.0.
+            // 2.160.0 through 2.161.2 loaded `esbuild` unguarded at startup
+            // while listing it only as an OPTIONAL dependency, so an install
+            // that skipped optional deps died on `--acp` ("Cannot find module
+            // 'esbuild'"); codeg's own `npm install -g` passes
+            // `--include=optional`, so managed installs always had it. 2.161.3
+            // dropped `esbuild` entirely (no dependency lists it, no bundle
+            // loads it), and 2.161.4 answers `initialize` from an install
+            // without it. The `@agentclientprotocol/sdk` and
+            // `@openai/agents-core` dependencies are still type-only, and
+            // `initialize` and the unauthenticated `session/new` answer match
+            // 2.161.0. What moved on the wire is argument streaming: those
+            // `tool_call_update` frames now carry the sub-agent link
+            // (`codebuddy.ai/parentToolCallId`) inside `_meta`, where codeg
+            // nests child calls from, instead of on the update itself; and
+            // after a call's first frame they are merged over a 100 ms window,
+            // each merged frame carrying the latest `rawInput` and `_meta`.
             distribution: AgentDistribution::Npx {
-                version: "2.161.0",
-                package: "@tencent-ai/codebuddy-code@2.161.0",
+                version: "2.161.4",
+                package: "@tencent-ai/codebuddy-code@2.161.4",
                 cmd: "codebuddy",
                 args: &["--acp"],
                 env: &[],
@@ -3288,40 +3429,47 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             // URL layout follows the ACP registry's `cursor` entry
             // (downloads.cursor.com/lab/<version>/<os>/<arch>/...); custom
             // versions substitute into the same pattern.
+            //
+            // 2026.10.01-14929f9 leaves the ACP layer alone: its 18
+            // `./src/acp/*` modules match 2026.09.28-64d2043's once minified
+            // names are normalized (only build paths, the embedded version
+            // string and one chunk number differ), and `initialize` and the
+            // unauthenticated `session/new` answer are identical. Every pin
+            // still has to be triaged in `cursor_acp_retry_compat`.
             distribution: AgentDistribution::Binary {
-                version: "2026.09.28-64d2043",
+                version: "2026.10.01-14929f9",
                 cmd: "cursor-agent",
                 args: &["acp"],
                 env: &[],
                 platforms: &[
                     PlatformBinary {
                         platform: "darwin-aarch64",
-                        url: "https://downloads.cursor.com/lab/2026.09.28-64d2043/darwin/arm64/agent-cli-package.tar.gz",
+                        url: "https://downloads.cursor.com/lab/2026.10.01-14929f9/darwin/arm64/agent-cli-package.tar.gz",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "darwin-x86_64",
-                        url: "https://downloads.cursor.com/lab/2026.09.28-64d2043/darwin/x64/agent-cli-package.tar.gz",
+                        url: "https://downloads.cursor.com/lab/2026.10.01-14929f9/darwin/x64/agent-cli-package.tar.gz",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "linux-aarch64",
-                        url: "https://downloads.cursor.com/lab/2026.09.28-64d2043/linux/arm64/agent-cli-package.tar.gz",
+                        url: "https://downloads.cursor.com/lab/2026.10.01-14929f9/linux/arm64/agent-cli-package.tar.gz",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "linux-x86_64",
-                        url: "https://downloads.cursor.com/lab/2026.09.28-64d2043/linux/x64/agent-cli-package.tar.gz",
+                        url: "https://downloads.cursor.com/lab/2026.10.01-14929f9/linux/x64/agent-cli-package.tar.gz",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "windows-aarch64",
-                        url: "https://downloads.cursor.com/lab/2026.09.28-64d2043/windows/arm64/agent-cli-package.zip",
+                        url: "https://downloads.cursor.com/lab/2026.10.01-14929f9/windows/arm64/agent-cli-package.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "windows-x86_64",
-                        url: "https://downloads.cursor.com/lab/2026.09.28-64d2043/windows/x64/agent-cli-package.zip",
+                        url: "https://downloads.cursor.com/lab/2026.10.01-14929f9/windows/x64/agent-cli-package.zip",
                         sha256: None,
                     },
                 ],
@@ -3624,8 +3772,28 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             // already have. `darwin-x86_64` first shipped with 1.2.1 (1.2.0
             // still covered only the other five targets), so on an Intel Mac
             // anything older 404s the same way.
+            //
+            // 1.3.0, checked against 1.2.1: every archive is still flat with
+            // the same two executables and modes, and `tools.py`,
+            // `config_options.py`, `paths.py`, `settings.py` and `oauth/` are
+            // byte-identical. So the MCP `rawInput` codeg folds, the mode
+            // values, the token paths and the loopback OAuth flow the login
+            // relay drives are unchanged. `initialize` matches, and
+            // `session/new` still fails `-32000 Authentication required` until
+            // settings.json declares `auth.type`, which gained a `gateway`
+            // value codeg does not offer. New on the wire is `usage_update`,
+            // which reaches the context ring like any agent's, and the Windows
+            // server is still the PyInstaller onefile that codeg's TMP/TEMP
+            // scratch and `_MEI*` reaping are built for. One launch detail
+            // moved: `main.py` now appends `localhost,127.0.0.1,::1` to both
+            // `NO_PROXY` spellings whenever a proxy variable is set. codeg
+            // already exports those hosts, so its value passes through, except
+            // `*`, which codeg sends alone because Python skips a `*` inside a
+            // list. The server turns it into `*,localhost,127.0.0.1,::1`, so
+            // with a proxy configured and a `*` bypass list, its urllib and
+            // requests traffic is proxied again.
             distribution: AgentDistribution::Binary {
-                version: "1.2.1",
+                version: "1.3.0",
                 // Never resolvable on PATH (there is no standalone CLI by
                 // this name); it exists because `Binary` requires one, and
                 // for dir-tree agents `installed_binary_path` ignores it in
@@ -3642,32 +3810,32 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
                 platforms: &[
                     PlatformBinary {
                         platform: "darwin-aarch64",
-                        url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.2.1-darwin-arm64.zip",
+                        url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.3.0-darwin-arm64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "darwin-x86_64",
-                        url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.2.1-darwin-x86_64.zip",
+                        url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.3.0-darwin-x86_64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "linux-aarch64",
-                        url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.2.1-linux-arm64.zip",
+                        url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.3.0-linux-arm64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "linux-x86_64",
-                        url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.2.1-linux-x86_64.zip",
+                        url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.3.0-linux-x86_64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "windows-aarch64",
-                        url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.2.1-windows-arm64.zip",
+                        url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.3.0-windows-arm64.zip",
                         sha256: None,
                     },
                     PlatformBinary {
                         platform: "windows-x86_64",
-                        url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.2.1-windows-x86_64.zip",
+                        url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.3.0-windows-x86_64.zip",
                         sha256: None,
                     },
                 ],
@@ -3769,7 +3937,7 @@ mod tests {
                 dir_entry,
                 ..
             } => {
-                assert_eq!(version, "1.2.1");
+                assert_eq!(version, "1.3.0");
                 assert_eq!(cmd, "agy_acp_server");
                 let entry = dir_entry.expect("antigravity must use dir-tree extraction");
                 assert_eq!(entry.unix, "agy_acp_server.par");
@@ -3779,7 +3947,7 @@ mod tests {
                 assert!(platforms.iter().any(|p| p.platform == "darwin-x86_64"));
                 for platform in platforms {
                     assert!(
-                        platform.url.contains("/agy-acp-server-1.2.1-"),
+                        platform.url.contains("/agy-acp-server-1.3.0-"),
                         "{} URL lost the release name: {}",
                         platform.platform,
                         platform.url
@@ -3894,8 +4062,8 @@ mod tests {
         let meta = get_agent_meta(AgentType::Cursor);
         assert_binary_version(
             AgentType::Cursor,
-            "2026.09.28-64d2043",
-            "/lab/2026.09.28-64d2043/",
+            "2026.10.01-14929f9",
+            "/lab/2026.10.01-14929f9/",
         );
         match meta.distribution {
             AgentDistribution::Binary {
@@ -3972,8 +4140,8 @@ mod tests {
     fn registry_pins_current_acp_agent_versions() {
         assert_npx_version(
             AgentType::ClaudeCode,
-            "0.85.1",
-            "@agentclientprotocol/claude-agent-acp@0.85.1",
+            "0.86.0",
+            "@agentclientprotocol/claude-agent-acp@0.86.0",
             Some("22.0.0"),
         );
         assert_npx_version(
@@ -3983,25 +4151,25 @@ mod tests {
             Some("20.0.0"),
         );
         // OpenClaw's floor is a RUNTIME gate (`node-version.mjs`), not just
-        // `engines` metadata: 2026.9.3 retired the Node 22 lane and 2026.9.7
+        // `engines` metadata: 2026.9.3 retired the Node 22 lane and 2026.9.8
         // keeps that range, so this must stay at the lowest release the guard
         // admits (see the registry entry).
         assert_npx_version(
             AgentType::OpenClaw,
-            "2026.9.7",
-            "openclaw@2026.9.7",
+            "2026.9.8",
+            "openclaw@2026.9.8",
             Some("24.16.0"),
         );
         assert_npx_version(
             AgentType::Cline,
-            "3.0.67",
-            "cline@3.0.67",
+            "3.0.68",
+            "cline@3.0.68",
             Some("22.0.0"),
         );
         assert_npx_version(
             AgentType::CodeBuddy,
-            "2.161.0",
-            "@tencent-ai/codebuddy-code@2.161.0",
+            "2.161.4",
+            "@tencent-ai/codebuddy-code@2.161.4",
             Some("22.0.0"),
         );
         // Kimi Code must never land on 0.37.0–0.38.0: every session in that
@@ -4037,7 +4205,7 @@ mod tests {
             "@qoder-ai/qodercli@1.1.65",
             Some("20.0.0"),
         );
-        assert_binary_version(AgentType::OpenCode, "1.18.34", "/releases/download/v1.18.34/");
+        assert_binary_version(AgentType::OpenCode, "1.18.35", "/releases/download/v1.18.35/");
         // Hermes rides the community npm bridge (upstream retired its PyPI
         // channel at 0.19.0; see the registry entry). The npm package version
         // tracks the upstream version 1:1, and the pin must stay EXACT — the

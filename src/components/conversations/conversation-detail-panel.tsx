@@ -102,7 +102,8 @@ import {
   shouldQueueDirectSend,
   shouldRejectDuplicateCreate,
 } from "@/lib/queue-flush"
-import { TurnBusyError, isNoActiveTurnRejection } from "@/lib/turn-busy"
+import { TurnBusyError } from "@/lib/turn-busy"
+import { deliverQueuedSteer } from "@/lib/queued-steer"
 import { toErrorMessage } from "@/lib/app-error"
 import { notify } from "@/lib/notify"
 import {
@@ -662,6 +663,7 @@ const ConversationTabView = memo(function ConversationTabView({
     dequeue: mqDequeue,
     remove: mqRemove,
     reorder: mqReorder,
+    moveToFront: mqMoveToFront,
     updateItem: mqUpdateItem,
     editingItemId: mqEditingItemId,
     startEditing: mqStartEditing,
@@ -2235,9 +2237,8 @@ const ConversationTabView = memo(function ConversationTabView({
   // over the same live-feedback channel the composer's mid-turn dropdown uses.
   // The block/text encoding is the shared `buildSteerPayload` — one call site,
   // no policy here beyond the row's own lifecycle: success removes the row;
-  // the turn-end race leaves it queued so the auto-flush sends it with the
-  // next turn — never lost. Any other failure keeps the row untouched and
-  // surfaces the error.
+  // a turn-end race prioritizes the row for the existing queue auto-flush.
+  // Failures keep the row available for retry.
   const handleQueueSteer = useCallback(
     async (id: string) => {
       const item = msgQueue.find((m) => m.id === id)
@@ -2252,14 +2253,15 @@ const ConversationTabView = memo(function ConversationTabView({
       // when the turn-end edge lands mid-round-trip.
       setQueueSteerInFlight(true)
       try {
-        await feedbackSteer(payload.text, payload.blocks)
-        mqRemove(id)
+        const delivered = await deliverQueuedSteer(
+          () => feedbackSteer(payload.text, payload.blocks),
+          () => mqMoveToFront(id)
+        )
+        // Not delivered means the turn ended first, so the row goes out as the
+        // next turn instead; say so, as the composer's steer does.
+        if (delivered) mqRemove(id)
+        else toast.info(tCmp("steerQueuedInstead"))
       } catch (err: unknown) {
-        if (isNoActiveTurnRejection(err)) {
-          // The turn ended mid-click — the queue flush will deliver it.
-          toast.info(tCmp("steerQueuedInstead"))
-          return
-        }
         notify({
           level: "error",
           key: `steer-failed:${tabId}`,
@@ -2272,7 +2274,15 @@ const ConversationTabView = memo(function ConversationTabView({
         setQueueSteerInFlight(false)
       }
     },
-    [msgQueue, feedbackSteer, mqRemove, feedback.channel, tabId, tCmp]
+    [
+      msgQueue,
+      feedbackSteer,
+      mqRemove,
+      feedback.channel,
+      tabId,
+      tCmp,
+      mqMoveToFront,
+    ]
   )
 
   return (

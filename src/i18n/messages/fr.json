@@ -4599,6 +4599,97 @@
       "deleted": "Message rapide supprimé"
     }
   },
+  "ConversationTags": {
+    "tags": "Étiquettes",
+    "moreTags": "{count, plural, one {# étiquette de plus} other {# étiquettes de plus}}",
+    "addTags": "Ajouter des étiquettes",
+    "editTags": "Modifier les étiquettes",
+    "global": "Globales",
+    "noTagsYet": "Aucune étiquette pour l’instant",
+    "newTag": "Nouvelle étiquette…",
+    "manageTags": "Gérer les étiquettes…",
+    "branchChip": "Branche : {branch}",
+    "picker": {
+      "searchPlaceholder": "Rechercher ou créer une étiquette…",
+      "noResults": "Aucune étiquette correspondante",
+      "empty": "Aucune étiquette pour l’instant. Saisissez un nom pour en créer une.",
+      "createGlobal": "Créer l’étiquette globale « {name} »",
+      "createInFolder": "Créer « {name} » dans {folder}",
+      "otherFolders": "Autres dossiers"
+    },
+    "form": {
+      "createTitle": "Nouvelle étiquette",
+      "editTitle": "Modifier l’étiquette",
+      "name": "Nom",
+      "namePlaceholder": "p. ex. bug, relecture, idée",
+      "color": "Couleur",
+      "customColor": "Couleur personnalisée",
+      "scope": "Disponible dans",
+      "scopeGlobal": "Toutes les conversations",
+      "scopeFolder": "{folder} uniquement",
+      "create": "Créer",
+      "save": "Enregistrer",
+      "cancel": "Annuler"
+    },
+    "editor": {
+      "empty": "Aucune étiquette ici pour l’instant.",
+      "add": "Nouvelle étiquette",
+      "edit": "Modifier l’étiquette « {name} »",
+      "delete": "Supprimer l’étiquette « {name} »",
+      "dragToReorder": "Faire glisser pour réordonner « {name} »",
+      "deleteTitle": "Supprimer cette étiquette ?",
+      "deleteDescription": "« {name} » sera retirée de toutes les conversations qui la portent. Cette action est irréversible.",
+      "deleteConfirm": "Supprimer",
+      "deleteCancel": "Annuler",
+      "loadFailed": "Impossible de charger les étiquettes"
+    },
+    "manager": {
+      "title": "Gérer les étiquettes",
+      "description": "Marquez les conversations avec des étiquettes de couleur, puis filtrez la barre latérale par étiquette.",
+      "branchTitle": "Étiquette de branche",
+      "branchDescription": "Affiche la branche Git sur laquelle chaque conversation a commencé, sous forme d’étiquette après son titre.",
+      "branchShow": "Afficher",
+      "branchLoadFailed": "Impossible de charger l’étiquette de branche",
+      "globalTitle": "Étiquettes globales",
+      "globalDescription": "Disponibles dans toutes les conversations, mode discussion compris.",
+      "folderTitle": "Étiquettes de dossier",
+      "folderDescription": "Disponibles uniquement dans les conversations du dossier choisi, worktrees compris.",
+      "folderPlaceholder": "Choisir un dossier",
+      "noFolders": "Aucun dossier pour l’instant. Ouvrez-en un dans l’espace de travail pour lui donner ses propres étiquettes."
+    },
+    "filter": {
+      "button": "Filtrer par étiquettes",
+      "searchPlaceholder": "Rechercher des étiquettes…",
+      "match": "Correspondance",
+      "matchAny": "Au moins une",
+      "matchAll": "Toutes",
+      "matchAnyHint": "Conversations portant au moins une des étiquettes choisies",
+      "matchAllHint": "Conversations portant toutes les étiquettes choisies",
+      "modeAll": "Toutes à la fois",
+      "modeAny": "Au moins une",
+      "clear": "Effacer le filtre",
+      "noTags": "Aucune étiquette pour l’instant. Ajoutez-en une depuis le menu d’une conversation.",
+      "noResults": "Aucune étiquette correspondante",
+      "active": "Filtré par étiquettes",
+      "noMatches": "Aucune conversation avec ces étiquettes",
+      "remove": "Retirer « {name} » du filtre"
+    },
+    "toasts": {
+      "assignFailed": "Impossible de mettre à jour les étiquettes de la conversation",
+      "createFailed": "Impossible de créer l’étiquette",
+      "deleteFailed": "Impossible de supprimer l’étiquette",
+      "reorderFailed": "Impossible d’enregistrer l’ordre des étiquettes",
+      "branchTagFailed": "Impossible d’enregistrer l’étiquette de branche"
+    },
+    "errors": {
+      "emptyName": "Saisissez un nom d’étiquette",
+      "duplicateName": "Une étiquette nommée « {name} » existe déjà ici",
+      "invalidColor": "Choisissez une couleur valide",
+      "folderNotTaggable": "Ce dossier ne peut pas avoir ses propres étiquettes",
+      "notApplicable": "Cette étiquette appartient à un autre dossier",
+      "tagNotFound": "Cette étiquette n’existe plus"
+    }
+  },
   "Pet": {
     "badge": {
       "running": "{count} en cours",
@@ -6642,7 +6733,17 @@
       "invalidUrl": "Adresse non valide",
       "profile": "Profil : {name}",
       "profileMenuLabel": "Ouvrir cette page dans un autre profil",
-      "profileDefault": "Par défaut"
+      "profileDefault": "Par défaut",
+      "device": "Appareil : {name}",
+      "deviceMenuLabel": "Afficher comme",
+      "deviceDesktop": "Ordinateur",
+      "deviceTablet": "Tablette",
+      "devicePhone": "Téléphone",
+      "deviceFill": "Tout le volet",
+      "deviceCustom": "Personnalisé",
+      "deviceWidth": "Largeur",
+      "deviceHeight": "Hauteur",
+      "deviceLaidOut": "Volet trop petit : mise en page en {size}"
     },
     "status": {
       "popupDenied": "Fenêtre contextuelle bloquée : {host}",
