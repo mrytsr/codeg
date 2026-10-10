@@ -176,6 +176,19 @@
       "sectionDescription": "新会话页面输入框上方显示的「代码开发 / 日常办公」快捷卡片区域。",
       "showQuickActions": "在新会话页面显示"
     },
+    "chatAnimations": {
+      "sectionTitle": "聊天区域动画",
+      "sectionDescription": "会话区域内的折叠/展开、工具调用、工作状态等动画，以及平滑滚动。关闭后界面立即更新、不再有过渡动画；加载转圈图标仍会旋转。",
+      "enable": "启用聊天区域动画"
+    },
+    "chatWidth": {
+      "sectionTitle": "聊天区域宽度",
+      "sectionDescription": "会话列与输入框的最大宽度。也可以直接拖动聊天区域左右两侧的边缘来调整。",
+      "label": "内容宽度",
+      "default": "默认（{width}px）",
+      "hint": "数值按 100% 窗口缩放计，随缩放等比变化；过宽的值会按窗口大小自动限制。",
+      "reset": "恢复默认"
+    },
     "workspaceBackground": {
       "sectionTitle": "工作区背景",
       "sectionDescription": "在整个工作区背后显示一张图片。侧栏与面板会变半透明并磨砂让图片透出，遮罩保证文字可读。",
@@ -2298,6 +2311,9 @@
       "closeAll": "关闭所有",
       "hideTerminal": "隐藏终端（{shortcut}）",
       "openFolderFirst": "请先打开一个文件夹",
+      "processExited": "进程已退出",
+      "processExitedWithCode": "进程已退出（代码 {code}）",
+      "unavailable": "终端会话不可用；它可能已结束，或后端已重启。",
       "keybar": {
         "label": "终端虚拟键",
         "show": "显示虚拟键",
@@ -3469,7 +3485,8 @@
         "completedAt": "完成时间",
         "jumpToPreviousUserMessage": "跳转到上一条用户消息",
         "showMore": "展开",
-        "showLess": "收起"
+        "showLess": "收起",
+        "resizeWidth": "拖动调整聊天区域宽度 · 双击恢复默认"
       },
       "liveTurnStats": {
         "thinking": "思考中...",
@@ -3579,6 +3596,7 @@
         "nameLabel": "名称：",
         "agentPromptLabel": "提示词",
         "agentModelLabel": "模型",
+        "agentEffortLabel": "思考强度",
         "agentRunning": "运行中...",
         "agentLiveTranscript": "实时活动",
         "agentProgressTools": "{count} 次工具调用",
@@ -4110,7 +4128,25 @@
     "loading": "加载中...",
     "emptyDirectory": "此目录为空",
     "errorLoadingDir": "加载目录失败",
-    "permissionDenied": "权限不足"
+    "permissionDenied": "权限不足",
+    "newFolder": {
+      "button": "新建文件夹",
+      "placeholder": "文件夹名称",
+      "create": "创建文件夹",
+      "location": "位于 {path}",
+      "errors": {
+        "empty": "请输入文件夹名称。",
+        "reservedName": "“{name}”不能用作文件夹名称。",
+        "separator": "文件夹名称不能包含 / 或 \\。",
+        "controlCharacter": "文件夹名称不能包含控制字符或换行符。",
+        "reservedCharacter": "文件夹名称不能包含 {character}。",
+        "invalidParent": "无法在 {path} 中创建文件夹。",
+        "parentNotFound": "{path} 已不存在。",
+        "alreadyExists": "“{name}”已存在。",
+        "permissionDenied": "没有在此处创建文件夹的权限。",
+        "failed": "无法创建文件夹：{reason}"
+      }
+    }
   },
   "ServerFileBrowser": {
     "title": "选择服务端文件",
@@ -4571,6 +4607,7 @@
       "experts": "专家",
       "science": "科学研究",
       "office": "办公工具",
+      "ui": "界面",
       "custom": "自定义"
     },
     "actions": {
@@ -4579,6 +4616,18 @@
     },
     "toasts": {
       "openFolderFailed": "打开目录失败"
+    }
+  },
+  "GenerativeUiSettings": {
+    "loading": "加载中…",
+    "switchLabel": "启用 json-render 生成式界面",
+    "switchDescription": "打开后，Codeg 会给启动的智能体装上 json-render 技能，回复里的 spec 代码块会渲染成可交互的卡片。",
+    "usage": "在输入框输入 /json-render 加需求，例如 /json-render 用表格列出这次改动的文件；Codex 用 $json-render。也可以直接让智能体用卡片或表格展示。",
+    "effect": "卡片立即出现或退回代码块；技能在打开后新建的会话里可用；关闭会立即从所有智能体移除技能。",
+    "conflict": "中央目录里已有你自己的 json-render 技能。在「自定义」页给它改个名，才能用 Codeg 内置的版本。",
+    "toasts": {
+      "saveFailed": "保存设置失败",
+      "unlinkFailed": "已关闭，但以下位置的 json-render 未能移除。对应智能体下次启动时会再试一次。"
     }
   },
   "QuickMessagesSettings": {
@@ -4834,6 +4883,8 @@
     }
   },
   "RemoteWorkspace": {
+    "openLocalWorkspace": "打开本地工作区",
+    "openLocalFailed": "打开本地工作区失败",
     "openRemoteWorkspace": "打开远端工作区",
     "manage": "管理远端工作区",
     "manageTitle": "远端工作区连接",

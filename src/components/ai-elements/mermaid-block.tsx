@@ -815,7 +815,7 @@ MermaidBlock.displayName = "MermaidBlock"
  * block from inline code. Dropping it would render every code fence as inline
  * code, so the passthrough is load-bearing.
  */
-function MermaidAwarePre({ children }: { children?: ReactNode }) {
+export function MermaidAwarePre({ children }: { children?: ReactNode }) {
   const source = isValidElement(children)
     ? mermaidSourceFromPre(children)
     : null

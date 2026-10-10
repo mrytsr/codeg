@@ -176,6 +176,19 @@
       "sectionDescription": "The Code Development / Office Work shortcut cards shown above the composer on the new conversation page.",
       "showQuickActions": "Show on the new conversation page"
     },
+    "chatAnimations": {
+      "sectionTitle": "Chat animations",
+      "sectionDescription": "Entrance, expand/collapse, tool-call and working-status animations in the conversation area, plus smooth scrolling. Turn off for instant, motion-free updates. Spinners keep rotating.",
+      "enable": "Enable chat animations"
+    },
+    "chatWidth": {
+      "sectionTitle": "Chat width",
+      "sectionDescription": "Maximum width of the conversation column and the composer. You can also drag the edges of the chat column to adjust it.",
+      "label": "Content width",
+      "default": "Default ({width}px)",
+      "hint": "Measured at 100% window zoom and scaled with it. Very wide values are limited to fit the window.",
+      "reset": "Reset to default"
+    },
     "workspaceBackground": {
       "sectionTitle": "Workspace background",
       "sectionDescription": "Show a picture behind the whole workspace. Sidebar and panels turn translucent and frosted so the image shows through, and a mask keeps text readable.",
@@ -2298,6 +2311,9 @@
       "closeAll": "Close All",
       "hideTerminal": "Hide Terminal ({shortcut})",
       "openFolderFirst": "Open a folder first",
+      "processExited": "Process exited",
+      "processExitedWithCode": "Process exited (code {code})",
+      "unavailable": "Terminal session unavailable. It may have ended or the backend restarted.",
       "keybar": {
         "label": "Terminal virtual keys",
         "show": "Show virtual keys",
@@ -3469,7 +3485,8 @@
         "completedAt": "Completed at",
         "jumpToPreviousUserMessage": "Jump to user message",
         "showMore": "Show more",
-        "showLess": "Show less"
+        "showLess": "Show less",
+        "resizeWidth": "Drag to resize the chat width · double-click to reset"
       },
       "liveTurnStats": {
         "thinking": "Thinking...",
@@ -3579,6 +3596,7 @@
         "nameLabel": "Name:",
         "agentPromptLabel": "Prompt",
         "agentModelLabel": "Model",
+        "agentEffortLabel": "Effort",
         "agentRunning": "Running...",
         "agentLiveTranscript": "Live activity",
         "agentProgressTools": "{count} tool calls",
@@ -4110,7 +4128,25 @@
     "loading": "Loading...",
     "emptyDirectory": "This directory is empty",
     "errorLoadingDir": "Failed to load directory",
-    "permissionDenied": "Permission denied"
+    "permissionDenied": "Permission denied",
+    "newFolder": {
+      "button": "New folder",
+      "placeholder": "Folder name",
+      "create": "Create folder",
+      "location": "In {path}",
+      "errors": {
+        "empty": "Enter a name for the folder.",
+        "reservedName": "“{name}” can't be used as a folder name.",
+        "separator": "A folder name can't contain / or \\.",
+        "controlCharacter": "A folder name can't contain control characters or line breaks.",
+        "reservedCharacter": "A folder name can't contain {character}.",
+        "invalidParent": "A folder can't be created in {path}.",
+        "parentNotFound": "{path} no longer exists.",
+        "alreadyExists": "“{name}” already exists here.",
+        "permissionDenied": "You don't have permission to create a folder here.",
+        "failed": "Couldn't create the folder: {reason}"
+      }
+    }
   },
   "ServerFileBrowser": {
     "title": "Pick server file",
@@ -4571,6 +4607,7 @@
       "experts": "Experts",
       "science": "Science",
       "office": "Office Tools",
+      "ui": "UI",
       "custom": "Custom"
     },
     "actions": {
@@ -4579,6 +4616,18 @@
     },
     "toasts": {
       "openFolderFailed": "Failed to open folder"
+    }
+  },
+  "GenerativeUiSettings": {
+    "loading": "Loading…",
+    "switchLabel": "Generative UI (json-render)",
+    "switchDescription": "When on, agents Codeg starts get the json-render skill, and spec code blocks in their replies render as interactive cards.",
+    "usage": "Type /json-render followed by your request, for example /json-render list the changed files as a table. In Codex, use $json-render. You can also just ask the agent to show something as cards or a table.",
+    "effect": "Cards appear, or turn back into code blocks, right away. The skill is available in conversations started after you turn this on; turning it off removes the skill from every agent at once.",
+    "conflict": "Your central skills folder already has a skill of your own named json-render. Rename it on the Custom tab to use the built-in one.",
+    "toasts": {
+      "saveFailed": "Couldn't save the setting",
+      "unlinkFailed": "Turned off, but json-render could not be removed from these places. Each agent's next launch tries again."
     }
   },
   "QuickMessagesSettings": {
@@ -4834,6 +4883,8 @@
     }
   },
   "RemoteWorkspace": {
+    "openLocalWorkspace": "Open local workspace",
+    "openLocalFailed": "Failed to open local workspace",
     "openRemoteWorkspace": "Open remote workspace",
     "manage": "Manage remote workspace",
     "manageTitle": "Remote Workspace connections",

@@ -24,6 +24,22 @@ import {
  */
 const LOAD_OLDER_THRESHOLD_PX = 240
 
+/**
+ * Keys the browser scrolls a focused viewport with. Modifiers don't matter:
+ * Cmd+ArrowDown and Ctrl+End jump to the end, Shift+Space pages back up.
+ */
+const SCROLL_KEYS = new Set([
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "PageUp",
+  "PageDown",
+  "Home",
+  "End",
+  " ",
+])
+
 interface VirtualizedMessageThreadProps<T> {
   /** Data to virtualise — each entry becomes one virtual row. */
   items: T[]
@@ -49,7 +65,7 @@ interface VirtualizedMessageThreadProps<T> {
   gap?: number
   /** Vertical padding before the first / after the last item. @default 16 */
   padding?: number
-  /** Extra className on every item's inner wrapper (the `max-w-3xl` div). */
+  /** Extra className on every item's inner wrapper (the `chat-content-w` div). */
   className?: string
   /** Extra className on the MessageThreadContent shell. */
   contentClassName?: string
@@ -229,7 +245,9 @@ function VirtualizedMessageThreadImpl<T>({
     const el = scrollRef.current
     if (!el) return
     el.tabIndex = 0
+    let blurCheck: number | undefined
     const clearPointerFocus = () => {
+      window.clearTimeout(blurCheck)
       el.removeAttribute("data-focus-origin")
     }
     const onPointerDown = (e: PointerEvent) => {
@@ -249,18 +267,44 @@ function VirtualizedMessageThreadImpl<T>({
       el.setAttribute("data-focus-origin", "pointer")
       el.focus({ preventScroll: true })
     }
+    // The pointer-origin marker only hides the ring for the click that
+    // focused the viewport. Once the user scrolls it with the keyboard, drop
+    // the marker so the ring reappears — keeping the keyboard focus indicator
+    // visible per WCAG 2.4.7. Other keys keep it: Chromium already matches
+    // :focus-visible after that script focus, so clearing on any key ringed
+    // the whole transcript on a mere Esc, or on Ctrl/Cmd+C to copy a
+    // selection. Tabbing in still shows the ring: that focus never sets it.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(e.key)) clearPointerFocus()
+    }
+    // Otherwise the marker holds until focus really leaves the viewport. A
+    // blur alone isn't that: the whole window losing focus (switch apps, then
+    // resize the window to come back) blurs the viewport too, yet it stays the
+    // document's active element and the browser re-focuses it on the way
+    // back — without the marker, the ring appeared on return. So look after
+    // the blur settles: only a viewport that is no longer active drops it.
+    const onBlur = () => {
+      window.clearTimeout(blurCheck)
+      blurCheck = window.setTimeout(() => {
+        if (document.activeElement !== el) clearPointerFocus()
+      })
+    }
+    // Focus can also move on while the window is away (a script focuses
+    // another control). The viewport gets no second blur for that — its blur
+    // already went out with the window's — so look again when the window
+    // comes back, or Tabbing back in later would bring no ring.
+    const onWindowFocus = () => {
+      if (document.activeElement !== el) clearPointerFocus()
+    }
     el.addEventListener("pointerdown", onPointerDown)
-    el.addEventListener("blur", clearPointerFocus)
-    // Once the user drives the viewport with the keyboard (Arrow/Page/Home/End
-    // to scroll), drop the pointer-origin marker so the focus ring reappears —
-    // keeping the keyboard focus indicator visible per WCAG 2.4.7. The ring is
-    // only suppressed for the mouse click that focused the viewport, not for
-    // subsequent keyboard use.
-    el.addEventListener("keydown", clearPointerFocus)
+    el.addEventListener("keydown", onKeyDown)
+    el.addEventListener("blur", onBlur)
+    window.addEventListener("focus", onWindowFocus)
     return () => {
       el.removeEventListener("pointerdown", onPointerDown)
-      el.removeEventListener("blur", clearPointerFocus)
-      el.removeEventListener("keydown", clearPointerFocus)
+      el.removeEventListener("keydown", onKeyDown)
+      el.removeEventListener("blur", onBlur)
+      window.removeEventListener("focus", onWindowFocus)
       clearPointerFocus()
     }
   }, [scrollRef])
@@ -288,7 +332,7 @@ function VirtualizedMessageThreadImpl<T>({
     <MessageScrollProvider value={scrollContextValue}>
       <MessageThreadContent
         className={cn("mx-0 max-w-none p-0", contentClassName)}
-        scrollClassName="scrollbar-thin overscroll-contain [overflow-anchor:none] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[focus-origin=pointer]:focus-visible:ring-0"
+        scrollClassName="chat-scroll-port scrollbar-thin overscroll-contain [overflow-anchor:none] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[focus-origin=pointer]:focus-visible:ring-0"
         {...contentProps}
       >
         {items.length === 0 ? (
@@ -304,7 +348,7 @@ function VirtualizedMessageThreadImpl<T>({
           >
             {hasOlder ? (
               <div key="load-older-row" style={styles.first}>
-                <div className={cn("mx-auto max-w-3xl px-4", className)}>
+                <div className={cn("mx-auto chat-content-w px-4", className)}>
                   <button
                     type="button"
                     onClick={isLoadingOlder ? undefined : onLoadOlder}
@@ -328,7 +372,7 @@ function VirtualizedMessageThreadImpl<T>({
                 key={getItemKey(item, index)}
                 style={itemStyle(index, items.length)}
               >
-                <div className={cn("mx-auto max-w-3xl px-4", className)}>
+                <div className={cn("mx-auto chat-content-w px-4", className)}>
                   {renderItem(item, index)}
                 </div>
               </div>

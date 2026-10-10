@@ -67,8 +67,8 @@ use crate::models::agent::AgentType;
 use crate::models::message::MessageTurn;
 use crate::parsers::claude::{
     capture_tag, capture_title_record, find_clear_rollover_successor, find_session_file,
-    group_into_turns, is_meta_message, slash_command_display,
-    task_notification_result_regex, task_notification_status_regex,
+    group_into_turns, is_meta_message, queued_human_prompt, queued_task_notification,
+    slash_command_display, task_notification_result_regex, task_notification_status_regex,
     task_notification_summary_regex, task_notification_task_id_regex,
     task_notification_tool_use_id_regex, ClaudeRecordAccumulator, BACKGROUND_RESULT_MAX_CHARS,
     CONTEXT_CONTINUATION_PREFIX,
@@ -1210,12 +1210,31 @@ impl WatchState {
     }
 
     /// Task accounting for one record: launch acks; settlements via a
-    /// `<task-notification>` record, a `TaskOutput` result reaching a terminal
-    /// `task.status`, or a `TaskStop`/`KillShell` call; and `SendMessage`
-    /// re-arms of settled sub-agents.
+    /// `<task-notification>` record or one folded into a running turn, a
+    /// `TaskOutput` result reaching a terminal `task.status`, or a
+    /// `TaskStop`/`KillShell` call; and `SendMessage` re-arms of settled
+    /// sub-agents.
     fn account(&mut self, value: &serde_json::Value, settled: &mut Vec<BackgroundSettledInfo>) {
         let record_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match record_type {
+            // A task that settled while a turn ran: its notification is folded
+            // into that turn (see `queued_task_notification`), and this is the
+            // usual way a background task ends. Missed, the task kept the
+            // connection exempt from the idle sweeps until its keep-alive
+            // expired. Like a `TaskOutput` collection, it only leaves the
+            // count, with no `settled` push: the agent takes the result inline,
+            // so there is nothing to announce out of turn, and the launch card
+            // gets its final state from the detail parse.
+            "attachment" => {
+                if let Some(id) = queued_task_notification(value)
+                    .and_then(|raw| capture_tag(task_notification_task_id_regex(), raw))
+                {
+                    if self.tasks.remove(&id).is_some() {
+                        tracing::info!("[bg-watch] settled task={id} folded into a turn");
+                    }
+                    self.settled_ids.insert(id);
+                }
+            }
             "user" => {
                 if let Some(tur) = value.get("toolUseResult") {
                     if tur.get("status").and_then(|s| s.as_str()) == Some("async_launched") {
@@ -1429,6 +1448,28 @@ impl WatchState {
             self.foreground_awaiting_reply = false;
         }
 
+        // A message folded into the running turn continues that turn and never
+        // starts one. Matched against the ledger — a prompt codeg sent that
+        // Claude Code folded into a turn it started on its own, or a steer — it
+        // hands the rest of the turn to the wire, so an open episode closes as
+        // for any codeg-sent prompt. Unmatched, it stays with whatever turn is
+        // running, the overlay's or the wire's. The steer arm records its
+        // fingerprint only once the adapter answers `injected`, so the CLI can
+        // write the attachment before the ledger has it; taken for an
+        // out-of-turn start, it would draw the rest of a wire-rendered turn in
+        // the overlay as well.
+        if let Some(text) = folded_prompt_text(value) {
+            if ledger.consume_matching(&TurnInitiatorText::Verbatim(text)) {
+                tracing::debug!("[bg-watch] folded prompt matched ledger");
+                self.collect_changed_turns(cwd, changed_turns);
+                self.episode = None;
+                self.mode = Mode::Foreground;
+                self.foreground_awaiting_reply = true;
+                self.foreground_submission_id = None;
+                return;
+            }
+        }
+
         if let Some(initiator) = turn_initiator_text(value) {
             let initiator_text = initiator.as_str();
             if ledger.consume_matching(&initiator) {
@@ -1576,7 +1617,13 @@ fn user_record_text(value: &serde_json::Value) -> Option<String> {
     if value.get("type").and_then(|t| t.as_str()) != Some("user") {
         return None;
     }
-    let content = value.get("message")?.get("content")?;
+    content_text(value.get("message")?.get("content")?)
+}
+
+/// The text of a user `content` value — a record's `message.content`, or the
+/// prompt of a message folded into a running turn: the bare string form, or
+/// the concatenated text blocks of the array form.
+fn content_text(content: &serde_json::Value) -> Option<String> {
     if let Some(s) = content.as_str() {
         return Some(s.to_string());
     }
@@ -1603,6 +1650,9 @@ fn user_record_text(value: &serde_json::Value) -> Option<String> {
 ///   still rendering it — never a boundary;
 /// * everything else user-typed/injected (real prompts, `<task-notification>`
 ///   records, cron prompts) initiates.
+///
+/// A message folded into the running turn is an attachment, not a `user`
+/// record, and never initiates: see [`folded_prompt_text`].
 fn turn_initiator_text(value: &serde_json::Value) -> Option<TurnInitiatorText> {
     if value.get("type").and_then(|t| t.as_str()) != Some("user") {
         return None;
@@ -1637,6 +1687,15 @@ fn turn_initiator_text(value: &serde_json::Value) -> Option<TurnInitiatorText> {
         return None;
     }
     Some(TurnInitiatorText::Verbatim(text))
+}
+
+/// The text of a message the user sent mid-turn, which Claude Code folded into
+/// the running turn and recorded as an attachment ([`queued_human_prompt`]).
+/// `None` for any other record, and for one with no text (an image on its
+/// own): there is nothing to match, as an image-only prompt leaves no
+/// fingerprint either.
+fn folded_prompt_text(value: &serde_json::Value) -> Option<String> {
+    content_text(queued_human_prompt(value)?).filter(|text| !text.trim().is_empty())
 }
 
 /// The submission a record belongs to. Claude Code stamps every user record it
@@ -2332,9 +2391,12 @@ mod tests {
     }
 
     /// A `_session/steering` injection reaches the agent outside
-    /// `session/prompt`, but the CLI still writes it to the transcript as a
-    /// user record — which starts a new turn as far as `group_into_turns` is
-    /// concerned. Since claude-agent-acp #958 the owning prompt stays in
+    /// `session/prompt`, but the CLI still writes it to the transcript — as a
+    /// user record when it runs as a turn of its own, the shape here, and as an
+    /// attachment when it is folded into the running turn (see
+    /// `a_steer_folded_into_the_running_turn_classifies_foreground`) — which
+    /// starts a new turn as far as `group_into_turns` is concerned. Since
+    /// claude-agent-acp #958 the owning prompt stays in
     /// flight across the steered work, so every update of that turn is
     /// already streaming over the wire; surfacing it as overlay activity too
     /// double-renders it and shuffles the transcript as the upserts land
@@ -2396,6 +2458,220 @@ mod tests {
             !turns.is_empty(),
             "same-text refire must surface — the steer's entry was consumed, not left standing"
         );
+    }
+
+    /// Real-shape message folded into the running turn (CLI 2.1.293): a
+    /// `queued_command` attachment rather than a user record, with no
+    /// `promptId`.
+    fn folded_prompt(uuid: &str, text: &str) -> String {
+        format!(
+            r#"{{"type":"attachment","timestamp":"2026-07-07T03:48:30.000Z","uuid":"{uuid}","renderedRole":"system","attachment":{{"type":"queued_command","prompt":[{{"type":"text","text":"{text}"}}],"source_uuid":"s-{uuid}","delivery_id":"d-{uuid}","commandMode":"prompt","origin":{{"kind":"human"}},"timestamp":"2026-07-07T03:48:30.000Z","humanTurn":true}}}}"#
+        )
+    }
+
+    /// A steer that lands while a tool runs is folded into the running turn and
+    /// recorded as an attachment. It matches the ledger like the user-record
+    /// shape and consumes its fingerprint. Left standing, the entry took an
+    /// autonomous re-fire of the same words within the ledger's lifetime for
+    /// codeg's own, and that turn never surfaced.
+    #[test]
+    fn a_steer_folded_into_the_running_turn_classifies_foreground() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+
+        ledger.record_text("build a test page");
+        write_lines(
+            &path,
+            &[
+                &user_prompt_array("u1", "build a test page"),
+                &assistant_text("a1", "working"),
+            ],
+        );
+        let event = tick_prompting(&mut ws, &ledger);
+        assert!(event.is_none() || unpack(event.unwrap()).0.is_empty());
+
+        ledger.record_text("make it cyberpunk");
+        write_lines(
+            &path,
+            &[
+                &folded_prompt("q1", "make it cyberpunk"),
+                &assistant_text("a2", "restyling"),
+            ],
+        );
+        let event = tick_prompting(&mut ws, &ledger);
+        assert!(
+            event.is_none() || unpack(event.unwrap()).0.is_empty(),
+            "the steered work is wire-rendered — it must not surface as overlay activity"
+        );
+
+        write_lines(
+            &path,
+            &[
+                &cron_prompt("make it cyberpunk"),
+                &assistant_text("a3", "again"),
+            ],
+        );
+        let (turns, ..) = unpack(tick_now(&mut ws, &ledger).expect("turns event"));
+        assert!(
+            !turns.is_empty(),
+            "same-text refire must surface — the folded steer consumed its entry"
+        );
+    }
+
+    /// #893 once claude-agent-acp answers a folded prompt (0.87.0+): a
+    /// background task's notification starts a turn Claude Code runs on its
+    /// own, which surfaces as overlay activity, and the user's prompt is folded
+    /// into that turn. From there the wire renders the turn as the reply to the
+    /// prompt, so the episode closes at the attachment and the reply stays off
+    /// the overlay rather than rendering twice.
+    #[test]
+    fn a_prompt_folded_into_an_autonomous_turn_takes_the_rest_off_the_overlay() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+
+        write_lines(
+            &path,
+            &[
+                &notification("bm1", "completed"),
+                &assistant_text("a1", "checking the result"),
+            ],
+        );
+        let (turns, ..) = unpack(tick_now(&mut ws, &ledger).expect("the autonomous turn surfaces"));
+        assert!(serde_json::to_string(&turns)
+            .unwrap()
+            .contains("checking the result"));
+
+        ledger.record_text("question B");
+        write_lines(
+            &path,
+            &[
+                &folded_prompt("q1", "question B"),
+                &assistant_text("a2", "answer to B"),
+            ],
+        );
+        let blob = tick_prompting(&mut ws, &ledger)
+            .map(|event| serde_json::to_string(&unpack(event).0).unwrap())
+            .unwrap_or_default();
+        assert!(
+            !blob.contains("question B") && !blob.contains("answer to B"),
+            "the folded prompt and its reply are the wire's: {blob}"
+        );
+        assert!(matches!(ws.mode, Mode::Foreground));
+    }
+
+    /// A folded message carries no `promptId`, so matching one leaves no
+    /// submission to group by. An initiator that lands before the reply — a
+    /// cron prompt here, which carries no id either — is out-of-turn as usual,
+    /// not swallowed as part of the folded message's submission.
+    #[test]
+    fn an_initiator_after_a_folded_prompt_is_not_taken_for_its_submission() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+
+        ledger.record_text("question B");
+        write_lines(
+            &path,
+            &[
+                &folded_prompt("q1", "question B"),
+                &cron_prompt("scheduled check"),
+                &assistant_text("a1", "cron reply"),
+            ],
+        );
+        let (turns, ..) = unpack(tick_now(&mut ws, &ledger).expect("the cron turn surfaces"));
+        let blob = serde_json::to_string(&turns).unwrap();
+        assert!(blob.contains("cron reply"), "{blob}");
+        assert!(!blob.contains("question B"), "{blob}");
+    }
+
+    /// A folded message the ledger does not hold continues whatever turn is
+    /// running. The steer arm records a steer only once the adapter answers
+    /// `injected`, so the CLI can write the attachment first: inside a
+    /// codeg-sent turn the rest of that turn stays the wire's instead of being
+    /// drawn in the overlay too. Inside an overlay episode it is part of the
+    /// episode, drawn as the user turn it is.
+    #[test]
+    fn a_folded_message_the_ledger_does_not_hold_continues_the_running_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+
+        ledger.record_text("build a test page");
+        write_lines(
+            &path,
+            &[
+                &user_prompt_array("u1", "build a test page"),
+                &assistant_text("a1", "working"),
+                &folded_prompt("q1", "make it cyberpunk"),
+                &assistant_text("a2", "restyling"),
+            ],
+        );
+        let event = tick_prompting(&mut ws, &ledger);
+        assert!(
+            event.is_none() || unpack(event.unwrap()).0.is_empty(),
+            "a steer the ledger got late must not pull the turn into the overlay"
+        );
+        assert!(matches!(ws.mode, Mode::Foreground));
+
+        write_lines(
+            &path,
+            &[
+                &notification("bm1", "completed"),
+                &assistant_text("a3", "checking"),
+                &folded_prompt("q2", "typed elsewhere"),
+                &assistant_text("a4", "reply elsewhere"),
+            ],
+        );
+        let (turns, ..) = unpack(tick_now(&mut ws, &ledger).expect("overlay activity"));
+        let blob = serde_json::to_string(&turns).unwrap();
+        assert!(
+            blob.contains("checking")
+                && blob.contains("typed elsewhere")
+                && blob.contains("reply elsewhere"),
+            "{blob}"
+        );
+    }
+
+    /// Only a message the user typed has text to match: an image sent on its
+    /// own has none (an image-only prompt records no fingerprint either), and
+    /// the other `queued_command` attachments are not the user's. None of them
+    /// initiates a turn.
+    #[test]
+    fn only_a_folded_message_the_user_typed_has_text_to_match() {
+        let image_only: serde_json::Value = serde_json::from_str(
+            r#"{"type":"attachment","uuid":"q1","attachment":{"type":"queued_command","commandMode":"prompt","origin":{"kind":"human"},"humanTurn":true,"prompt":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"QUJD"}}]}}"#,
+        )
+        .unwrap();
+        let blank: serde_json::Value = serde_json::from_str(
+            r#"{"type":"attachment","uuid":"q2","attachment":{"type":"queued_command","commandMode":"prompt","origin":{"kind":"human"},"prompt":"  "}}"#,
+        )
+        .unwrap();
+        let notification: serde_json::Value = serde_json::from_str(
+            r#"{"type":"attachment","uuid":"q3","attachment":{"type":"queued_command","commandMode":"task-notification","prompt":"<task-notification>\n<task-id>b1</task-id>\n</task-notification>"}}"#,
+        )
+        .unwrap();
+        let typed: serde_json::Value =
+            serde_json::from_str(&folded_prompt("q4", "make it cyberpunk")).unwrap();
+        for record in [&image_only, &blank, &notification] {
+            assert_eq!(folded_prompt_text(record), None, "{record}");
+        }
+        assert_eq!(
+            folded_prompt_text(&typed).as_deref(),
+            Some("make it cyberpunk")
+        );
+        for record in [&image_only, &blank, &notification, &typed] {
+            assert_eq!(turn_initiator_text(record), None, "{record}");
+        }
     }
 
     /// A slash command sent from codeg writes MORE than its own record: the
@@ -2801,6 +3077,50 @@ mod tests {
         // response is the rendered out-of-turn content.
         assert_eq!(turns.len(), 1);
         assert!(turns[0].id.starts_with("bg-"));
+    }
+
+    /// Real-shape notification of a task that settled while a turn ran (CLI
+    /// 2.1.293): folded into that turn as a `queued_command` attachment, not a
+    /// user record.
+    fn folded_notification(task_id: &str) -> String {
+        let inner = format!(
+            "<task-notification>\\n<task-id>{task_id}</task-id>\\n<tool-use-id>toolu_01</tool-use-id>\\n<status>completed</status>\\n<summary>Agent \\\"Run pnpm build\\\" finished</summary>\\n<result>Build OK</result>\\n</task-notification>"
+        );
+        format!(
+            r#"{{"type":"attachment","timestamp":"2026-07-07T03:47:00.000Z","uuid":"q-note-{task_id}","attachment":{{"type":"queued_command","prompt":"{inner}","commandMode":"task-notification","origin":{{"kind":"task-notification","producer":"session-task"}},"timestamp":"2026-07-07T03:47:00.000Z"}}}}"#
+        )
+    }
+
+    /// Most tasks settle while a turn is running, and their notification is
+    /// folded into it. That still settles the count — it used to keep the
+    /// connection exempt from the idle sweeps until the keep-alive expired —
+    /// but, like a `TaskOutput` collection, announces nothing: the agent takes
+    /// the result inline. Nor does it start a turn.
+    #[test]
+    fn a_notification_folded_into_a_turn_settles_the_count_quietly() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[&agent_ack("agent1"), &bash_ack("bash1")]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+        let (_, outstanding, ..) = unpack(tick_now(&mut ws, &ledger).expect("launch event"));
+        assert_eq!(outstanding, 2);
+
+        write_lines(
+            &path,
+            &[
+                &folded_notification("agent1"),
+                &folded_notification("bash1"),
+            ],
+        );
+        let (turns, outstanding, settled, _) =
+            unpack(tick_prompting(&mut ws, &ledger).expect("settle event"));
+        assert_eq!(outstanding, 0);
+        assert!(settled.is_empty());
+        assert!(turns.is_empty());
+        assert!(matches!(ws.mode, Mode::Foreground));
+        // A settled sub-agent can still be resumed and re-armed.
+        assert!(ws.settled_ids.contains("agent1"));
     }
 
     /// A `<task-notification>`

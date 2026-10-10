@@ -176,6 +176,19 @@
       "sectionDescription": "新しい会話ページで入力欄の上に表示される「コード開発 / 日常業務」のショートカットカードです。",
       "showQuickActions": "新しい会話ページに表示する"
     },
+    "chatAnimations": {
+      "sectionTitle": "チャットのアニメーション",
+      "sectionDescription": "会話エリア内の折りたたみ/展開、ツール呼び出し、作業状態などのアニメーションとスムーズスクロールを制御します。オフにすると即時に更新されます。スピナーは回転し続けます。",
+      "enable": "チャットのアニメーションを有効にする"
+    },
+    "chatWidth": {
+      "sectionTitle": "チャット幅",
+      "sectionDescription": "会話列と入力欄の最大幅です。チャット領域の左右の端をドラッグして調整することもできます。",
+      "label": "コンテンツ幅",
+      "default": "既定（{width}px）",
+      "hint": "値はウィンドウズーム 100% 時のもので、ズームに合わせて拡大縮小されます。広すぎる値はウィンドウに収まるよう自動的に制限されます。",
+      "reset": "既定に戻す"
+    },
     "workspaceBackground": {
       "sectionTitle": "ワークスペースの背景",
       "sectionDescription": "ワークスペース全体の背後に画像を表示します。サイドバーやパネルは半透明のすりガラスになり画像が透けて見えます。マスクで文字の可読性を保ちます。",
@@ -2298,6 +2311,9 @@
       "closeAll": "すべて閉じる",
       "hideTerminal": "ターミナルを隠す ({shortcut})",
       "openFolderFirst": "先にフォルダを開いてください",
+      "processExited": "プロセスが終了しました",
+      "processExitedWithCode": "プロセスが終了しました（コード {code}）",
+      "unavailable": "ターミナルセッションを利用できません。終了したか、バックエンドが再起動した可能性があります。",
       "keybar": {
         "label": "仮想ターミナルキー",
         "show": "仮想キーを表示",
@@ -3469,7 +3485,8 @@
         "completedAt": "完了時刻",
         "jumpToPreviousUserMessage": "前のユーザーメッセージへ",
         "showMore": "もっと見る",
-        "showLess": "折りたたむ"
+        "showLess": "折りたたむ",
+        "resizeWidth": "ドラッグでチャット幅を調整 · ダブルクリックで元に戻す"
       },
       "liveTurnStats": {
         "thinking": "考え中...",
@@ -3579,6 +3596,7 @@
         "nameLabel": "名前:",
         "agentPromptLabel": "プロンプト",
         "agentModelLabel": "モデル",
+        "agentEffortLabel": "思考の強度",
         "agentRunning": "実行中...",
         "agentLiveTranscript": "ライブアクティビティ",
         "agentProgressTools": "{count} 件のツール呼び出し",
@@ -4110,7 +4128,25 @@
     "loading": "読み込み中...",
     "emptyDirectory": "このディレクトリは空です",
     "errorLoadingDir": "ディレクトリの読み込みに失敗しました",
-    "permissionDenied": "アクセス権がありません"
+    "permissionDenied": "アクセス権がありません",
+    "newFolder": {
+      "button": "新しいフォルダ",
+      "placeholder": "フォルダ名",
+      "create": "フォルダを作成",
+      "location": "{path} 内",
+      "errors": {
+        "empty": "フォルダ名を入力してください。",
+        "reservedName": "「{name}」はフォルダ名に使用できません。",
+        "separator": "フォルダ名に / や \\ は使用できません。",
+        "controlCharacter": "フォルダ名に制御文字や改行は使用できません。",
+        "reservedCharacter": "フォルダ名に {character} は使用できません。",
+        "invalidParent": "{path} にはフォルダを作成できません。",
+        "parentNotFound": "{path} は存在しません。",
+        "alreadyExists": "「{name}」はすでに存在します。",
+        "permissionDenied": "ここにフォルダを作成する権限がありません。",
+        "failed": "フォルダを作成できませんでした: {reason}"
+      }
+    }
   },
   "ChatChannelSettings": {
     "loading": "読み込み中...",
@@ -4551,6 +4587,7 @@
       "experts": "エキスパート",
       "science": "科学研究",
       "office": "Officeツール",
+      "ui": "UI",
       "custom": "カスタム"
     },
     "actions": {
@@ -4559,6 +4596,18 @@
     },
     "toasts": {
       "openFolderFailed": "フォルダを開けませんでした"
+    }
+  },
+  "GenerativeUiSettings": {
+    "loading": "読み込み中…",
+    "switchLabel": "json-render 生成 UI を有効にする",
+    "switchDescription": "オンにすると、Codeg が起動するエージェントに json-render スキルが入り、返信内の spec コードブロックが操作できるカードとして表示されます。",
+    "usage": "入力欄に /json-render と依頼内容を入力します。例: /json-render 今回変更したファイルを表で一覧にして。Codex では $json-render を使います。エージェントに、カードや表で見せてと頼むこともできます。",
+    "effect": "カードの表示とコードブロックへの戻りはすぐに反映されます。スキルはオンにした後に始めた会話で使えます。オフにすると、すべてのエージェントからスキルがすぐに外れます。",
+    "conflict": "中央フォルダーに、json-render という名前の自作スキルがすでにあります。組み込み版を使うには、「カスタム」タブで名前を変更してください。",
+    "toasts": {
+      "saveFailed": "設定を保存できませんでした",
+      "unlinkFailed": "オフにしましたが、次の場所から json-render を削除できませんでした。各エージェントの次回起動時に再試行します。"
     }
   },
   "QuickMessagesSettings": {
@@ -4814,6 +4863,8 @@
     }
   },
   "RemoteWorkspace": {
+    "openLocalWorkspace": "ローカルワークスペースを開く",
+    "openLocalFailed": "ローカルワークスペースを開けませんでした",
     "openRemoteWorkspace": "Open remote workspace",
     "manage": "Manage remote workspace",
     "manageTitle": "Remote Workspace connections",

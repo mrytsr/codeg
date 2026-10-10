@@ -90,6 +90,14 @@ pub fn build_router(
             post(handlers::feedback::submit_session_feedback),
         )
         .route(
+            "/get_generative_ui_settings",
+            post(handlers::generative_ui::get_generative_ui_settings),
+        )
+        .route(
+            "/set_generative_ui_settings",
+            post(handlers::generative_ui::set_generative_ui_settings),
+        )
+        .route(
             "/get_question_settings",
             post(handlers::question::get_question_settings),
         )
@@ -476,6 +484,10 @@ pub fn build_router(
         .route(
             "/list_directory_entries",
             post(handlers::folders::list_directory_entries),
+        )
+        .route(
+            "/create_directory",
+            post(handlers::folders::create_directory),
         )
         .route(
             "/list_directory_with_files",

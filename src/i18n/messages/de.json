@@ -176,6 +176,19 @@
       "sectionDescription": "Die Shortcut-Karten „Code-Entwicklung / Büroarbeit“ über dem Eingabefeld auf der Seite für eine neue Konversation.",
       "showQuickActions": "Auf der Seite für neue Konversationen anzeigen"
     },
+    "chatAnimations": {
+      "sectionTitle": "Chat-Animationen",
+      "sectionDescription": "Animationen für Ein-/Ausklappen, Tool-Aufrufe und Arbeitsstatus im Unterhaltungsbereich sowie sanftes Scrollen. Wenn deaktiviert, werden Änderungen sofort angezeigt. Ladeanzeigen drehen sich weiterhin.",
+      "enable": "Chat-Animationen aktivieren"
+    },
+    "chatWidth": {
+      "sectionTitle": "Chat-Breite",
+      "sectionDescription": "Maximale Breite der Unterhaltungsspalte und des Eingabefelds. Sie lässt sich auch durch Ziehen der Chat-Ränder anpassen.",
+      "label": "Inhaltsbreite",
+      "default": "Standard ({width}px)",
+      "hint": "Gemessen bei 100% Fensterzoom und mit dem Zoom skaliert. Sehr große Werte werden an das Fenster angepasst.",
+      "reset": "Auf Standard zurücksetzen"
+    },
     "workspaceBackground": {
       "sectionTitle": "Arbeitsbereich-Hintergrund",
       "sectionDescription": "Zeigt ein Bild hinter dem gesamten Arbeitsbereich. Seitenleiste und Panels werden durchscheinend und mattiert, sodass das Bild durchscheint, und eine Maske sorgt für lesbaren Text.",
@@ -2298,6 +2311,9 @@
       "closeAll": "Alle schließen",
       "hideTerminal": "Terminal ausblenden ({shortcut})",
       "openFolderFirst": "Öffnen Sie zuerst einen Ordner",
+      "processExited": "Prozess beendet",
+      "processExitedWithCode": "Prozess beendet (Code {code})",
+      "unavailable": "Terminalsitzung nicht verfügbar. Sie wurde möglicherweise beendet oder das Backend neu gestartet.",
       "keybar": {
         "label": "Virtuelle Terminaltasten",
         "show": "Virtuelle Tasten anzeigen",
@@ -3469,7 +3485,8 @@
         "completedAt": "Abgeschlossen um",
         "jumpToPreviousUserMessage": "Zur Benutzernachricht springen",
         "showMore": "Mehr anzeigen",
-        "showLess": "Weniger anzeigen"
+        "showLess": "Weniger anzeigen",
+        "resizeWidth": "Ziehen, um die Chat-Breite zu ändern · Doppelklick zum Zurücksetzen"
       },
       "liveTurnStats": {
         "thinking": "Denkt nach...",
@@ -3579,6 +3596,7 @@
         "nameLabel": "Bezeichnung:",
         "agentPromptLabel": "Eingabe",
         "agentModelLabel": "Modell",
+        "agentEffortLabel": "Aufwand",
         "agentRunning": "Läuft...",
         "agentLiveTranscript": "Live-Aktivität",
         "agentProgressTools": "{count} Tool-Aufrufe",
@@ -4110,7 +4128,25 @@
     "loading": "Wird geladen...",
     "emptyDirectory": "Dieses Verzeichnis ist leer",
     "errorLoadingDir": "Verzeichnis konnte nicht geladen werden",
-    "permissionDenied": "Zugriff verweigert"
+    "permissionDenied": "Zugriff verweigert",
+    "newFolder": {
+      "button": "Neuer Ordner",
+      "placeholder": "Ordnername",
+      "create": "Ordner erstellen",
+      "location": "In {path}",
+      "errors": {
+        "empty": "Geben Sie einen Namen für den Ordner ein.",
+        "reservedName": "„{name}“ kann nicht als Ordnername verwendet werden.",
+        "separator": "Ein Ordnername darf weder / noch \\ enthalten.",
+        "controlCharacter": "Ein Ordnername darf keine Steuerzeichen oder Zeilenumbrüche enthalten.",
+        "reservedCharacter": "Ein Ordnername darf {character} nicht enthalten.",
+        "invalidParent": "In {path} kann kein Ordner erstellt werden.",
+        "parentNotFound": "{path} existiert nicht mehr.",
+        "alreadyExists": "„{name}“ existiert hier bereits.",
+        "permissionDenied": "Sie haben keine Berechtigung, hier einen Ordner zu erstellen.",
+        "failed": "Der Ordner konnte nicht erstellt werden: {reason}"
+      }
+    }
   },
   "ChatChannelSettings": {
     "loading": "Wird geladen...",
@@ -4551,6 +4587,7 @@
       "experts": "Experten",
       "science": "Wissenschaft",
       "office": "Office-Tools",
+      "ui": "Oberfläche",
       "custom": "Benutzerdefiniert"
     },
     "actions": {
@@ -4559,6 +4596,18 @@
     },
     "toasts": {
       "openFolderFailed": "Ordner konnte nicht geöffnet werden"
+    }
+  },
+  "GenerativeUiSettings": {
+    "loading": "Wird geladen…",
+    "switchLabel": "Generative Oberfläche (json-render)",
+    "switchDescription": "Wenn aktiviert, erhalten die von Codeg gestarteten Agenten den Skill json-render, und spec-Codeblöcke in ihren Antworten werden als interaktive Karten angezeigt.",
+    "usage": "Gib /json-render gefolgt von deiner Anfrage ein, zum Beispiel /json-render zeig die geänderten Dateien als Tabelle. In Codex verwendest du $json-render. Du kannst den Agenten auch einfach bitten, etwas als Karten oder Tabelle darzustellen.",
+    "effect": "Karten erscheinen sofort bzw. werden sofort wieder zu Codeblöcken. Der Skill steht in Unterhaltungen bereit, die nach dem Aktivieren beginnen; beim Deaktivieren wird er sofort bei allen Agenten entfernt.",
+    "conflict": "In deinem zentralen Skill-Ordner gibt es bereits einen eigenen Skill namens json-render. Benenne ihn im Tab Benutzerdefiniert um, um den integrierten zu verwenden.",
+    "toasts": {
+      "saveFailed": "Einstellung konnte nicht gespeichert werden",
+      "unlinkFailed": "Deaktiviert, aber json-render konnte an diesen Orten nicht entfernt werden. Beim nächsten Start des jeweiligen Agenten wird es erneut versucht."
     }
   },
   "QuickMessagesSettings": {
@@ -4814,6 +4863,8 @@
     }
   },
   "RemoteWorkspace": {
+    "openLocalWorkspace": "Lokalen Arbeitsbereich öffnen",
+    "openLocalFailed": "Lokaler Arbeitsbereich konnte nicht geöffnet werden",
     "openRemoteWorkspace": "Open remote workspace",
     "manage": "Manage remote workspace",
     "manageTitle": "Remote Workspace connections",

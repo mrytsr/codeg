@@ -614,6 +614,14 @@ export const FOLDER_LINKS_CHANGED_EVENT = "folder://links-changed"
  *  frontend-only cache. Mirrors the Rust `FEEDBACK_SETTINGS_CHANGED_EVENT`. */
 export const FEEDBACK_SETTINGS_CHANGED_EVENT = "feedback-settings://changed"
 
+/** Global side-channel announcing a generative-UI enable/disable (payload is
+ *  `GenerativeUiSettings`). The settings UI runs in a separate window, so open
+ *  conversations learn that spec fences render as cards — or no longer do —
+ *  from this backend broadcast. Mirrors the Rust
+ *  `GENERATIVE_UI_SETTINGS_CHANGED_EVENT`. */
+export const GENERATIVE_UI_SETTINGS_CHANGED_EVENT =
+  "generative-ui-settings://changed"
+
 /** Global side-channel announcing a create-from-chat switch move (payload is
  *  `ChatAuthoringSettings`). Load-bearing rather than cosmetic: these two flags
  *  share one record and have two editors — the settings form, which writes the
@@ -4592,15 +4600,24 @@ export interface TerminalEvent {
    *  snapshot already contains (`seq <= snapshot.seq`). Absent on the exit
    *  event, which carries no output. */
   seq?: number
+  generation?: string
 }
 
-/** Recent output of a live terminal plus the cursor it was read at. `alive`
- *  false means no such terminal is running — the caller should spawn one
- *  rather than attach. */
+/** Recent output of a live or completed terminal.
+ *  When `alive` is false, `exists` distinguishes retained final output
+ *  from a missing session. */
 export interface TerminalSnapshot {
+  /** False after a backend restart or explicit close. Absent on old servers. */
+  exists?: boolean
+  /** Process exit code when a completed PTY reported one. */
+  exit_code?: number | null
+  generation?: string | null
   alive: boolean
   data: string
   seq: number
+  /** The PTY's size, which `data` was laid out for. Absent on old servers. */
+  cols?: number | null
+  rows?: number | null
 }
 
 export interface TokenBreakdown {

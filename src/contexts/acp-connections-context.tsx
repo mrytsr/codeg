@@ -128,6 +128,7 @@ import {
   saveModePreference,
   saveConfigPreference,
 } from "@/lib/selector-prefs-storage"
+import { rememberAdvertisedCommands } from "@/lib/advertised-commands-store"
 import { rememberModelLabels } from "@/lib/model-label-store"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { getAcpAgentsSnapshot } from "@/hooks/use-acp-agents"
@@ -264,17 +265,20 @@ export type LiveContentBlock =
    * point in the stream where the user interrupted, so
    * `buildStreamingTurnsFromLiveMessage` can close the assistant turn here,
    * render the message as its own user turn, and start the reply to it as a
-   * new turn. Mirrors what the transcript projection already does with a
-   * mid-turn `user_message_chunk` (see `parsers/acp_native.rs`), so the live
-   * view and a reload agree. `id` is the feedback note id.
+   * new turn. Mirrors what a reload draws from the history — Claude Code's own
+   * transcript for the built-in agent (`parsers/claude.rs`), the transcript
+   * codeg writes for a custom one, where the steer is a marked prompt
+   * (`parsers/acp_native.rs`) — so the live view and a reload agree. `id` is
+   * the feedback note id.
    *
    * `createdAt` (ISO, the note's `created_at`) is taken before the backend
    * hands the text to the agent (`submit_feedback_native`), on the machine the
    * agent runs on — so it is directly comparable with, and earlier than, the
-   * timestamp the agent writes when it records this message in its own
-   * transcript. That ordering is what lets the runtime store tell the agent's
-   * copy of THIS message from the same words sent in an earlier round (see
-   * `suppressPersistedSteeredPrompts`), and it is the time the message shows.
+   * timestamp the history gives this message (the agent's own record, or
+   * codeg's once the agent took it in). That ordering is what lets the runtime
+   * store tell the history's copy of THIS message from the same words sent in
+   * an earlier round (see `suppressPersistedSteeredPrompts`), and it is the
+   * time the message shows.
    *
    * `blocks` is what the user actually sent, present only when the draft
    * carried more than plain text (image attachments). `text` alone cannot
@@ -2827,7 +2831,8 @@ function connectionsReducer(
       // there is no running turn to split, and appending would graft the
       // message onto the PREVIOUS turn's completed liveMessage. The note keeps
       // its strip in that case (it is absent from `steeredMessageIds`), and
-      // the agent recorded it either way, so a reload still shows it.
+      // the history holds it either way (see the `steering` block), so a
+      // reload still shows it.
       if (conn.status !== "prompting") return state
       // Idempotent by note id: the submit broadcast reaches every attached
       // client, and one client is also the sender.
@@ -3908,6 +3913,26 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         sink(nextConn.liveMessage, nextConn.status === "prompting")
       }
 
+      // A list the connection now advertises is also what its folder's
+      // transcripts badge until the next connection there advertises (see
+      // `advertised-commands-store`). Read off the reducer's result like the
+      // rest of this block, so the live `available_commands` event and a
+      // snapshot carrying the list are one path. Filed under the connection's
+      // OWN agent and cwd, never a tab's selection, which can lag an agent
+      // switch and would file one agent's commands under another.
+      const rememberCommands = (key: string) => {
+        const nextConn = next.get(key)
+        if (!nextConn?.availableCommands) return
+        if (nextConn.availableCommands === prev.get(key)?.availableCommands) {
+          return
+        }
+        rememberAdvertisedCommands(
+          nextConn.agentType,
+          nextConn.workingDir,
+          nextConn.availableCommands
+        )
+      }
+
       if (action.type === "REMOVE_ALL") {
         notifyAllKeyListeners()
       } else if (action.type === "STREAM_BATCH") {
@@ -3933,6 +3958,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         if (key) {
           mirrorLiveMessage(key)
           notifyKeyListeners(key)
+          rememberCommands(key)
         }
       }
     },

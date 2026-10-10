@@ -358,12 +358,12 @@ export const SuggestionPopup = forwardRef<
       }
       // A move with no resize has no event at all — not `resize`, not `scroll`,
       // and ResizeObserver is deaf to it by definition. The sidebar animating
-      // open slides the centred (`max-w-3xl`) welcome composer sideways at a
-      // constant width, so nothing above would fire and the panel would sit at
-      // the old left edge for the rest of its life; an animation also has no
-      // "done" event the ancestor mutation could stand in for. Watch the box per
-      // frame and re-measure only when it actually moved — one rect read per
-      // frame, and only while the panel is open.
+      // open slides the centred (`chat-content-w`) welcome composer sideways
+      // at a constant width, so nothing above would fire and the panel would
+      // sit at the old left edge for the rest of its life; an animation also
+      // has no "done" event the ancestor mutation could stand in for. Watch the
+      // box per frame and re-measure only when it actually moved — one rect
+      // read per frame, and only while the panel is open.
       if (typeof requestAnimationFrame !== "undefined") {
         let last = anchorEl.getBoundingClientRect()
         const watch = () => {

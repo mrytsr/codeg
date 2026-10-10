@@ -176,6 +176,19 @@
       "sectionDescription": "Os cartões de atalho «Desenvolvimento / Escritório» exibidos acima do campo de entrada na página de nova conversa.",
       "showQuickActions": "Mostrar na página de nova conversa"
     },
+    "chatAnimations": {
+      "sectionTitle": "Animações do chat",
+      "sectionDescription": "Animações de recolher/expandir, chamadas de ferramentas e estado de trabalho na área de conversa, além da rolagem suave. Desative para atualizações instantâneas. Os indicadores de carregamento continuam girando.",
+      "enable": "Ativar as animações do chat"
+    },
+    "chatWidth": {
+      "sectionTitle": "Largura do chat",
+      "sectionDescription": "Largura máxima da coluna de conversa e da caixa de entrada. Você também pode arrastar as bordas do chat para ajustá-la.",
+      "label": "Largura do conteúdo",
+      "default": "Padrão ({width}px)",
+      "hint": "Medida com o zoom da janela em 100% e ajustada com ele. Valores muito grandes são limitados para caber na janela.",
+      "reset": "Redefinir para o padrão"
+    },
     "workspaceBackground": {
       "sectionTitle": "Plano de fundo da área de trabalho",
       "sectionDescription": "Mostra uma imagem atrás de toda a área de trabalho. A barra lateral e os painéis ficam translúcidos e foscos para deixar a imagem transparecer, e uma máscara mantém o texto legível.",
@@ -2298,6 +2311,9 @@
       "closeAll": "Fechar tudo",
       "hideTerminal": "Ocultar terminal ({shortcut})",
       "openFolderFirst": "Abra primeiro uma pasta",
+      "processExited": "Processo encerrado",
+      "processExitedWithCode": "Processo encerrado (código {code})",
+      "unavailable": "Sessão do terminal indisponível. Ela pode ter terminado ou o servidor pode ter reiniciado.",
       "keybar": {
         "label": "Teclas virtuais do terminal",
         "show": "Mostrar teclas virtuais",
@@ -3469,7 +3485,8 @@
         "completedAt": "Concluído às",
         "jumpToPreviousUserMessage": "Ir para a mensagem do usuário",
         "showMore": "Mostrar mais",
-        "showLess": "Mostrar menos"
+        "showLess": "Mostrar menos",
+        "resizeWidth": "Arraste para ajustar a largura do chat · clique duas vezes para redefinir"
       },
       "liveTurnStats": {
         "thinking": "Pensando...",
@@ -3579,6 +3596,7 @@
         "nameLabel": "Nome:",
         "agentPromptLabel": "Instrução",
         "agentModelLabel": "Modelo",
+        "agentEffortLabel": "Esforço",
         "agentRunning": "Em execução...",
         "agentLiveTranscript": "Atividade ao vivo",
         "agentProgressTools": "{count} chamadas de ferramentas",
@@ -4110,7 +4128,25 @@
     "loading": "Carregando...",
     "emptyDirectory": "Este diretório está vazio",
     "errorLoadingDir": "Falha ao carregar o diretório",
-    "permissionDenied": "Permissão negada"
+    "permissionDenied": "Permissão negada",
+    "newFolder": {
+      "button": "Nova pasta",
+      "placeholder": "Nome da pasta",
+      "create": "Criar pasta",
+      "location": "Em {path}",
+      "errors": {
+        "empty": "Digite um nome para a pasta.",
+        "reservedName": "“{name}” não pode ser usado como nome de pasta.",
+        "separator": "O nome de uma pasta não pode conter / nem \\.",
+        "controlCharacter": "O nome de uma pasta não pode conter caracteres de controle nem quebras de linha.",
+        "reservedCharacter": "O nome de uma pasta não pode conter {character}.",
+        "invalidParent": "Não é possível criar uma pasta em {path}.",
+        "parentNotFound": "{path} não existe mais.",
+        "alreadyExists": "“{name}” já existe aqui.",
+        "permissionDenied": "Você não tem permissão para criar uma pasta aqui.",
+        "failed": "Não foi possível criar a pasta: {reason}"
+      }
+    }
   },
   "ChatChannelSettings": {
     "loading": "Carregando...",
@@ -4551,6 +4587,7 @@
       "experts": "Especialistas",
       "science": "Ciência",
       "office": "Ferramentas de escritório",
+      "ui": "Interface",
       "custom": "Personalizadas"
     },
     "actions": {
@@ -4559,6 +4596,18 @@
     },
     "toasts": {
       "openFolderFailed": "Falha ao abrir a pasta"
+    }
+  },
+  "GenerativeUiSettings": {
+    "loading": "Carregando…",
+    "switchLabel": "Interface generativa (json-render)",
+    "switchDescription": "Quando ativada, os agentes iniciados pelo Codeg recebem a habilidade json-render, e os blocos de código spec nas respostas aparecem como cartões interativos.",
+    "usage": "Digite /json-render seguido do seu pedido, por exemplo /json-render mostre em uma tabela os arquivos alterados. No Codex, use $json-render. Você também pode simplesmente pedir ao agente que mostre algo em cartões ou em uma tabela.",
+    "effect": "Os cartões aparecem, ou voltam a ser blocos de código, imediatamente. A habilidade fica disponível nas conversas iniciadas depois de ativar; ao desativar, ela é removida de todos os agentes de uma vez.",
+    "conflict": "Sua pasta central de habilidades já tem uma habilidade sua chamada json-render. Renomeie-a na aba Personalizadas para usar a versão integrada.",
+    "toasts": {
+      "saveFailed": "Não foi possível salvar a configuração",
+      "unlinkFailed": "Desativada, mas não foi possível remover o json-render destes locais. Uma nova tentativa será feita na próxima vez que cada agente for iniciado."
     }
   },
   "QuickMessagesSettings": {
@@ -4814,6 +4863,8 @@
     }
   },
   "RemoteWorkspace": {
+    "openLocalWorkspace": "Abrir espaço de trabalho local",
+    "openLocalFailed": "Não foi possível abrir o espaço de trabalho local",
     "openRemoteWorkspace": "Open remote workspace",
     "manage": "Manage remote workspace",
     "manageTitle": "Remote Workspace connections",

@@ -6,6 +6,7 @@ import {
   type MessageNavEntry,
 } from "./conversation-message-nav"
 import type { MessageScrollContextValue } from "./message-scroll-context"
+import { ChatAnimationsContext } from "@/components/appearance-provider"
 
 // Stable `t` (per next-intl mock guidance) — returns the key verbatim, which is
 // enough to address every label in this component (the collapsed chip, the card
@@ -136,6 +137,26 @@ describe("ConversationMessageNav", () => {
     expect(scrollToIndex).toHaveBeenCalledWith(3, {
       align: "start",
       smooth: true,
+    })
+  })
+
+  it("expanded: jumps without gliding when chat animations are off", () => {
+    const { scrollToIndex, scrollApiRef } = makeScrollApi()
+    render(
+      <ChatAnimationsContext.Provider value={false}>
+        <ConversationMessageNav
+          count={entries.length}
+          expanded
+          onToggle={vi.fn()}
+          entries={entries}
+          scrollApiRef={scrollApiRef}
+        />
+      </ChatAnimationsContext.Provider>
+    )
+    fireEvent.click(screen.getByText("edit something"))
+    expect(scrollToIndex).toHaveBeenCalledWith(3, {
+      align: "start",
+      smooth: false,
     })
   })
 
