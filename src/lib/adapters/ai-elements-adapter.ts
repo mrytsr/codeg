@@ -202,6 +202,11 @@ export type AdaptedContentPart =
   | AdaptedGeneratedImagePart
   | AdaptedPlanPart
   | AdaptedProposedPlanPart
+  /**
+   * The turn FAILED, in the agent's own words (`turn_error` block) — drawn as
+   * one muted line closing the round, never as a reply.
+   */
+  | { type: "turn-error"; message: string }
 
 export interface UserResourceDisplay {
   name: string
@@ -1573,6 +1578,9 @@ function adaptContentBlock(
         isStreaming,
       }
 
+    case "turn_error":
+      return { type: "turn-error", message: block.message }
+
     default:
       return null
   }
@@ -2093,6 +2101,7 @@ export function isTurnAnswerPart(part: AdaptedContentPart): boolean {
     case "text":
     case "proposed-plan":
     case "generated-image":
+    case "turn-error":
       return true
     case "reasoning":
     case "tool-call":

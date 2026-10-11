@@ -245,6 +245,14 @@ export type ContentBlock =
     }
   | { type: "thinking"; text: string }
   /**
+   * The turn FAILED, in the agent's own words. Mirror of Rust
+   * `ContentBlock::TurnError`: a parser puts it alone in a `system` turn
+   * closing the round, and the live stream does the same with the failure the
+   * adapter reported (`buildStreamingTurnsFromLiveMessage`). Drawn as one muted
+   * line, never as a reply.
+   */
+  | { type: "turn_error"; message: string }
+  /**
    * Frontend-only, LIVE-stream synthetic block. It is NEVER persisted and
    * NEVER emitted by the Rust JSONL parsers — the persisted plan path is a
    * `TodoWrite` tool_use block. It exists purely so a live plan can survive

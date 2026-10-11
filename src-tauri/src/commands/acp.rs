@@ -915,6 +915,24 @@ fn parse_node_major(v: &str) -> Option<u64> {
         .ok()
 }
 
+/// Whether the active Node.js `current` (`v20.11.1` / `20.11.1`) meets an
+/// agent's floor `required`, or `None` when either version is unreadable.
+///
+/// Compared on the whole `major.minor.patch`, as the launch preflight does
+/// (`acp::preflight::parse_node_version`), so the two never disagree. They did
+/// when this read majors only: a floor inside a major — codex-acp 2.2's 20.3.0,
+/// which is where `AbortSignal.any` (called on every prompt) first exists,
+/// Kimi's 22.19.0, OpenClaw's 24.16.0 — passed Node 20.2 / 22.18 / 24.15 here
+/// while preflight's `node_version` check failed them. Majors are only the
+/// fallback for a version that does not parse whole.
+fn node_meets_requirement(current: &str, required: &str) -> Option<bool> {
+    use crate::acp::preflight::parse_node_version;
+    if let (Some(cur), Some(req)) = (parse_node_version(current), parse_node_version(required)) {
+        return Some(cur >= req);
+    }
+    Some(parse_node_major(current)? >= parse_node_major(required)?)
+}
+
 /// Compare the user's login-shell PATH against the app PATH. Unix-only; on
 /// Windows it returns a note (npm bins there are `.cmd` in the prefix root and a
 /// robust login-shell probe is out of scope for v1).
@@ -1253,14 +1271,12 @@ fn compute_verdict(inp: &DiagInputs) -> DiagnosticsVerdict {
     }
 
     if let (Some(req), Some(ver)) = (agent.node_required.as_deref(), inp.node.version.as_deref()) {
-        if let (Some(rmaj), Some(nmaj)) = (parse_node_major(req), parse_node_major(ver)) {
-            if nmaj < rmaj {
-                return diag_verdict(
-                    DiagLevel::Fail,
-                    "node_too_old",
-                    "The active Node.js is older than this agent requires.",
-                );
-            }
+        if node_meets_requirement(ver, req) == Some(false) {
+            return diag_verdict(
+                DiagLevel::Fail,
+                "node_too_old",
+                "The active Node.js is older than this agent requires.",
+            );
         }
     }
 
@@ -1558,9 +1574,7 @@ fn build_report(
                 .node
                 .version
                 .as_deref()
-                .and_then(parse_node_major)
-                .zip(parse_node_major(req))
-                .map(|(n, r)| n >= r)
+                .and_then(|ver| node_meets_requirement(ver, req))
                 .unwrap_or(true);
             checks.push(diag_check(
                 "node_required",
@@ -1862,6 +1876,40 @@ mod diagnostics_tests {
         a.resolve_npx = Some("/x/codex-acp".to_string()); // resolves, but node too old
         inp.agent = Some(a);
         assert_eq!(compute_verdict(&inp).code, "node_too_old");
+    }
+
+    // The floor is a full version, and diagnostics must read it the way the
+    // launch preflight does: codex-acp 2.2 needs 20.3.0 (`AbortSignal.any`),
+    // so a Node 20.2 that resolves the command is still too old.
+    #[test]
+    fn verdict_node_too_old_within_the_required_major() {
+        let mut inp = base_inputs();
+        inp.node.version = Some("v20.2.0".to_string());
+        let mut a = agent_installed_unresolved();
+        a.node_required = Some("20.3.0".to_string());
+        a.resolve_npx = Some("/x/codex-acp".to_string());
+        inp.agent = Some(a);
+        assert_eq!(compute_verdict(&inp).code, "node_too_old");
+
+        inp.node.version = Some("v20.3.0".to_string());
+        assert_eq!(compute_verdict(&inp).code, "ok");
+    }
+
+    #[test]
+    fn node_requirement_compares_whole_versions() {
+        assert_eq!(node_meets_requirement("v20.2.0", "20.3.0"), Some(false));
+        assert_eq!(node_meets_requirement("v20.3.0", "20.3.0"), Some(true));
+        assert_eq!(node_meets_requirement("v20.19.1", "20.3.0"), Some(true));
+        assert_eq!(node_meets_requirement("v22.18.0", "22.19.0"), Some(false));
+        assert_eq!(node_meets_requirement("v24.0.0", "22.19.0"), Some(true));
+        assert_eq!(
+            node_meets_requirement("v22.0.0-nightly", "22.0.0"),
+            Some(true)
+        );
+        // A version without its patch still compares by major.
+        assert_eq!(node_meets_requirement("v20", "20.3.0"), Some(true));
+        assert_eq!(node_meets_requirement("v18", "20.3.0"), Some(false));
+        assert_eq!(node_meets_requirement("unknown", "20.3.0"), None);
     }
 
     #[test]
@@ -8277,7 +8325,7 @@ async fn hermes_setup_argvs() -> (Vec<String>, Vec<String>) {
         // Unreachable: Hermes is always an Npx distribution. Fall through to
         // the npx guidance with the same pinned spec so a future match-arm
         // change can't resurrect a stale recipe.
-        _ => "hermes-agent@0.21.5",
+        _ => "hermes-agent@0.21.6",
     };
     let build = |tail: &[&str]| -> Vec<String> {
         let mut argv = vec![
@@ -19771,7 +19819,7 @@ wire_api = "chat"
     // own version is also the recorded fallback when detection comes up empty.
     #[test]
     fn hermes_custom_version_spec_keeps_lifecycle_scripts_and_records_its_version() {
-        let spec = build_npm_install_spec("hermes-agent@0.21.5", Some("0.22.0")).unwrap();
+        let spec = build_npm_install_spec("hermes-agent@0.21.6", Some("0.22.0")).unwrap();
         assert_eq!(spec, "hermes-agent@0.22.0");
         assert!(npm_package_requires_scripts(&spec));
         assert_eq!(version_from_package_spec(&spec).as_deref(), Some("0.22.0"));
@@ -21416,7 +21464,7 @@ wire_api = "chat"
                     .expect("npx recipe must pin via --package");
                 assert_eq!(
                     argv.get(pkg_idx + 1).map(String::as_str),
-                    Some("hermes-agent@0.21.5")
+                    Some("hermes-agent@0.21.6")
                 );
                 assert_eq!(argv.get(pkg_idx + 2).map(String::as_str), Some("hermes"));
             } else {
@@ -22103,7 +22151,7 @@ model = "gpt"
             )
         };
 
-        let annotated = annotate_npm_bootstrap_failure("hermes-agent@0.21.5", download());
+        let annotated = annotate_npm_bootstrap_failure("hermes-agent@0.21.6", download());
         let text = annotated.to_string();
         assert!(text.contains("fetch failed"), "keeps the original error");
         assert!(text.contains("HTTP(S)_PROXY"), "adds the proxy hint");
@@ -22115,7 +22163,7 @@ model = "gpt"
 
         // A hermes failure that isn't a download stays untouched.
         let permissions = annotate_npm_bootstrap_failure(
-            "hermes-agent@0.21.5",
+            "hermes-agent@0.21.6",
             AcpError::Protocol("failed to install npm package globally: EACCES".to_string()),
         );
         assert!(!permissions.to_string().contains("HTTP(S)_PROXY"));

@@ -2078,7 +2078,8 @@
         "assistant": "助手",
         "system": "系统",
         "toolResult": "结果",
-        "toolError": "错误"
+        "toolError": "错误",
+        "turnFailed": "本轮失败"
       },
       "moreActions": "更多操作"
     },
@@ -2121,6 +2122,8 @@
       "untitledConversation": "未命名会话",
       "newConversation": "新建会话",
       "atToNewConversation": "At 添加到新会话",
+      "maximize": "最大化",
+      "restore": "还原",
       "attachToCurrentSession": "添加到会话",
       "rename": "重命名",
       "status": "状态",
@@ -3449,6 +3452,7 @@
         "errorActionCommandCopied": "已复制",
         "emptyConversation": "当前会话暂无消息。",
         "systemMessage": "系统消息",
+        "turnFailed": "本轮失败：{message}",
         "copyMessage": "复制",
         "forkFromHere": "从此处分叉",
         "forkBusy": "当前有回合正在进行，暂不可分叉",

@@ -2078,7 +2078,8 @@
         "assistant": "Assistant",
         "system": "System",
         "toolResult": "Result",
-        "toolError": "Error"
+        "toolError": "Error",
+        "turnFailed": "Turn failed"
       },
       "moreActions": "More actions"
     },
@@ -2121,6 +2122,8 @@
       "untitledConversation": "Untitled conversation",
       "newConversation": "New Conversation",
       "atToNewConversation": "At in new conversation",
+      "maximize": "Maximize",
+      "restore": "Restore",
       "attachToCurrentSession": "Add to session",
       "rename": "Rename",
       "status": "Status",
@@ -3449,6 +3452,7 @@
         "errorActionCommandCopied": "Copied",
         "emptyConversation": "No messages in this conversation.",
         "systemMessage": "System message",
+        "turnFailed": "Turn failed: {message}",
         "copyMessage": "Copy",
         "forkFromHere": "Fork from here",
         "forkBusy": "Can't fork while a turn is running",

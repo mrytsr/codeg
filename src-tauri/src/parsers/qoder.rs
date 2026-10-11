@@ -12,9 +12,9 @@ use crate::models::{
     UnifiedMessage,
 };
 use crate::parsers::claude::{
-    capture_title_record, extract_assistant_content, extract_usage, extract_user_content,
-    extract_user_text, group_into_turns, is_interrupt_marker, is_meta_message,
-    is_synthetic_assistant, slash_command_display, ClaudeRecordAccumulator,
+    api_error_text, capture_title_record, extract_assistant_content, extract_usage,
+    extract_user_content, extract_user_text, group_into_turns, is_interrupt_marker,
+    is_meta_message, is_synthetic_assistant, slash_command_display, ClaudeRecordAccumulator,
 };
 use crate::parsers::{
     backfill_turn_durations, compute_session_stats, folder_name_from_path,
@@ -335,9 +335,14 @@ fn extract_reported_context(value: &Value) -> Option<ReportedContext> {
 impl Transcript {
     /// Messages, not raw records: the count the sessions list shows should be
     /// what the conversation actually renders, so rewound branches, `isMeta`
-    /// injections and `<synthetic>` error placeholders are already gone.
+    /// injections and `<synthetic>` placeholders are already gone. A failed
+    /// turn's line is drawn but is nobody's message, so it does not count —
+    /// as Claude Code's own does not (`parsers::claude`).
     fn message_count(&self) -> u32 {
-        self.messages.len() as u32
+        self.messages
+            .iter()
+            .filter(|m| !matches!(m.content.as_slice(), [ContentBlock::TurnError { .. }]))
+            .count() as u32
     }
 
     fn folder_name(&self) -> Option<String> {
@@ -380,7 +385,8 @@ fn record_timestamp(value: &Value) -> Option<DateTime<Utc>> {
 /// `{"pricingUrl":"https://qoder.com/pricing?client=qoder"}` for an
 /// unentitled account). Rendering that as the model's reply puts an internal
 /// error string in the assistant's mouth — and it is the FIRST thing an
-/// unauthenticated user would see, since every turn fails that way.
+/// unauthenticated user would see, since every turn fails that way. So it is
+/// drawn as the turn's failure line instead (`claude::api_error_text`).
 fn is_non_conversational_assistant(value: &Value) -> bool {
     is_synthetic_assistant(value)
         || value
@@ -697,6 +703,16 @@ fn parse_transcript(bytes: &[u8]) -> Transcript {
         }
         let record_type = value.get("type").and_then(Value::as_str).unwrap_or("");
         if record_type == "assistant" && is_non_conversational_assistant(value) {
+            // A FAILED turn's record still closes its round, as the failure
+            // line rather than as the model's reply.
+            if let Some(failure) = api_error_text(value).and_then(|text| {
+                let uuid = value.get("uuid").and_then(Value::as_str).unwrap_or("");
+                let timestamp = record_timestamp(value).or(last_ts)?;
+                super::turn_error_message(uuid.to_string(), &text, timestamp)
+            }) {
+                pending_assistant_chat_id = None;
+                messages.push(failure);
+            }
             continue;
         }
         let Some(timestamp) = record_timestamp(value).or(last_ts) else {
@@ -1458,11 +1474,8 @@ mod tests {
         assert_eq!(summary.model, None);
 
         let detail = parser_in(tmp.path()).get_conversation("s2").unwrap();
-        assert_eq!(detail.turns.len(), 1);
-        assert!(matches!(
-            detail.turns[0].role,
-            crate::models::TurnRole::User
-        ));
+        assert_eq!(detail.turns.len(), 2);
+        assert!(matches!(detail.turns[0].role, crate::models::TurnRole::User));
         assert_eq!(text_of(&detail.turns[0]), "hi");
         assert!(
             !detail
@@ -1470,6 +1483,20 @@ mod tests {
                 .iter()
                 .any(|t| text_of(t).contains("pricingUrl")),
             "a failed API turn must not render as the assistant's answer"
+        );
+        // It closes the round as the failure line instead.
+        assert!(matches!(
+            detail.turns[1].role,
+            crate::models::TurnRole::System
+        ));
+        assert!(
+            matches!(
+                detail.turns[1].blocks.as_slice(),
+                [ContentBlock::TurnError { message }]
+                    if message == r#"{"pricingUrl":"https://qoder.com/pricing?client=qoder"}"#
+            ),
+            "{:?}",
+            detail.turns[1].blocks
         );
     }
 

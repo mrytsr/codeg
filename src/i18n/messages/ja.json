@@ -2078,7 +2078,8 @@
         "assistant": "アシスタント",
         "system": "システム",
         "toolResult": "結果",
-        "toolError": "エラー"
+        "toolError": "エラー",
+        "turnFailed": "ターン失敗"
       },
       "moreActions": "その他の操作"
     },
@@ -2121,6 +2122,8 @@
       "untitledConversation": "無題の会話",
       "newConversation": "新しい会話",
       "atToNewConversation": "新規会話に At を追加",
+      "maximize": "最大化",
+      "restore": "元に戻す",
       "attachToCurrentSession": "セッションに追加",
       "rename": "名前を変更",
       "status": "ステータス",
@@ -3449,6 +3452,7 @@
         "errorActionCommandCopied": "コピーしました",
         "emptyConversation": "この会話にはメッセージがありません。",
         "systemMessage": "システムメッセージ",
+        "turnFailed": "このターンは失敗しました：{message}",
         "copyMessage": "コピー",
         "forkFromHere": "ここから分岐",
         "forkBusy": "ターンの実行中は分岐できません",

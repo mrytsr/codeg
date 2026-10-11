@@ -124,9 +124,19 @@ describe("ConversationDetailPanel new conversation layout", () => {
       )
     ).toHaveLength(2)
     // The FILE column under the conversation overlay — this is the one that
-    // hosts git-diff tabs.
+    // hosts git-diff tabs — in conversation mode and under a maximized
+    // conversation alike, which take the same overlay over the whole area.
     expect(workspaceLayoutSource).toContain(
-      'mode === "conversation" && "conversation-tab-hidden invisible"'
+      'const conversationFillsArea = mode === "conversation" || conversationMaximized'
+    )
+    expect(workspaceLayoutSource).toContain(
+      'conversationFillsArea && "conversation-tab-hidden invisible"'
+    )
+    expect(workspaceLayoutSource).toMatch(
+      /conversationFillsArea &&\s*"absolute inset-0 z-30 bg-background ws-transparent-bg"/
+    )
+    expect(workspaceLayoutSource).toContain(
+      "inert={conversationFillsArea || undefined}"
     )
     // The conversation column under the files-maximized overlay.
     expect(workspaceLayoutSource).toContain(
@@ -134,14 +144,55 @@ describe("ConversationDetailPanel new conversation layout", () => {
     )
   })
 
+  // The expressions above prove nothing on their own if they sit in the wrong
+  // column: pin each to its subtree. Each column's section is wrapped in its
+  // own provider, so a provider's open..close span is that column.
+  it("puts the overlay on the conversation column and the hiding on the file column", () => {
+    const span = (open: string) => {
+      const start = workspaceLayoutSource.indexOf(open)
+      expect(start).toBeGreaterThan(-1)
+      return workspaceLayoutSource.slice(
+        start,
+        workspaceLayoutSource.indexOf("</OverlayHostHiddenProvider>", start)
+      )
+    }
+    const conversationColumn = span(
+      "<OverlayHostHiddenProvider hidden={filesMaximized}>"
+    )
+    expect(conversationColumn).toContain('data-workspace-pane="conversation"')
+    expect(conversationColumn).not.toContain('data-workspace-pane="files"')
+    expect(conversationColumn).toMatch(
+      /conversationFillsArea &&\s*"absolute inset-0 z-30 bg-background ws-transparent-bg"/
+    )
+    expect(conversationColumn).toContain("<TabBar maximizeControl />")
+
+    const fileColumn = span(
+      "<OverlayHostHiddenProvider hidden={conversationFillsArea}>"
+    )
+    expect(fileColumn).toContain('data-workspace-pane="files"')
+    expect(fileColumn).toContain("<FileWorkspaceTabBar />")
+    expect(fileColumn).not.toContain('data-workspace-pane="conversation"')
+    expect(fileColumn).toContain(
+      'conversationFillsArea && "conversation-tab-hidden invisible"'
+    )
+    expect(fileColumn).toContain("aria-hidden={conversationFillsArea}")
+    expect(fileColumn).toContain("inert={conversationFillsArea || undefined}")
+  })
+
   /**
    * The class above only reaches what stays in the host's DOM subtree. A drawer
    * portals to the body, so every hidden subtree that can host a CONVERSATION
    * (and therefore a "查看会话" viewer) has to publish the flag too, or the
-   * viewer paints over whatever covered it. Three such subtrees exist; the file
-   * column is deliberately not one — no conversation lives there.
+   * viewer paints over whatever covered it. Three such subtrees exist. The file
+   * column hosts no conversation, but it publishes the flag as well while the
+   * conversation overlay covers it: its built-in browser pages are native views
+   * no CSS reaches, and this is what tells their hosts to take them down.
    */
   it("publishes the hidden flag from every conversation-hosting subtree", () => {
+    // File column under the conversation overlay.
+    expect(workspaceLayoutSource).toContain(
+      "<OverlayHostHiddenProvider hidden={conversationFillsArea}>"
+    )
     // Full-page workbench route, both shells.
     expect(workspaceLayoutSource).toContain(
       "<OverlayHostHiddenProvider hidden={hidden}>"
@@ -276,7 +327,12 @@ describe("ConversationDetailPanel split-group render model", () => {
   })
 
   it("gives each split group its own strip and divider overlays only while split", () => {
-    expect(source).toContain("<TabBar groupId={groupId} />")
+    // The column's single maximize/restore button rides on the top-right
+    // group's strip — the one in the unsplit strip's place.
+    expect(source).toContain(
+      "<TabBar groupId={groupId} maximizeControl={touchesRight} />"
+    )
+    expect(workspaceLayoutSource).toContain("<TabBar maximizeControl />")
     const handlesIdx = source.indexOf("groupHandles.map((handle) => (")
     expect(handlesIdx).toBeGreaterThan(-1)
     expect(source.slice(handlesIdx - 80, handlesIdx)).toContain("{isSplit &&")

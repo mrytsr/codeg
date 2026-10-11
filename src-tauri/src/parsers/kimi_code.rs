@@ -192,6 +192,13 @@ pub struct KimiCodeParser {
     base_dir: PathBuf,
 }
 
+/// Whether a `session_index.jsonl` work dir is one `load_work_dir_index`
+/// keeps; backup restore merges the index by the same test
+/// (`ExternalSource::indexes`).
+pub(crate) fn is_usable_work_dir(dir: &str) -> bool {
+    !dir.trim().is_empty()
+}
+
 impl KimiCodeParser {
     pub fn new() -> Self {
         Self {
@@ -237,7 +244,7 @@ impl KimiCodeParser {
                 .get("workDir")
                 .and_then(Value::as_str)
                 .map(str::trim)
-                .filter(|s| !s.is_empty());
+                .filter(|dir| is_usable_work_dir(dir));
             if let (Some(id), Some(dir)) = (session_id, work_dir) {
                 map.insert(id.to_string(), dir.to_string());
             }

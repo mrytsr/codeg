@@ -66,9 +66,10 @@ describe("corner reserve slide", () => {
   })
 
   // Width follows the side panel over the corner (that change slides); which
-  // column holds the corner follows the workspace mode / files-maximize (that
-  // change snaps the layout), so it decides whether the reserve is mounted —
-  // a reserve still animating after its column had moved left a closing gap.
+  // column holds the corner follows the workspace mode / which column is
+  // maximized (that change snaps the layout), so it decides whether the
+  // reserve is mounted — a reserve still animating after its column had moved
+  // left a closing gap.
   it("mounts each reserve by corner ownership and sizes it by the side panel", () => {
     expect(layout).toContain(
       "const leftCornerWidth = sidebarOpen ? 0 : leftReserve"
@@ -76,7 +77,12 @@ describe("corner reserve slide", () => {
     expect(layout).toContain(
       "const rightCornerWidth = auxOpen ? 0 : rightReserve"
     )
-    expect(layout).toContain('const convHoldsRight = mode === "conversation"')
+    // The conversation column is the window's right edge with no file column
+    // and while it is maximized over one.
+    expect(layout).toContain(
+      'const conversationFillsArea = mode === "conversation" || conversationMaximized'
+    )
+    expect(layout).toContain("const convHoldsRight = conversationFillsArea")
     expect(layout).toContain('const fileHoldsRight = mode === "fusion"')
     expect(layout).toContain("const fileHoldsLeft = filesMaximized")
 
@@ -99,13 +105,14 @@ describe("corner reserve slide", () => {
     )
   })
 
-  it("mounts a split strip's right reserve only in conversation mode", () => {
+  it("mounts a split strip's right reserve only while the column holds the right edge", () => {
     const start = panel.indexOf("function SplitStripCornerReserve(")
     expect(start).toBeGreaterThan(-1)
     const body = panel.slice(start, panel.indexOf("\n}\n", start))
     expect(body).toContain(
-      'if (side === "right" && mode !== "conversation") return null'
+      'const holdsRight = mode === "conversation" || conversationMaximized'
     )
+    expect(body).toContain('if (side === "right" && !holdsRight) return null')
     expect(body).not.toContain("width <= 0")
     expect(body).toMatch(/:\s*auxOpen\s*\?\s*0\s*:\s*rightChromeReserve\(/)
     expect(body).toContain("return <ChromeReserve width={width} />")

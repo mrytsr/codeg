@@ -313,6 +313,30 @@ describe("loadOlderTurns", () => {
     expect(mockGetTurns).not.toHaveBeenCalled()
   })
 
+  it("waits out a detail load in flight instead of discarding it", async () => {
+    // A refetch (a reload, an overlay fold) sets `detailLoading`, and only its
+    // own result clears it. A page issued under it bumped the fetch generation,
+    // so that result was dropped as stale and the session stayed loading for
+    // good: auto-connect held shut, overlay folds stopped.
+    seed({ detail: windowedDetail(4) })
+    let land: (d: DbConversationDetail) => void = () => {}
+    mockGet.mockImplementation(
+      () =>
+        new Promise<DbConversationDetail>((r) => {
+          land = r
+        })
+    )
+    mockGetTurns.mockResolvedValue(page(2, 4))
+    actions().refetchDetail(CID)
+    actions().loadOlderTurns(CID)
+    expect(mockGetTurns).not.toHaveBeenCalled()
+
+    land(windowedDetail(4))
+    await flush()
+    expect(session()?.detailLoading).toBe(false)
+    expect(session()?.loadingOlderTurns).toBe(false)
+  })
+
   it("rejects a page whose seam proof mismatches and resets via refetch", async () => {
     seed({ detail: windowedDetail(4) })
     mockGetTurns.mockResolvedValue(

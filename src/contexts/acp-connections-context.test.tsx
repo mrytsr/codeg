@@ -1022,6 +1022,189 @@ describe("AcpConnectionsProvider AIR session-failure lifecycle", () => {
 // carries PARTIAL deltas keyed by task id, so the reducer owns a merge that has
 // to match `SessionState::apply_event` — including its refusal to invent a row
 // for a task it never saw announced.
+// A failed turn closes on one muted line in the transcript, live as on reload
+// (where the parsers read the agent's own record of the failure). Live, it is
+// a `turn_error` block the reducer appends to the turn's message: the
+// adapter's terminal record, a prompt the agent rejected, or codeg's verdict
+// that the turn failed — never a turn that merely ended early with output.
+describe("AcpConnectionsProvider failed-turn line", () => {
+  async function promptingOwner(): Promise<AttachHandlers> {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1", 42)
+    })
+    const handlers = latestAttachHandlers()
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "prompting",
+    })
+    return handlers
+  }
+
+  function failureRecord(revision: number, severity: string, title: string) {
+    return {
+      id: "t1:error",
+      revision,
+      category: "service",
+      severity,
+      title,
+      actions: ["retry"],
+    }
+  }
+
+  function lineOf(): unknown {
+    return h
+      .store!.getConnection(TAB)
+      ?.liveMessage?.content.filter((block) => block.type === "turn_error")
+  }
+
+  it("closes the turn on the adapter's terminal record, not on its retries", async () => {
+    const handlers = await promptingOwner()
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "session_failure",
+      record: failureRecord(1, "warning", "Reconnecting… 1/5"),
+    })
+    expect(lineOf()).toEqual([])
+
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: "spawned-conn",
+      type: "session_failure",
+      record: failureRecord(
+        2,
+        "error",
+        "API Error: 503 No available accounts."
+      ),
+    })
+    expect(lineOf()).toEqual([
+      {
+        type: "turn_error",
+        message: "API Error: 503 No available accounts.",
+        fromAgent: true,
+      },
+    ])
+    const content = h.store!.getConnection(TAB)!.liveMessage!.content
+    expect(content[content.length - 1]?.type).toBe("turn_error")
+  })
+
+  it("lands text still queued for the stream before the line", async () => {
+    const handlers = await promptingOwner()
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "content_delta",
+      text: "looking",
+    })
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: "spawned-conn",
+      type: "session_failure",
+      record: failureRecord(1, "error", "API Error: 503"),
+    })
+    expect(h.store!.getConnection(TAB)!.liveMessage!.content).toEqual([
+      { type: "text", text: "looking" },
+      { type: "turn_error", message: "API Error: 503", fromAgent: true },
+    ])
+  })
+
+  it("keeps the agent's own words over codeg's verdict, whichever comes first", async () => {
+    const handlers = await promptingOwner()
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "error",
+      message: "ended the turn without producing any response.",
+      agent_type: "claude_code",
+      code: "turn_failed_empty",
+    })
+    // codeg's verdict, in its localized wording (this harness's `t` echoes
+    // the key).
+    expect(lineOf()).toEqual([
+      {
+        type: "turn_error",
+        message: "backendErrors.turnFailedEmpty",
+        fromAgent: false,
+      },
+    ])
+
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: "spawned-conn",
+      type: "session_failure",
+      record: failureRecord(1, "error", "Upstream exploded"),
+    })
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: "spawned-conn",
+      type: "error",
+      message: "needs you to sign in again.",
+      agent_type: "claude_code",
+      code: "turn_failed_auth_required",
+    })
+    expect(lineOf()).toEqual([
+      { type: "turn_error", message: "Upstream exploded", fromAgent: true },
+    ])
+  })
+
+  it("reads a rejected prompt's own message, without the backend's prefix", async () => {
+    const handlers = await promptingOwner()
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "error",
+      message: "ACP protocol error: API key expired.",
+      agent_type: "cline",
+      code: null,
+    })
+    expect(lineOf()).toEqual([
+      { type: "turn_error", message: "API key expired.", fromAgent: true },
+    ])
+  })
+
+  it("adds nothing for a turn that ended early with output", async () => {
+    const handlers = await promptingOwner()
+    for (const [seq, code] of [
+      [2, "turn_failed_refusal"],
+      [3, "turn_failed_max_tokens"],
+      [4, "turn_failed_max_turn_requests"],
+    ] as const) {
+      emitAcpEvent(handlers, {
+        seq,
+        connection_id: "spawned-conn",
+        type: "error",
+        message: "ended early",
+        agent_type: "claude_code",
+        code,
+      })
+    }
+    expect(lineOf()).toEqual([])
+  })
+
+  it("adds nothing outside a turn", async () => {
+    const handlers = await promptingOwner()
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "turn_complete",
+      session_id: "sess-1",
+      stop_reason: "end_turn",
+    })
+    const before = h.store!.getConnection(TAB)!.liveMessage
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: "spawned-conn",
+      type: "session_failure",
+      record: failureRecord(1, "error", "Session-scoped failure"),
+    })
+    expect(h.store!.getConnection(TAB)!.liveMessage).toBe(before)
+  })
+})
+
 describe("AcpConnectionsProvider AIR async tasks", () => {
   async function connectOwner(): Promise<AttachHandlers> {
     h.acpFindConnectionForConversation.mockResolvedValue(null)

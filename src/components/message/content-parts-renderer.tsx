@@ -59,6 +59,7 @@ import {
 } from "./context-compaction-card"
 import { contextCompactionSummary } from "@/lib/context-compaction"
 import { FeedbackCheckResultCard } from "./feedback-check-result-card"
+import { TurnErrorPart } from "./turn-error-part"
 import { SearchResultsOutput } from "./search-results-output"
 import {
   isCodexGrepNoMatchEnvelope,
@@ -3281,6 +3282,12 @@ export const ContentPartsRenderer = memo(function ContentPartsRenderer({
           image={part.image}
           status={part.status}
         />
+      )
+    }
+
+    if (part.type === "turn-error") {
+      return (
+        <TurnErrorPart key={`turn-error-${keyId}`} message={part.message} />
       )
     }
 

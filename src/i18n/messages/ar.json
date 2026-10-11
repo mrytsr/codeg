@@ -2078,7 +2078,8 @@
         "assistant": "المساعد",
         "system": "النظام",
         "toolResult": "النتيجة",
-        "toolError": "خطأ"
+        "toolError": "خطأ",
+        "turnFailed": "فشلت الجولة"
       },
       "moreActions": "إجراءات إضافية"
     },
@@ -2121,6 +2122,8 @@
       "untitledConversation": "محادثة بدون عنوان",
       "newConversation": "محادثة جديدة",
       "atToNewConversation": "At في محادثة جديدة",
+      "maximize": "تكبير",
+      "restore": "استعادة",
       "attachToCurrentSession": "إضافة إلى الجلسة",
       "rename": "إعادة تسمية",
       "status": "الحالة",
@@ -3449,6 +3452,7 @@
         "errorActionCommandCopied": "تم النسخ",
         "emptyConversation": "لا توجد رسائل في هذه المحادثة.",
         "systemMessage": "رسالة النظام",
+        "turnFailed": "فشلت هذه الجولة: {message}",
         "copyMessage": "نسخ",
         "forkFromHere": "تفريع من هنا",
         "forkBusy": "لا يمكن التفريع أثناء تنفيذ دور",

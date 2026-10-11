@@ -2078,7 +2078,8 @@
         "assistant": "어시스턴트",
         "system": "시스템",
         "toolResult": "결과",
-        "toolError": "오류"
+        "toolError": "오류",
+        "turnFailed": "턴 실패"
       },
       "moreActions": "추가 작업"
     },
@@ -2121,6 +2122,8 @@
       "untitledConversation": "제목 없는 대화",
       "newConversation": "새 대화",
       "atToNewConversation": "새 대화에 At 추가",
+      "maximize": "최대화",
+      "restore": "복원",
       "attachToCurrentSession": "세션에 추가",
       "rename": "이름 변경",
       "status": "상태",
@@ -3449,6 +3452,7 @@
         "errorActionCommandCopied": "복사됨",
         "emptyConversation": "이 대화에는 메시지가 없습니다.",
         "systemMessage": "시스템 메시지",
+        "turnFailed": "이번 턴 실패: {message}",
         "copyMessage": "복사",
         "forkFromHere": "여기서 분기",
         "forkBusy": "턴이 실행 중일 때는 분기할 수 없습니다",

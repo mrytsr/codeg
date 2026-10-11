@@ -45,7 +45,11 @@
 //!   event ever follows. These bytes are already being tailed, so the records
 //!   are folded here and handed to [`publish_native_title`] — the same path a
 //!   live ACP title takes. Not activity: it rides alongside the activity event
-//!   rather than inside it (see `run_watch`).
+//!   rather than inside it (see `run_watch`). This watch is also the only
+//!   live writer of a Claude title: the adapter's own `session_info_update`
+//!   title is held for it, and it drops that title while it reads the
+//!   transcript (`session_title::release_held_wire_title`; the module docs
+//!   of `acp::session_title` say why).
 //!
 //! The watcher is connection-scoped on purpose: background work cannot outlive
 //! the agent CLI process, whose lifetime IS the connection's. Poll ticks are
@@ -61,7 +65,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 use crate::acp::session_state::{background_keepalive_max_age, SessionState};
-use crate::acp::session_title::publish_native_title;
+use crate::acp::session_title::{publish_native_title, release_held_wire_title};
 use crate::acp::types::{AcpEvent, BackgroundSettledInfo, ConnectionStatus};
 use crate::models::agent::AgentType;
 use crate::models::message::MessageTurn;
@@ -412,6 +416,47 @@ pub(crate) fn spawn_if_claude(
     Some(BackgroundWatchGuard(handle))
 }
 
+/// Wait out `delay` before the next poll, or less if `wake` is notified.
+async fn wait_for_poll(delay: Duration, wake: &tokio::sync::Notify) {
+    tokio::select! {
+        _ = tokio::time::sleep(delay) => {}
+        _ = wake.notified() => {}
+    }
+}
+
+/// Publish what a tick learned about the session's title.
+///
+/// A title the transcript just named the session goes out exactly like a live
+/// ACP one (same skip-cache, same lifecycle write). It is held rather than
+/// dropped while the conversation row is still unbound: unlike a live ACP
+/// title there is no resend to COUNT on. These bytes are read exactly once,
+/// and while the CLI does re-emit the record on its own metadata flushes,
+/// nothing guarantees another one lands after the row binds — a session that
+/// ends right there would keep its first-prompt name.
+///
+/// Then the title the adapter published, which the notification loop held for
+/// this watch: dropped while the transcript titles the session, published only
+/// while there is no transcript to read. Settled after the tick, so a
+/// transcript that exists has had its lookup this poll.
+///
+/// The read guard is released before `publish_native_title` asks for the
+/// write lock, and both halves short-circuit so a settled session takes no
+/// write lock at all.
+async fn publish_tick_titles(
+    ws: &mut WatchState,
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+) {
+    let title_is_publishable =
+        ws.pending_title.is_some() && state.read().await.conversation_id.is_some();
+    if title_is_publishable {
+        if let Some(title) = ws.pending_title.take() {
+            publish_native_title(state, emitter, title).await;
+        }
+    }
+    release_held_wire_title(state, emitter, ws.reads_transcript()).await;
+}
+
 async fn run_watch(
     conn_id: String,
     state: Arc<RwLock<SessionState>>,
@@ -433,8 +478,11 @@ async fn run_watch(
     // lingered, able to swallow a later same-text cron refire.
     let spawn_epoch = std::time::SystemTime::now();
     let mut first_arm_done = false;
+    // A wire title the notification loop holds for this watch wakes it, so the
+    // title is settled within a tick of arriving (`publish_tick_titles`).
+    let wire_title_wake = Arc::clone(&state.read().await.wire_title_wake);
     loop {
-        tokio::time::sleep(ws.poll_delay()).await;
+        wait_for_poll(ws.poll_delay(), &wire_title_wake).await;
 
         let (session_id, session_changed_at, is_prompting, turn_ended_abnormally) = {
             let s = state.read().await;
@@ -508,30 +556,11 @@ async fn run_watch(
             }
         };
 
-        // Publish a title the transcript just named the session, exactly like
-        // a live ACP one (same skip-cache, same lifecycle write). Deliberately
-        // OUTSIDE the activity emit below: a tick whose tail is nothing but an
-        // `ai-title` record produces no turns, no settlements and no
-        // accounting change, so `tick` correctly returns `None` — which is the
-        // common case for a title generated after the last turn ended.
-        //
-        // Held rather than dropped while the conversation row is still
-        // unbound: unlike a live ACP title there is no resend to COUNT on.
-        // These bytes are read exactly once, and while the CLI does re-emit the
-        // record on its own metadata flushes, nothing guarantees another one
-        // lands after the row binds — a session that ends right there would
-        // keep its first-prompt name.
-        //
-        // Bound to a `let` so the read guard is released before
-        // `publish_native_title` asks for the write lock, and short-circuited
-        // on `pending_title` so a settled session never takes the lock at all.
-        let title_is_publishable =
-            ws.pending_title.is_some() && state.read().await.conversation_id.is_some();
-        if title_is_publishable {
-            if let Some(title) = ws.pending_title.take() {
-                publish_native_title(&state, &emitter, title).await;
-            }
-        }
+        // Deliberately OUTSIDE the activity emit below: a tick whose tail is
+        // nothing but an `ai-title` record produces no turns, no settlements
+        // and no accounting change, so `tick` correctly returns `None` — which
+        // is the common case for a title generated after the last turn ended.
+        publish_tick_titles(&mut ws, &state, &emitter).await;
 
         if let Some(new_id) = ws.pending_transcript_id.take() {
             tracing::info!(
@@ -718,6 +747,9 @@ pub(crate) struct WatchState {
     /// The ACP session id is unchanged, so this is the id `conversation.external_id`
     /// must be re-pointed at. Consumed by `run_watch` after the tick.
     pending_transcript_id: Option<String>,
+    /// The last read of `file` failed (it exists but cannot be read). Cleared
+    /// by the next read that succeeds and by adopting a file.
+    read_failed: bool,
     /// Transcript uuid this watch rolled over ONTO, kept for as long as the
     /// watch lives. `find_session_file` resolves the ACP session id, which
     /// after a `/clear` names the abandoned file — so a re-locate (the stat
@@ -757,6 +789,7 @@ impl WatchState {
             ai_title: None,
             pending_title: None,
             pending_transcript_id: None,
+            read_failed: false,
             rolled_over_id: None,
         }
     }
@@ -766,6 +799,16 @@ impl WatchState {
     /// precedence `parsers::claude` applies when it resolves the whole file.
     fn resolved_title(&self) -> Option<String> {
         self.custom_title.clone().or_else(|| self.ai_title.clone())
+    }
+
+    /// Whether this watch reads the session's transcript, the file whose title
+    /// records the history parser resolves too: it has the file and its last
+    /// read of it did not fail. Until it does (it retries the lookup every
+    /// tick), or for good when the agent writes where codeg does not look, or
+    /// while the file cannot be read, the adapter's wire title is the only one
+    /// codeg has (`session_title::release_held_wire_title`).
+    pub(crate) fn reads_transcript(&self) -> bool {
+        self.file.is_some() && !self.read_failed
     }
 
     /// Fold one transcript record into the title slots, queueing the result
@@ -1021,6 +1064,7 @@ impl WatchState {
         } else if !unchanged {
             match self.read_new_lines(&path) {
                 Ok(lines) => {
+                    self.read_failed = false;
                     if !lines.is_empty() {
                         self.last_disk_activity = Some(Instant::now());
                     }
@@ -1041,7 +1085,15 @@ impl WatchState {
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("[bg-watch] read failed for {}: {e}", path.display());
+                    // Retried on every tick (`last_stat` forgotten), so a file
+                    // that becomes readable again without changing length or
+                    // mtime (a permission fix) is read on the next tick. Logged
+                    // once per run of failures.
+                    if !self.read_failed {
+                        tracing::warn!("[bg-watch] read failed for {}: {e}", path.display());
+                    }
+                    self.read_failed = true;
+                    self.last_stat = None;
                     return None;
                 }
             }
@@ -1117,6 +1169,7 @@ impl WatchState {
             // on the next unrelated append.
             self.seed_titles_from_history(&f, self.committed);
         }
+        self.read_failed = false;
         self.file = Some(f);
     }
 
@@ -3961,6 +4014,199 @@ mod tests {
             ws.pending_title.take().as_deref(),
             Some("Fix the signup flow")
         );
+    }
+
+    /// `reads_transcript` decides whether the adapter's held title may reach
+    /// the row (`session_title::release_held_wire_title`): only while this
+    /// watch has no transcript whose records title the session. A file it
+    /// adopted counts; one that went away stops counting until the lookup
+    /// finds a transcript again.
+    #[test]
+    fn reads_transcript_only_while_it_holds_a_transcript() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+
+        assert!(!WatchState::new().reads_transcript(), "nothing located yet");
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+        assert!(ws.reads_transcript());
+
+        write_lines(&path, &[&ai_title("Fix the login flow")]);
+        let _ = tick_now(&mut ws, &ledger);
+        assert!(ws.reads_transcript());
+
+        // The tick that finds the file gone drops it (and does not look it up
+        // again before the next tick, so this test reads no real config dir).
+        std::fs::remove_file(&path).unwrap();
+        let _ = tick_now(&mut ws, &ledger);
+        assert!(!ws.reads_transcript());
+    }
+
+    /// A transcript that exists but cannot be read titles nothing (the history
+    /// parser cannot read it either), so it does not count as read and the
+    /// held wire title stays the only title codeg has. The read is retried
+    /// every tick, so the file counts again on the tick after it becomes
+    /// readable, even when only its permissions changed (its length and mtime
+    /// did not, so the stat gate alone would never read it again).
+    #[cfg(unix)]
+    #[test]
+    fn a_transcript_that_cannot_be_read_is_not_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[&ai_title("Fix the login flow")]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::File::open(&path).is_ok() {
+            // Running as root: permissions do not stop the read.
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return;
+        }
+        let _ = tick_now(&mut ws, &ledger);
+        assert!(!ws.reads_transcript(), "a failed read is not a read");
+        let _ = tick_now(&mut ws, &ledger);
+        assert!(!ws.reads_transcript(), "nor is a failed retry");
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let _ = tick_now(&mut ws, &ledger);
+        assert!(ws.reads_transcript());
+        assert_eq!(
+            ws.pending_title.take().as_deref(),
+            Some("Fix the login flow"),
+            "the retry read the file"
+        );
+    }
+
+    fn bound_claude_state() -> Arc<RwLock<SessionState>> {
+        let mut st = SessionState::new(
+            "conn-test".to_string(),
+            AgentType::ClaudeCode,
+            None,
+            "win".to_string(),
+            None,
+        );
+        st.conversation_id = Some(7);
+        Arc::new(RwLock::new(st))
+    }
+
+    /// Titles published on this connection so far, oldest first.
+    async fn published_titles(state: &Arc<RwLock<SessionState>>) -> Vec<String> {
+        state
+            .read()
+            .await
+            .recent_events_after(0)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|e| match &e.payload {
+                AcpEvent::NativeSessionTitle { title } => Some(title.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A wake ends the wait for the next poll at once: here only the wake can
+    /// end an hour's wait inside the test's five seconds.
+    #[tokio::test]
+    async fn a_wake_ends_the_wait_for_the_next_poll() {
+        let wake = tokio::sync::Notify::new();
+        wake.notify_one();
+        let waited = tokio::time::timeout(
+            Duration::from_secs(5),
+            wait_for_poll(Duration::from_secs(3600), &wake),
+        )
+        .await;
+        assert!(waited.is_ok());
+    }
+
+    /// The real watch loop settles a held wire title on the wake that holding
+    /// it sends, not on its poll. The clock is paused and this test never
+    /// sleeps, so the clock cannot auto-advance and the loop's poll delay
+    /// never elapses: only the wake can make it poll. The session id is one
+    /// `find_session_file` refuses before it lists any directory, so the loop
+    /// finds no transcript (and this test reads no real config dir): the held
+    /// title is the only one, and the loop publishes it.
+    #[tokio::test(start_paused = true)]
+    async fn the_watch_loop_settles_a_held_title_on_its_wake() {
+        let state = bound_claude_state();
+        state.write().await.external_id = Some("../no-transcript".into());
+        let guard = spawn_if_claude(
+            "conn-test",
+            AgentType::ClaudeCode,
+            Arc::clone(&state),
+            EventEmitter::Noop,
+            "/tmp".into(),
+            PromptLedger::shared(),
+        )
+        .expect("a Claude connection gets a watcher");
+
+        crate::acp::session_title::accept_wire_title(
+            &state,
+            &EventEmitter::Noop,
+            AgentType::ClaudeCode,
+            "Fix the login flow".into(),
+        )
+        .await;
+
+        // Real time (`std::time::Instant`), which the paused clock does not
+        // stop: a bound for a loop that never polls, not a latency budget.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while published_titles(&state).await.is_empty() {
+            assert!(Instant::now() < deadline, "the loop never published it");
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            published_titles(&state).await,
+            vec!["Fix the login flow".to_string()]
+        );
+        assert!(state.read().await.held_wire_title.is_none());
+        drop(guard);
+    }
+
+    /// The adapter's title for an untitled session (its newest `last-prompt`
+    /// record), held by the notification loop, never reaches the row while
+    /// this watch reads the transcript; the transcript's own title does.
+    #[tokio::test]
+    async fn a_tick_that_reads_the_transcript_drops_the_held_wire_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+        let state = bound_claude_state();
+        state.write().await.held_wire_title = Some("now update the tests".into());
+
+        let _ = tick_now(&mut ws, &ledger);
+        publish_tick_titles(&mut ws, &state, &EventEmitter::Noop).await;
+        assert!(published_titles(&state).await.is_empty());
+        assert!(state.read().await.held_wire_title.is_none());
+
+        write_lines(&path, &[&ai_title("Fix the login flow")]);
+        let _ = tick_now(&mut ws, &ledger);
+        publish_tick_titles(&mut ws, &state, &EventEmitter::Noop).await;
+        assert_eq!(
+            published_titles(&state).await,
+            vec!["Fix the login flow".to_string()]
+        );
+    }
+
+    /// With no transcript to read, the held wire title is the only one codeg
+    /// gets, so the watch publishes it.
+    #[tokio::test]
+    async fn a_tick_without_a_transcript_publishes_the_held_wire_title() {
+        let mut ws = WatchState::new();
+        let state = bound_claude_state();
+        state.write().await.held_wire_title = Some("Fix the login flow".into());
+
+        publish_tick_titles(&mut ws, &state, &EventEmitter::Noop).await;
+
+        assert_eq!(
+            published_titles(&state).await,
+            vec!["Fix the login flow".to_string()]
+        );
+        assert!(state.read().await.held_wire_title.is_none());
     }
 
     /// `customTitle ?? aiTitle` — Claude Code's own precedence, and the one

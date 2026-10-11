@@ -1,6 +1,6 @@
 import { act, render, screen } from "@testing-library/react"
 import { useEffect } from "react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   WorkspaceProvider,
   useWorkspaceActions,
@@ -33,6 +33,7 @@ import {
   resetAppWorkspaceStore,
   useAppWorkspaceStore,
 } from "@/stores/app-workspace-store"
+import { resetTabStore, useTabStore, type TabItem } from "@/stores/tab-store"
 
 vi.mock("next-intl", () => {
   // Return a STABLE function instance across renders, mirroring next-intl's
@@ -512,6 +513,268 @@ describe("WorkspaceProvider files-maximized", () => {
     expect(screen.getByTestId("active-file-tab")).toHaveTextContent(
       activeBefore
     )
+  })
+})
+
+// An open conversation tab, seeded straight into the real tab store: the
+// provider only asks whether the conversation strip has any tab.
+const seededConversationTab: TabItem = {
+  id: "conv-1-claude_code-5",
+  kind: "conversation",
+  folderId: 1,
+  conversationId: 5,
+  agentType: "claude_code",
+  title: "Conversation",
+  isPinned: false,
+}
+
+function seedConversationTabs(tabs: TabItem[]) {
+  useTabStore.setState({ rawTabs: tabs, tabs })
+}
+
+function MaximizeProbe() {
+  const {
+    mode,
+    activePane,
+    fileTabs,
+    activeFileTabId,
+    filesMaximized,
+    conversationMaximized,
+    openSessionFileDiff,
+    closeFileTab,
+    closeAllFileTabs,
+    switchFileTab,
+    toggleFilesMaximized,
+    toggleConversationMaximized,
+    activateConversationPane,
+    openBrowserTab,
+  } = useWorkspaceContext()
+
+  return (
+    <div>
+      <output data-testid="mode">{mode}</output>
+      <output data-testid="active-pane">{activePane}</output>
+      <output data-testid="file-tab-count">{fileTabs.length}</output>
+      <output data-testid="active-file-tab">{activeFileTabId ?? "none"}</output>
+      <output data-testid="files-maximized">{String(filesMaximized)}</output>
+      <output data-testid="conversation-maximized">
+        {String(conversationMaximized)}
+      </output>
+      <button
+        type="button"
+        onClick={() =>
+          openSessionFileDiff("src/app.ts", "diff --git", "Turn 1")
+        }
+      >
+        Open diff
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          openSessionFileDiff("src/other.ts", "diff --git", "Turn 1")
+        }
+      >
+        Open diff 2
+      </button>
+      <button
+        type="button"
+        onClick={() => fileTabs[0] && switchFileTab(fileTabs[0].id)}
+      >
+        Switch to first file
+      </button>
+      <button
+        type="button"
+        onClick={() => activeFileTabId && closeFileTab(activeFileTabId)}
+      >
+        Close active
+      </button>
+      <button type="button" onClick={closeAllFileTabs}>
+        Close all
+      </button>
+      <button type="button" onClick={toggleFilesMaximized}>
+        Toggle files maximize
+      </button>
+      <button type="button" onClick={toggleConversationMaximized}>
+        Toggle conversation maximize
+      </button>
+      <button type="button" onClick={activateConversationPane}>
+        Activate conversation
+      </button>
+      {/* A local server coming up: its page is selected in the strip without
+          bringing the files pane forward. */}
+      <button
+        type="button"
+        onClick={() =>
+          openBrowserTab("http://localhost:4000/", { activate: "tab" })
+        }
+      >
+        Open page in place
+      </button>
+    </div>
+  )
+}
+
+describe("WorkspaceProvider conversation-maximized", () => {
+  beforeEach(() => {
+    resetTabStore()
+    resetBrowserTabStoreForTests()
+    resetBrowserPrefsForTests()
+    resetClosedTabStackForTests()
+    seedConversationTabs([seededConversationTab])
+  })
+  afterEach(() => {
+    resetTabStore()
+  })
+
+  const click = (name: string) =>
+    act(() => {
+      screen.getByRole("button", { name }).click()
+    })
+  const conversationMaximized = () =>
+    screen.getByTestId("conversation-maximized").textContent
+
+  function renderMaximizeProbe() {
+    return render(
+      <WorkspaceProvider>
+        <MaximizeProbe />
+      </WorkspaceProvider>
+    )
+  }
+
+  it("toggles only beside a file column", () => {
+    renderMaximizeProbe()
+
+    // No file column to cover: the toggle does not take.
+    click("Toggle conversation maximize")
+    expect(conversationMaximized()).toBe("false")
+
+    click("Open diff")
+    expect(screen.getByTestId("mode")).toHaveTextContent("fusion")
+    expect(conversationMaximized()).toBe("false")
+
+    click("Toggle conversation maximize")
+    expect(conversationMaximized()).toBe("true")
+    click("Toggle conversation maximize")
+    expect(conversationMaximized()).toBe("false")
+  })
+
+  it("never has both columns maximized", () => {
+    renderMaximizeProbe()
+    click("Open diff")
+
+    click("Toggle files maximize")
+    expect(screen.getByTestId("files-maximized")).toHaveTextContent("true")
+
+    click("Toggle conversation maximize")
+    expect(conversationMaximized()).toBe("true")
+    expect(screen.getByTestId("files-maximized")).toHaveTextContent("false")
+
+    click("Toggle files maximize")
+    expect(screen.getByTestId("files-maximized")).toHaveTextContent("true")
+    expect(conversationMaximized()).toBe("false")
+  })
+
+  it("leaves the active pane alone on toggle", () => {
+    renderMaximizeProbe()
+    click("Open diff")
+    expect(screen.getByTestId("active-pane")).toHaveTextContent("files")
+
+    click("Toggle conversation maximize")
+    expect(conversationMaximized()).toBe("true")
+    expect(screen.getByTestId("active-pane")).toHaveTextContent("files")
+
+    click("Toggle conversation maximize")
+    expect(screen.getByTestId("active-pane")).toHaveTextContent("files")
+  })
+
+  // Every session opened from the sidebar activates the conversation pane;
+  // that releases a maximized FILES pane, and must keep this one.
+  it("stays maximized when the conversation pane activates", () => {
+    renderMaximizeProbe()
+    click("Open diff")
+    click("Toggle conversation maximize")
+
+    click("Activate conversation")
+    expect(conversationMaximized()).toBe("true")
+    expect(screen.getByTestId("active-pane")).toHaveTextContent("conversation")
+  })
+
+  it("comes out from under a file opened or switched to", () => {
+    renderMaximizeProbe()
+    click("Open diff")
+    click("Toggle conversation maximize")
+
+    click("Open diff 2")
+    expect(conversationMaximized()).toBe("false")
+    expect(screen.getByTestId("active-pane")).toHaveTextContent("files")
+    expect(screen.getByTestId("file-tab-count")).toHaveTextContent("2")
+
+    click("Toggle conversation maximize")
+    expect(conversationMaximized()).toBe("true")
+    click("Switch to first file")
+    expect(conversationMaximized()).toBe("false")
+    expect(screen.getByTestId("mode")).toHaveTextContent("fusion")
+  })
+
+  // With the file strip hidden, a close of the active file tab comes from
+  // elsewhere — an agent closing its page, a page closing itself — and must
+  // not pull the hidden column back out or move the pane into it.
+  it("stays maximized when the active file tab closes behind it", () => {
+    renderMaximizeProbe()
+    click("Open diff")
+    const firstTabId = screen.getByTestId("active-file-tab").textContent
+    click("Open diff 2")
+    expect(screen.getByTestId("active-file-tab").textContent).not.toBe(
+      firstTabId
+    )
+    click("Activate conversation")
+    click("Toggle conversation maximize")
+    expect(conversationMaximized()).toBe("true")
+
+    click("Close active")
+    expect(screen.getByTestId("file-tab-count")).toHaveTextContent("1")
+    // The selection still moves to the neighbour, as it does unmaximized.
+    expect(screen.getByTestId("active-file-tab")).toHaveTextContent(
+      firstTabId ?? ""
+    )
+    expect(conversationMaximized()).toBe("true")
+    expect(screen.getByTestId("active-pane")).toHaveTextContent("conversation")
+  })
+
+  it("resets once the file column empties, and does not come back with the next file", () => {
+    renderMaximizeProbe()
+    click("Open diff")
+    click("Toggle conversation maximize")
+
+    click("Close all")
+    expect(screen.getByTestId("mode")).toHaveTextContent("conversation")
+    expect(conversationMaximized()).toBe("false")
+
+    // Reopened WITHOUT bringing the files pane forward, so nothing on the way
+    // back in releases a maximize — only the reset can have. (Any ordinary
+    // open activates the file pane, which would release it by itself.)
+    click("Open page in place")
+    expect(screen.getByTestId("mode")).toHaveTextContent("fusion")
+    expect(screen.getByTestId("active-pane")).toHaveTextContent("conversation")
+    expect(conversationMaximized()).toBe("false")
+  })
+
+  // The column would be an empty pane over the files with no strip — and so
+  // no restore button — left to bring them back.
+  it("resets once the conversation strip empties", () => {
+    renderMaximizeProbe()
+    click("Open diff")
+    click("Toggle conversation maximize")
+    expect(conversationMaximized()).toBe("true")
+
+    act(() => seedConversationTabs([]))
+    expect(conversationMaximized()).toBe("false")
+
+    // Released, not merely hidden: a tab coming back does not re-cover the
+    // files.
+    act(() => seedConversationTabs([seededConversationTab]))
+    expect(conversationMaximized()).toBe("false")
+    expect(screen.getByTestId("file-tab-count")).toHaveTextContent("1")
   })
 })
 

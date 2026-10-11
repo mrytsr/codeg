@@ -1607,6 +1607,47 @@ describe("MessageInput slash menu while the agent connects", () => {
   })
 })
 
+// Each row of the `/` list shows what the agent says goes after the command —
+// codex `/review-branch` takes a branch name — so the user need not know it.
+describe("MessageInput slash menu rows", () => {
+  afterEach(() => {
+    cleanup()
+    composerHandle.current = null
+  })
+
+  it("shows the argument a command takes beside its token", async () => {
+    renderInput({
+      availableCommands: [
+        {
+          name: "review-branch",
+          description: "Review a branch",
+          input_hint: "branch name",
+        },
+        { name: "compact", description: "Compact the thread" },
+      ],
+    })
+    await waitFor(
+      () => expect(composerHandle.current?.getEditor()).toBeTruthy(),
+      { timeout: 5000 }
+    )
+    const editor = composerHandle.current?.getEditor()
+    if (!editor) throw new Error("composer editor not mounted")
+    act(() => {
+      editor.commands.insertContent("/")
+    })
+
+    const menu = await screen.findByTestId("slash-menu")
+    const review = within(menu)
+      .getByText("/review-branch")
+      .closest("button") as HTMLElement
+    expect(review.textContent).toBe("/review-branchbranch nameReview a branch")
+    const compact = within(menu)
+      .getByText("/compact")
+      .closest("button") as HTMLElement
+    expect(compact.textContent).toBe("/compactCompact the thread")
+  })
+})
+
 describe("MessageInput slash badges", () => {
   afterEach(() => {
     cleanup()

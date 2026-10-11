@@ -338,7 +338,12 @@ fn pending_command_verdict(
     match value.get("type").and_then(|t| t.as_str()) {
         // A synthetic placeholder is what Claude Code writes FOR a client
         // command — evidence of the opposite, but the next prompt settles it.
-        Some("assistant") if !is_synthetic_assistant(value) => PendingCommandVerdict::Emit,
+        // A failed request's record is synthetic too, yet it is evidence FOR:
+        // only a request the command sent to the model can fail that way, and
+        // its failure line would otherwise answer a prompt that is not shown.
+        Some("assistant") if !is_synthetic_assistant(value) || api_error_text(value).is_some() => {
+            PendingCommandVerdict::Emit
+        }
         Some("user") => {
             // The marker is only ever written against a request that was
             // running, so the command did drive one — keep the prompt that
@@ -764,11 +769,58 @@ pub(crate) fn capture_title_record(
         "ai-title" => ("aiTitle", ai_title),
         _ => return,
     };
-    if let Some(t) = value.get(field).and_then(|v| v.as_str()) {
-        let t = t.trim();
-        if !t.is_empty() {
-            *slot = Some(truncate_str(t, 100));
+    if let Some(t) = value
+        .get(field)
+        .and_then(|v| v.as_str())
+        .and_then(displayed_session_title)
+    {
+        *slot = Some(t);
+    }
+}
+
+/// A stored or published session title as codeg shows it: trimmed, without
+/// JetBrains AIR's archive marker, and capped at 100 characters. `None` when
+/// nothing is left.
+///
+/// AIR archives a Claude session by appending its title again with an
+/// `[archived] ` prefix (a `custom-title` record, plus an `agent-name` record
+/// codeg does not read). From claude-agent-acp 0.89.0 the adapter publishes
+/// such a title to an AIR client, which codeg is, with the marker removed
+/// once (`clientTitle`, AIR's `visibleTitle`), while the transcript keeps it.
+/// codeg has two producers for a Claude title, this transcript reader and the
+/// wire's `session_info_update.title`
+/// (`acp::session_title::native_title_from_session_info`), and
+/// `publish_native_title` only collapses identical strings. So both go
+/// through this one function; otherwise a session archived in AIR would flip
+/// between the two names on the sidebar while it is open in codeg.
+///
+/// The marker follows AIR's rule: `[archived]`, a run of ASCII white space,
+/// then a title. A bare `[archived]`, or one with no white space after it, is
+/// a title like any other.
+///
+/// EVERY leading marker goes, where AIR's display removes one. The adapter
+/// removes one before it publishes, so the wire hands this function what the
+/// transcript reader gets minus a marker; only a rule that gives the same
+/// answer on its own output keeps the two producers equal (`[archived]
+/// [archived] X` reads `X` either way). AIR's `storedTitle` drops them all as
+/// well, so it never writes two.
+pub(crate) fn displayed_session_title(raw: &str) -> Option<String> {
+    // What AIR's pattern calls white space: Java's ASCII `\s`.
+    const AIR_WHITESPACE: [char; 6] = [' ', '\t', '\n', '\u{0B}', '\u{0C}', '\r'];
+    let mut visible = raw.trim();
+    while let Some(rest) = visible.strip_prefix("[archived]") {
+        let title = rest.trim_start_matches(AIR_WHITESPACE);
+        if title.len() == rest.len() || title.trim().is_empty() {
+            break;
         }
+        // `trim` again: the adapter collapses and trims what it publishes, so
+        // a Unicode space left after the marker never reaches the wire.
+        visible = title.trim();
+    }
+    if visible.is_empty() {
+        None
+    } else {
+        Some(truncate_str(visible, 100))
     }
 }
 
@@ -952,6 +1004,36 @@ pub(crate) fn is_synthetic_assistant(value: &serde_json::Value) -> bool {
         .and_then(|m| m.as_str())
         .map(|s| s == "<synthetic>")
         .unwrap_or(false)
+}
+
+/// What a request that FAILED for good died of. Claude Code then writes an
+/// assistant record flagged `isApiErrorMessage`, on the `<synthetic>` model,
+/// whose text is the error (`API Error: 503 …`, `Failed to authenticate. …`);
+/// its retries along the way are `system`/`api_error` records, not this.
+/// claude-agent-acp titles the live failure record with that same text
+/// (`assistantMessageText`), so the line a reload draws from it is the line the
+/// turn showed live.
+///
+/// `pub(crate)`: Qoder writes its failed turns the same way (see
+/// `parsers::qoder::is_non_conversational_assistant`).
+pub(crate) fn api_error_text(value: &serde_json::Value) -> Option<String> {
+    if !value
+        .get("isApiErrorMessage")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let text: String = match value.get("message")?.get("content")? {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(blocks) => blocks
+            .iter()
+            .filter(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
+            .filter_map(|block| block.get("text").and_then(|t| t.as_str()))
+            .collect(),
+        _ => return None,
+    };
+    (!text.trim().is_empty()).then_some(text)
 }
 
 /// Context window to display for a *file-parsed* Claude Code session, which
@@ -1961,8 +2043,17 @@ impl ClaudeRecordAccumulator {
 
         match msg_type {
             "assistant" if is_synthetic_assistant(&value) => {
-                // Skip synthetic assistant placeholders for local commands
+                // Skip synthetic assistant placeholders for local commands —
+                // all but the one recording a request that FAILED, which
+                // closes its round as the failure line.
                 *pending_assistant_message_id = None;
+                if let Some(failure) = api_error_text(&value).and_then(|text| {
+                    let uuid = value.get("uuid").and_then(|u| u.as_str()).unwrap_or("");
+                    let timestamp = parse_timestamp(&value).unwrap_or_else(Utc::now);
+                    super::turn_error_message(uuid.to_string(), &text, timestamp)
+                }) {
+                    messages.push(failure);
+                }
             }
             "user" => {
                 // Capture `<task-notification>` payloads for the background
@@ -2680,7 +2771,7 @@ impl ClaudeParser {
             title,
             started_at: first_timestamp.unwrap_or_else(Utc::now),
             ended_at: last_timestamp,
-            message_count: turns.len() as u32,
+            message_count: super::message_turn_count(&turns),
             model,
             git_branch,
             parent_id: None,
@@ -5105,6 +5196,37 @@ mod tests {
     }
 
     #[test]
+    fn parse_shows_an_air_archived_title_without_its_marker() {
+        // JetBrains AIR archives a session by appending the title again with
+        // an `[archived] ` prefix, as this record pair. claude-agent-acp 0.89.0
+        // publishes the title to codeg without the marker, so the history
+        // reads it the same way rather than flipping the row between the two.
+        let (detail, summary) = parse_both_titles(
+            "customtitle-archived",
+            &[
+                user_line("custom-title-archived", "first user prompt"),
+                serde_json::json!({
+                    "type": "custom-title",
+                    "customTitle": "auth-refactor",
+                    "sessionId": "custom-title-archived"
+                }),
+                serde_json::json!({
+                    "type": "custom-title",
+                    "customTitle": "[archived] auth-refactor",
+                    "sessionId": "custom-title-archived"
+                }),
+                serde_json::json!({
+                    "type": "agent-name",
+                    "agentName": "[archived] auth-refactor",
+                    "sessionId": "custom-title-archived"
+                }),
+            ],
+        );
+        assert_eq!(detail.as_deref(), Some("auth-refactor"));
+        assert_eq!(summary.as_deref(), Some("auth-refactor"));
+    }
+
+    #[test]
     fn parse_takes_the_last_non_empty_custom_title() {
         // Renaming twice appends twice — the newest name wins, and a blank
         // value (which Claude Code itself refuses to write) never clears one.
@@ -7024,6 +7146,136 @@ mod tests {
             })
             .collect();
         assert_eq!(texts, vec!["/goal ship it", "never mind"]);
+    }
+
+    /// The record Claude Code writes when a request FAILED for good closes its
+    /// round as the failure line: a `System` turn holding one `TurnError` with
+    /// the record's text — what claude-agent-acp titles the live failure with.
+    /// Never the model's reply. The retry notices before it (`system` /
+    /// `api_error`) stay out, and so does the `<synthetic>` placeholder a local
+    /// command writes, which records no failure.
+    #[test]
+    fn a_failed_request_closes_its_round_as_the_failure_line() {
+        let failure = "Failed to authenticate. API Error: 403 Your balance is too low.";
+        let mut acc = ClaudeRecordAccumulator::new(PathBuf::from("/nonexistent.jsonl"));
+        for record in [
+            json!({
+                "type": "user",
+                "timestamp": "2026-09-12T12:27:30.000Z",
+                "uuid": "u1",
+                "message": { "role": "user", "content": [{"type": "text", "text": "hi"}] }
+            }),
+            json!({
+                "type": "system",
+                "subtype": "api_error",
+                "level": "error",
+                "timestamp": "2026-09-12T12:27:31.000Z",
+                "uuid": "s1",
+                "error": { "message": "Request timed out." },
+                "retryInMs": 500,
+                "retryAttempt": 1,
+                "maxRetries": 10
+            }),
+            // The shape of a real one (2026-09-12), its text shortened.
+            json!({
+                "type": "assistant",
+                "timestamp": "2026-09-12T12:27:37.330Z",
+                "uuid": "e1",
+                "message": {
+                    "id": "65f6ee5b-9dd7-4d1a-924c-13291cb9ea69",
+                    "model": "<synthetic>",
+                    "role": "assistant",
+                    "stop_reason": "stop_sequence",
+                    "type": "message",
+                    "usage": {"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+                    "content": [{"type": "text", "text": failure}]
+                },
+                "error": "authentication_failed",
+                "isApiErrorMessage": true,
+                "apiErrorStatus": 403
+            }),
+            json!({
+                "type": "assistant",
+                "timestamp": "2026-09-12T12:28:00.000Z",
+                "uuid": "n1",
+                "message": {
+                    "id": "n1",
+                    "model": "<synthetic>",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "No response requested."}]
+                },
+                "isApiErrorMessage": false
+            }),
+        ] {
+            acc.feed_line(&record.to_string());
+        }
+        acc.finalize_background_lifecycle();
+        let turns = group_into_turns(acc.messages);
+        assert_eq!(
+            turns.iter().map(role_name).collect::<Vec<_>>(),
+            vec!["user", "system"]
+        );
+        assert!(
+            matches!(
+                turns[1].blocks.as_slice(),
+                [ContentBlock::TurnError { message }] if message == failure
+            ),
+            "{:?}",
+            turns[1].blocks
+        );
+    }
+
+    /// A command whose request FAILED drove a model request all the same, so
+    /// it keeps its prompt — or the failure line would answer nothing shown.
+    #[test]
+    fn failed_command_turn_keeps_its_prompt() {
+        let mut acc = ClaudeRecordAccumulator::new(PathBuf::from("/nonexistent.jsonl"));
+        for record in [
+            json!({
+                "type": "user",
+                "timestamp": "2026-08-15T23:43:38.000Z",
+                "uuid": "u-review",
+                "promptId": "p1",
+                "message": { "role": "user", "content": "<command-name>/review</command-name>\n<command-args>main</command-args>" }
+            }),
+            json!({
+                "type": "assistant",
+                "timestamp": "2026-08-15T23:43:45.000Z",
+                "uuid": "e1",
+                "message": {
+                    "model": "<synthetic>",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "API Error: 503 No available accounts."}]
+                },
+                "isApiErrorMessage": true
+            }),
+            json!({
+                "type": "user",
+                "timestamp": "2026-08-15T23:44:00.000Z",
+                "uuid": "u1",
+                "message": { "role": "user", "content": [{"type": "text", "text": "never mind"}] }
+            }),
+        ] {
+            acc.feed_line(&record.to_string());
+        }
+        acc.finalize_background_lifecycle();
+        let turns = group_into_turns(acc.messages);
+        let shown: Vec<_> = turns
+            .iter()
+            .map(|t| match t.blocks.as_slice() {
+                [ContentBlock::Text { text }] => text.clone(),
+                [ContentBlock::TurnError { message }] => format!("failed: {message}"),
+                other => panic!("unexpected blocks {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            vec![
+                "/review main",
+                "failed: API Error: 503 No available accounts.",
+                "never mind"
+            ]
+        );
     }
 
     /// The fallback evidence, for a shape the stronger rules can't see: no

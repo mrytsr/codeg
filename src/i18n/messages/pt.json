@@ -2078,7 +2078,8 @@
         "assistant": "Assistente",
         "system": "Sistema",
         "toolResult": "Resultado",
-        "toolError": "Erro"
+        "toolError": "Erro",
+        "turnFailed": "Turno com falha"
       },
       "moreActions": "Mais ações"
     },
@@ -2121,6 +2122,8 @@
       "untitledConversation": "Conversa sem título",
       "newConversation": "Nova conversa",
       "atToNewConversation": "At em nova conversa",
+      "maximize": "Maximizar",
+      "restore": "Restaurar",
       "attachToCurrentSession": "Adicionar à sessão",
       "rename": "Renomear",
       "status": "Status",
@@ -3449,6 +3452,7 @@
         "errorActionCommandCopied": "Copiado",
         "emptyConversation": "Nenhuma mensagem nesta conversa.",
         "systemMessage": "Mensagem do sistema",
+        "turnFailed": "O turno falhou: {message}",
         "copyMessage": "Copiar",
         "forkFromHere": "Bifurcar a partir daqui",
         "forkBusy": "Não é possível bifurcar enquanto há um turno em andamento",

@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useBrowserBackWindow } from "@/contexts/workspace-window-history"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+import { useTabStore } from "@/stores/tab-store"
 import { browserTabBackendId, buildFileTabId } from "@/lib/file-tab-id"
 import {
   gitDiff,
@@ -309,7 +310,10 @@ interface WorkspaceActionsValue {
   setFileTabComposing: (tabId: string, composing: boolean) => void
   reloadActiveFile: () => Promise<void>
   toggleFileTabPreview: (tabId: string) => void
+  // Maximize one column over the other, or put it back. Fusion only, and at
+  // most one at a time: maximizing one releases the other.
   toggleFilesMaximized: () => void
+  toggleConversationMaximized: () => void
   // Open (or re-activate) a built-in browser tab for an http(s) URL. One tab
   // per URL (fragment ignored): a second open activates the existing tab.
   // Returns the tab id, or null when the URL does not parse. The native
@@ -392,7 +396,10 @@ export interface RestorableBrowserTab {
 interface WorkspaceViewValue {
   mode: WorkspaceMode
   activePane: WorkspacePane
+  /** The file column covers the conversation column. */
   filesMaximized: boolean
+  /** The conversation column covers the file column. */
+  conversationMaximized: boolean
 }
 
 interface WorkspaceFileTabsValue {
@@ -678,7 +685,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const [previewFileTabIds, setPreviewFileTabIds] = useState<Set<string>>(
     new Set()
   )
-  const [filesMaximized, setFilesMaximized] = useState(false)
+  // The column maximized over the other one, if either: the files overlay the
+  // conversation, or the conversation overlays the files. One slot, so the
+  // two can never both be on.
+  const [maximizedPane, setMaximizedPane] = useState<WorkspacePane | null>(null)
   // FIFO queue of unresolved disk-vs-buffer divergences (head is shown by
   // the always-mounted conflict dialog). Isolated state: never flows into
   // the fileTabs slice, so idle cost is zero.
@@ -838,20 +848,44 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   )
 
   const mode: WorkspaceMode = fileTabs.length > 0 ? "fusion" : "conversation"
-  const effectiveFilesMaximized = mode === "fusion" && filesMaximized
+  // Low-frequency: flips only when the conversation strip empties or refills.
+  const hasConversationTabs = useTabStore((s) => s.tabs.length > 0)
+  const effectiveFilesMaximized = mode === "fusion" && maximizedPane === "files"
+  const effectiveConversationMaximized =
+    mode === "fusion" && maximizedPane === "conversation" && hasConversationTabs
 
   // Reset maximize state once the file workspace is empty so reopening a file
   // later starts from the normal split instead of a stale maximized layout.
+  // A maximized conversation also lets go once its strip empties: the column
+  // would be an empty pane over the files, and its restore button goes away
+  // with the strip.
   useEffect(() => {
-    if (fileTabs.length === 0 && filesMaximized) {
+    if (maximizedPane === null) return
+    if (
+      fileTabs.length === 0 ||
+      (maximizedPane === "conversation" && !hasConversationTabs)
+    ) {
       /* eslint-disable react-hooks/set-state-in-effect */
-      setFilesMaximized(false)
+      setMaximizedPane(null)
       /* eslint-enable react-hooks/set-state-in-effect */
     }
-  }, [fileTabs.length, filesMaximized])
+  }, [fileTabs.length, hasConversationTabs, maximizedPane])
+
+  // Latest-state mirror for `closeFileTab`, a stable callback (see the refs
+  // above).
+  const conversationMaximizedRef = useRef(false)
+  useEffect(() => {
+    conversationMaximizedRef.current = effectiveConversationMaximized
+  }, [effectiveConversationMaximized])
 
   const toggleFilesMaximized = useCallback(() => {
-    setFilesMaximized((prev) => !prev)
+    setMaximizedPane((prev) => (prev === "files" ? null : "files"))
+  }, [])
+
+  const toggleConversationMaximized = useCallback(() => {
+    setMaximizedPane((prev) =>
+      prev === "conversation" ? null : "conversation"
+    )
   }, [])
 
   const setActivePane = useCallback((nextPane: WorkspacePane) => {
@@ -864,12 +898,17 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     )
     // Releasing the files overlay so a session opened from the sidebar (or any
     // other path that activates the conversation pane) becomes visible instead
-    // of staying hidden behind a maximized files pane.
-    setFilesMaximized(false)
+    // of staying hidden behind a maximized files pane. A maximized
+    // conversation stays as it is: that is the pane being activated.
+    setMaximizedPane((prev) => (prev === "files" ? null : prev))
   }, [])
 
   const activateFilePane = useCallback(() => {
     setActivePaneState((prev) => (prev === "files" ? prev : "files"))
+    // The mirror image: a file opened or switched to (a link in the
+    // transcript, the file tree, a page an agent opens in front of the user)
+    // comes out from under a maximized conversation instead of opening unseen.
+    setMaximizedPane((prev) => (prev === "conversation" ? null : prev))
   }, [])
 
   // NOTE: there is deliberately NO folder-removal cleanup for file tabs.
@@ -3152,7 +3191,12 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           // column, so focus the files pane — mirroring the conversation
           // closeTab. The section pointer-capture used to do this; the tab strip
           // now sits outside the pane-activation wrapper, so do it explicitly.
-          activateFilePane()
+          // Not while a maximized conversation covers the column: the strip
+          // is hidden then, so the close came from elsewhere (an agent closing
+          // its page, a page closing itself), the user is not in the file
+          // column, and activating it would pull the column out from under
+          // the conversation they are reading.
+          if (!conversationMaximizedRef.current) activateFilePane()
           return next[nextIdx].id
         })
 
@@ -3400,6 +3444,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       reloadActiveFile,
       toggleFileTabPreview,
       toggleFilesMaximized,
+      toggleConversationMaximized,
       openBrowserTab,
       adoptBrowserTab,
       restoreBrowserTabs,
@@ -3433,6 +3478,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       reloadActiveFile,
       toggleFileTabPreview,
       toggleFilesMaximized,
+      toggleConversationMaximized,
       openBrowserTab,
       adoptBrowserTab,
       restoreBrowserTabs,
@@ -3446,8 +3492,9 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       mode,
       activePane,
       filesMaximized: effectiveFilesMaximized,
+      conversationMaximized: effectiveConversationMaximized,
     }),
-    [mode, activePane, effectiveFilesMaximized]
+    [mode, activePane, effectiveFilesMaximized, effectiveConversationMaximized]
   )
 
   const fileTabsValue = useMemo<WorkspaceFileTabsValue>(
@@ -3523,8 +3570,8 @@ export function useOptionalWorkspaceView(): WorkspaceViewValue | null {
   return useContext(WorkspaceViewContext)
 }
 
-// Low-frequency layout state (mode / activePane / filesMaximized). Changes
-// only on fusion transitions, pane switches, and maximize toggles.
+// Low-frequency layout state (mode / activePane / which column is maximized).
+// Changes only on fusion transitions, pane switches, and maximize toggles.
 export function useWorkspaceView(): WorkspaceViewValue {
   const ctx = useContext(WorkspaceViewContext)
   if (!ctx) {

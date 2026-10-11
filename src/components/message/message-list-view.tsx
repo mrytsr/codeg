@@ -12,6 +12,7 @@ import { CompletedTurnContent } from "./completed-turn-content"
 import { ContextCompactionCard } from "./context-compaction-card"
 import { CollapsibleUserMessage } from "./collapsible-user-message"
 import { CollapsibleSystemMessage } from "./collapsible-system-message"
+import { ContentPartsRenderer } from "./content-parts-renderer"
 import {
   contextCompactionPayload,
   contextCompactionSummary,
@@ -553,6 +554,16 @@ function isEmptyTurnItem(item: ThreadRenderItem): boolean {
   return true
 }
 
+/** A `system` group that is nothing but a failed turn's line
+ *  (`TurnErrorPart`): the parsers write one per failed round, and so does the
+ *  live stream. */
+export function isTurnErrorGroup(group: ResolvedMessageGroup): boolean {
+  return (
+    group.parts.length > 0 &&
+    group.parts.every((part) => part.type === "turn-error")
+  )
+}
+
 /**
  * When a resolved group's ONLY meaningful content is a single context-compaction
  * tool-call part, return that part's `_meta`, retained summary and call id (so
@@ -902,6 +913,10 @@ export function markThreadTail(items: ThreadRenderItem[]): void {
   for (let idx = items.length - 1; idx >= 0; idx--) {
     const item = items[idx]
     if (item.kind === "turn" && isEmptyTurnItem(item)) continue
+    // Nor is a failed round's closing line where a fork lands: a tail fork
+    // keeps everything up to the reply before it — the failure is nothing the
+    // agent carries on from — so that reply is still the thread's tail.
+    if (item.kind === "turn" && isTurnErrorGroup(item.group)) continue
     if (item.kind === "turn") item.isThreadTail = true
     break
   }
@@ -966,6 +981,11 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   isThreadTail?: boolean
 }) {
   if (group.role === "system") {
+    // A failed turn's line is the agent's account of the failure, not a
+    // message the system sent: it closes the round in place, unboxed.
+    if (isTurnErrorGroup(group)) {
+      return <ContentPartsRenderer parts={group.parts} role="system" />
+    }
     return <CollapsibleSystemMessage parts={group.parts} />
   }
 

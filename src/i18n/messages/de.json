@@ -2078,7 +2078,8 @@
         "assistant": "Assistent",
         "system": "System",
         "toolResult": "Ergebnis",
-        "toolError": "Fehler"
+        "toolError": "Fehler",
+        "turnFailed": "Runde fehlgeschlagen"
       },
       "moreActions": "Weitere Aktionen"
     },
@@ -2121,6 +2122,8 @@
       "untitledConversation": "Unbenannte Konversation",
       "newConversation": "Neue Konversation",
       "atToNewConversation": "At in neuer Konversation",
+      "maximize": "Maximieren",
+      "restore": "Wiederherstellen",
       "attachToCurrentSession": "Zur Sitzung hinzufügen",
       "rename": "Umbenennen",
       "status": "Zustand",
@@ -3449,6 +3452,7 @@
         "errorActionCommandCopied": "Kopiert",
         "emptyConversation": "Keine Nachrichten in dieser Unterhaltung.",
         "systemMessage": "Systemnachricht",
+        "turnFailed": "Runde fehlgeschlagen: {message}",
         "copyMessage": "Kopieren",
         "forkFromHere": "Ab hier verzweigen",
         "forkBusy": "Verzweigen nicht möglich, während ein Zug läuft",

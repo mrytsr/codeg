@@ -97,7 +97,9 @@ import { presentSessionNotice, splitHeadline } from "@/lib/session-notices"
 import { presentPluginLoadFailures } from "@/lib/plugin-load-failures"
 import {
   acpErrorNotifiesDesktop,
+  isFailedTurnVerdict,
   isTurnFailureCode,
+  rejectedPromptText,
   routeAcpError,
   type AcpErrorLevel,
 } from "@/lib/acp-error-presentation"
@@ -295,6 +297,16 @@ export type LiveContentBlock =
       createdAt: string
       blocks?: ContentBlock[] | null
     }
+  /**
+   * The turn FAILED: the adapter's typed terminal record, the prompt the agent
+   * rejected, or codeg's verdict that nothing came back. Not agent output:
+   * like a steer it closes the reply, and it renders as a `system` turn of its
+   * own holding a `turn_error` block — what a reload draws from the agent's
+   * own record of the failure (`parsers::turn_error_message`). At most one per
+   * turn (see `TURN_FAILED`); `fromAgent` is whether `message` is the agent's
+   * own words rather than codeg's verdict.
+   */
+  | { type: "turn_error"; message: string; fromAgent: boolean }
 
 export interface LiveMessage {
   id: string
@@ -736,6 +748,13 @@ type Action =
       /** What the user sent, when it was more than plain text — see the
        *  `steering` block. Absent for a text-only steer. */
       blocks?: ContentBlock[] | null
+    }
+  | {
+      type: "TURN_FAILED"
+      contextKey: string
+      message: string
+      /** The agent's own words, as opposed to codeg's verdict. */
+      fromAgent: boolean
     }
   | {
       type: "CLAUDE_API_RETRY"
@@ -2855,6 +2874,47 @@ function connectionsReducer(
           ],
         },
         steeredMessageIds: [...conn.steeredMessageIds, action.id],
+      })
+      return next
+    }
+
+    case "TURN_FAILED": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      // Same out-of-turn guard as STEERING_MESSAGE: with no running turn there
+      // is nothing to close, and appending would graft the line onto the
+      // PREVIOUS turn's completed liveMessage.
+      if (conn.status !== "prompting") return state
+      const message = action.message.trim()
+      if (!message) return state
+      const prev = ensureLiveMessage(conn.liveMessage)
+      const current = prev.content.find((block) => block.type === "turn_error")
+      // One account per turn. The agent's own words win over codeg's verdict
+      // whichever arrives first; otherwise the later account replaces the
+      // earlier (a revised record), and a replay changes nothing.
+      if (current) {
+        if (current.fromAgent && !action.fromAgent) return state
+        if (
+          current.message === message &&
+          current.fromAgent === action.fromAgent
+        ) {
+          return state
+        }
+      }
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        liveMessage: {
+          ...prev,
+          content: [
+            ...prev.content.filter((block) => block.type !== "turn_error"),
+            {
+              type: "turn_error" as const,
+              message,
+              fromAgent: action.fromAgent,
+            },
+          ],
+        },
       })
       return next
     }
@@ -5238,8 +5298,25 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             contextKey,
             record: e.record,
           })
-          if (quiet || !failureConn) break
           const noticeKind = sessionFailureNotice(stored, e.record)
+          // A turn that failed closes on the adapter's own account of it — the
+          // record's title, which its transcript keeps too — as the failure
+          // line (see `TURN_FAILED`). Store state, so even when `quiet`.
+          if (noticeKind === "terminal") {
+            // Text still queued for the next streaming flush belongs to the
+            // reply this line closes, so it lands first.
+            flushStreamingQueue(contextKey)
+            const own = e.record.title.trim()
+            dispatch({
+              type: "TURN_FAILED",
+              contextKey,
+              message:
+                own ||
+                tFailure(sessionFailureCategoryLabelKey(e.record.category)),
+              fromAgent: own.length > 0,
+            })
+          }
+          if (quiet || !failureConn) break
           if (noticeKind === null) break
           const connKey = failureConn.connectionId
           // Adapter-authored English, shown verbatim like a notice's text —
@@ -5496,6 +5573,26 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             e.details,
             agentLabel
           )
+
+          // A verdict that the turn FAILED, or a prompt the agent rejected (no
+          // code: the message is the agent's own), closes the turn with the
+          // failure line (see `TURN_FAILED`). Store state, so even when
+          // `quiet`; outside a turn the reducer ignores it.
+          if (isFailedTurnVerdict(e.code)) {
+            dispatch({
+              type: "TURN_FAILED",
+              contextKey,
+              message: text,
+              fromAgent: false,
+            })
+          } else if (!e.code) {
+            dispatch({
+              type: "TURN_FAILED",
+              contextKey,
+              message: rejectedPromptText(e.message),
+              fromAgent: true,
+            })
+          }
 
           // Already shown by a transcript card (a failed compaction): the
           // event exists for the chat-channel bridges and the pet, not for us.
