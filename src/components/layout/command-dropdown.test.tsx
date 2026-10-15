@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   terminalStop: vi.fn(async () => {}),
   terminalKill: vi.fn(async () => {}),
   listFolderCommands: vi.fn(),
+  syncFolderCommandsFromPackageJson: vi.fn(),
   terminalTabs: [] as { id: string }[],
 }))
 
@@ -28,7 +29,7 @@ vi.mock("@/contexts/terminal-context", () => ({
 
 vi.mock("@/lib/api", () => ({
   listFolderCommands: mocks.listFolderCommands,
-  bootstrapFolderCommandsFromPackageJson: vi.fn(async () => []),
+  syncFolderCommandsFromPackageJson: mocks.syncFolderCommandsFromPackageJson,
   terminalStop: mocks.terminalStop,
   terminalKill: mocks.terminalKill,
 }))
@@ -111,11 +112,23 @@ describe("CommandDropdown menu items", () => {
     localStorage.clear()
     useCommandTerminalLinkStore.setState({ links: {} })
     mocks.listFolderCommands.mockResolvedValue(commands)
+    mocks.syncFolderCommandsFromPackageJson.mockResolvedValue(commands)
   })
 
   afterEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+  })
+
+  it("syncs commands from package.json every time the folder loads", async () => {
+    vi.useRealTimers()
+    renderDropdown()
+    await act(async () => {})
+
+    expect(mocks.syncFolderCommandsFromPackageJson).toHaveBeenCalledWith(
+      1,
+      "/repo"
+    )
   })
 
   it("a short press keeps selecting the command without running it", async () => {

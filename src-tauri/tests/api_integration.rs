@@ -745,4 +745,3 @@ async fn a_server_that_shares_its_screen_answers_its_web_clients() {
     assert_eq!(resp.status_code(), 200);
     assert_eq!(resp.json::<Value>(), json!({}));
 }
-}

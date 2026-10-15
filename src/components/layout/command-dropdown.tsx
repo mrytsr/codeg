@@ -14,8 +14,8 @@ import {
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useTerminalContext } from "@/contexts/terminal-context"
 import {
-  bootstrapFolderCommandsFromPackageJson,
   listFolderCommands,
+  syncFolderCommandsFromPackageJson,
   terminalStop,
 } from "@/lib/api"
 import type { FolderCommand } from "@/lib/types"
@@ -94,7 +94,7 @@ export function CommandDropdown() {
   const [manageOpen, setManageOpen] = useState(false)
   // Controlled so a long-press run can close the menu programmatically.
   const [menuOpen, setMenuOpen] = useState(false)
-  const [bootstrapping, setBootstrapping] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const [selectedCommandId, setSelectedCommandIdState] = useState<
     number | null
   >(null)
@@ -176,25 +176,19 @@ export function CommandDropdown() {
     let ignore = false
     const loadCommands = async () => {
       try {
-        setBootstrapping(false)
-        const data = await listFolderCommands(folderId)
-        if (ignore) return
-
-        if (data.length > 0 || !folderPath) {
-          setCommands(data)
-          return
-        }
-
-        setBootstrapping(true)
-        const bootstrapped = await bootstrapFolderCommandsFromPackageJson(
+        setSyncing(true)
+        // Add-only sync on every open: package.json scripts that have no
+        // saved command with the same name are appended; existing commands
+        // (edited, reordered, or removed from package.json) are untouched.
+        const data = await syncFolderCommandsFromPackageJson(
           folderId,
           folderPath
         )
-        if (!ignore) setCommands(bootstrapped)
+        if (!ignore) setCommands(data)
       } catch (err) {
         console.error("Failed to load commands:", err)
       } finally {
-        if (!ignore) setBootstrapping(false)
+        if (!ignore) setSyncing(false)
       }
     }
 
@@ -297,10 +291,10 @@ export function CommandDropdown() {
           size="sm"
           className="h-6 rounded-full px-2 text-xs gap-1 hover:text-foreground/80"
           onClick={() => setManageOpen(true)}
-          disabled={bootstrapping}
+          disabled={syncing}
         >
           <Plus className="h-3 w-3" />
-          {bootstrapping ? t("loading") : t("addCommand")}
+          {syncing ? t("loading") : t("addCommand")}
         </Button>
       ) : (
         // Has commands → one cohesive control: [name ▼ | run/stop]. The whole
