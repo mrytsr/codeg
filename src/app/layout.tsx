@@ -17,6 +17,7 @@ import {
 import { AppearanceProvider } from "@/components/appearance-provider"
 import { OverlayScrollbarsInit } from "@/components/overlay-scrollbars-init"
 import { ClipboardFallbackInit } from "@/components/clipboard-fallback-init"
+import { ServiceWorkerInit } from "@/components/service-worker-init"
 import { WebConnectionGuard } from "@/components/connection/web-connection-guard"
 import { WindowResizeGrips } from "@/components/layout/window-resize-grips"
 import { WorkspaceLeaveGuard } from "@/components/workspace/workspace-leave-guard"
@@ -104,6 +105,7 @@ export default async function RootLayout({
               <AppearanceProvider>
                 <OverlayScrollbarsInit />
                 <ClipboardFallbackInit />
+                <ServiceWorkerInit />
                 <WebConnectionGuard />
                 <WindowResizeGrips />
                 {/* Self-gated to the main window: every route it can show

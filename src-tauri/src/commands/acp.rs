@@ -5139,6 +5139,12 @@ const KIMI_SYNTHETIC_TOKEN_ACCESS: &str = "codeg-local-gate";
 /// largest value every current OpenAI-compatible coding endpoint accepts; the old
 /// 256K (kimi-k2) default silently broke those providers. Users on a bigger window
 /// raise it in the config panel.
+///
+/// Main raised this to the kimi-k2 256K window (262_144): on kimi-acp 2.2.0 the
+/// number is only a compaction budget — `openai` / `openai_responses` blocks send
+/// no output cap any more — so it is safe there. Up to 2.1.1 Kimi still turned it
+/// into the request's output cap, which is what broke the capped providers, so
+/// tjx keeps the 128K default that works on both.
 const KIMI_DEFAULT_MAX_CONTEXT_SIZE: i64 = 131_072;
 /// The six native provider `type` values Kimi accepts in `[providers.<name>]`.
 const KIMI_INTERFACE_TYPES: &[&str] = &[
@@ -8325,7 +8331,7 @@ async fn hermes_setup_argvs() -> (Vec<String>, Vec<String>) {
         // Unreachable: Hermes is always an Npx distribution. Fall through to
         // the npx guidance with the same pinned spec so a future match-arm
         // change can't resurrect a stale recipe.
-        _ => "hermes-agent@0.21.6",
+        _ => "hermes-agent@0.22.0",
     };
     let build = |tail: &[&str]| -> Vec<String> {
         let mut argv = vec![
@@ -10541,7 +10547,7 @@ pub(crate) fn agent_env_keys(agent_type: AgentType) -> (&'static str, &'static s
         // `auth.type = "gemini-api-key"` reads (the server says so in its own
         // `auth_required` message). `AGY_ACP_DEFAULT_MODEL` is real — it is
         // the env the server's `get_default_model_id` consults before falling
-        // back to `gemini-3.7-flash-high`. There is NO endpoint override, so
+        // back to `gemini-3.8-flash-high`. There is NO endpoint override, so
         // the base-url slot stays an inert `AGY_BASE_URL` placeholder for the
         // same reason `CURSOR_MODEL`/`QODER_BASE_URL` above are: it keeps the
         // generic cascade off the `OPENAI_*` keys.
@@ -15139,16 +15145,8 @@ mod tests {
 
     #[cfg(unix)]
     fn fake_version_script(dir: &std::path::Path, name: &str, banner: &str) -> PathBuf {
-        use std::io::Write;
-        use std::os::unix::fs::PermissionsExt;
-
         let bin = dir.join(name);
-        {
-            let mut f = std::fs::File::create(&bin).expect("create script");
-            f.write_all(format!("#!/bin/sh\necho \"{banner}\"\n").as_bytes())
-                .expect("write script");
-        }
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        crate::process::write_test_script(&bin, &format!("#!/bin/sh\necho \"{banner}\"\n"));
         bin
     }
 
@@ -17209,10 +17207,8 @@ base_url = \"https://example.test/v1\"
 
     #[cfg(unix)]
     fn fake_pi(dir: &Path, name: &str, body: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         let script = dir.join(name);
-        fs::write(&script, format!("#!/bin/sh\n{body}")).unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        crate::process::write_test_script(&script, &format!("#!/bin/sh\n{body}"));
         script
     }
 
@@ -19819,10 +19815,10 @@ wire_api = "chat"
     // own version is also the recorded fallback when detection comes up empty.
     #[test]
     fn hermes_custom_version_spec_keeps_lifecycle_scripts_and_records_its_version() {
-        let spec = build_npm_install_spec("hermes-agent@0.21.6", Some("0.22.0")).unwrap();
-        assert_eq!(spec, "hermes-agent@0.22.0");
+        let spec = build_npm_install_spec("hermes-agent@0.22.0", Some("0.23.0")).unwrap();
+        assert_eq!(spec, "hermes-agent@0.23.0");
         assert!(npm_package_requires_scripts(&spec));
-        assert_eq!(version_from_package_spec(&spec).as_deref(), Some("0.22.0"));
+        assert_eq!(version_from_package_spec(&spec).as_deref(), Some("0.23.0"));
     }
 
     #[test]
@@ -21464,7 +21460,7 @@ wire_api = "chat"
                     .expect("npx recipe must pin via --package");
                 assert_eq!(
                     argv.get(pkg_idx + 1).map(String::as_str),
-                    Some("hermes-agent@0.21.6")
+                    Some("hermes-agent@0.22.0")
                 );
                 assert_eq!(argv.get(pkg_idx + 2).map(String::as_str), Some("hermes"));
             } else {
@@ -22151,7 +22147,7 @@ model = "gpt"
             )
         };
 
-        let annotated = annotate_npm_bootstrap_failure("hermes-agent@0.21.6", download());
+        let annotated = annotate_npm_bootstrap_failure("hermes-agent@0.22.0", download());
         let text = annotated.to_string();
         assert!(text.contains("fetch failed"), "keeps the original error");
         assert!(text.contains("HTTP(S)_PROXY"), "adds the proxy hint");
@@ -22163,7 +22159,7 @@ model = "gpt"
 
         // A hermes failure that isn't a download stays untouched.
         let permissions = annotate_npm_bootstrap_failure(
-            "hermes-agent@0.21.6",
+            "hermes-agent@0.22.0",
             AcpError::Protocol("failed to install npm package globally: EACCES".to_string()),
         );
         assert!(!permissions.to_string().contains("HTTP(S)_PROXY"));

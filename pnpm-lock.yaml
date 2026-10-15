@@ -31,7 +31,7 @@ importers:
         version: 5.3.0
       '@iconify-json/material-icon-theme':
         specifier: ^1.2.70
-        version: 1.2.71
+        version: 1.2.72
       '@iconify/react':
         specifier: ^6.0.2
         version: 6.0.2(react@19.2.4)
@@ -177,7 +177,7 @@ importers:
         specifier: ^0.5.6
         version: 0.5.6(overlayscrollbars@2.15.1)(react@19.2.4)
       pdfjs-dist:
-        specifier: ^6.3.289
+        specifier: 6.4.299
         version: 6.4.299
       postcss:
         specifier: ^8.5.6
@@ -1039,8 +1039,8 @@ packages:
     resolution: {integrity: sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ==}
     engines: {node: '>=18.18'}
 
-  '@iconify-json/material-icon-theme@1.2.71':
-    resolution: {integrity: sha512-Y479vDMq4gvW5eea1EhOpaD8FhtZHh/thSGrQNwHJWaD2dGcn+dDCb8LCSlORfhzamIdxVQHsX4G+ku2rwMdLg==}
+  '@iconify-json/material-icon-theme@1.2.72':
+    resolution: {integrity: sha512-zNe7VGXvUGMeexC8DTSa+NNF2ng5gLAgQL8GQgEBLfqnG7W52dfL/X8cwNx5OmhaZkA+fuKZ6DFVrDdg5vqp/Q==}
 
   '@iconify/react@6.0.2':
     resolution: {integrity: sha512-SMmC2sactfpJD427WJEDN6PMyznTFMhByK9yLW0gOTtnjzzbsi/Ke/XqsumsavFPwNiXs8jSiYeZTmLCLwO+Fg==}
@@ -1297,8 +1297,8 @@ packages:
   '@kenjiuno/decompressrtf@0.1.4':
     resolution: {integrity: sha512-v9c/iFz17jRWyd2cRnrvJg4VOg/4I/VCk+bG8JnoX2gJ9sAesPzo3uTqcmlVXdpasTI8hChpBVw00pghKe3qTQ==}
 
-  '@kenjiuno/msgreader@1.28.0':
-    resolution: {integrity: sha512-+iv2rWCGRHmX/3sBwXZzkThEuuywGJjnYsvxj6Kp1L/FDMICQcFrtqN+6MFrnh2d+umtfGtX904wxaYEDZ52MQ==}
+  '@kenjiuno/msgreader@1.29.0':
+    resolution: {integrity: sha512-03kBR44FIO965Z2s/KpY7y6daBu+GOpK10/AmVEZ4e/iZqSdOfSTI8cfk+DJnO/iTVncUF2Y8j2l1pwJ7ZvEFA==}
     engines: {node: '>= 10'}
 
   '@mapbox/togeojson@0.16.2':
@@ -4361,8 +4361,8 @@ packages:
   dompurify@3.3.3:
     resolution: {integrity: sha512-Oj6pzI2+RqBfFG+qOaOLbFXLQ90ARpcGG6UePL82bJLtdsa6CYJD7nmiU8MW9nQNOtCHV3lZ/Bzq1X0QYbBZCA==}
 
-  dompurify@3.4.16:
-    resolution: {integrity: sha512-sqo+pNp3qRhCIpbgRi1y8Tgk27Bo2Ry7w0dC1NBeNTdZChWjz9Xb/KOoZbRP/R6pQZ80Qw8YhXw13hWWBbMRnQ==}
+  dompurify@3.4.17:
+    resolution: {integrity: sha512-B/pSlYVHQ58kqISD/yDjuJ1yfzI34m1gF4lAod2bwSRhiN4K5Cl3H8Af7hqB2PmTL911tdEudnnXn5FnhRoz0w==}
 
   dotenv@17.2.4:
     resolution: {integrity: sha512-mudtfb4zRB4bVvdj0xRo+e6duH1csJRM8IukBqfTRvHotn9+LBXB8ynAidP9zHqoRC/fsllXgk4kCKlR21fIhw==}
@@ -5056,8 +5056,8 @@ packages:
     resolution: {integrity: sha512-eKCa6bwnJhvxj14kZk5NCPc6Hb6BdsU9DZcOnmQKSnO1VKrfV0zCvtttPZUsBvjmNDn8rpcJfpwSYnHBjc95MQ==}
     engines: {node: '>=18.18.0'}
 
-  hyparquet@1.31.3:
-    resolution: {integrity: sha512-qThDJfCrTClFdaIQuQTtFOGp33bkbOyk+y1NrwcC8YZjvr5wxjNdKz7/PUF3xfNd7ZKLsYW+fY6N8dInjjMWJg==}
+  hyparquet@1.31.4:
+    resolution: {integrity: sha512-Qe37Nhu1lLvmnSL9bQuY/CN8suLDoNMPNhrTb6+ZXJDfiy1mHHRjkoVYIYPhf0krYpRdAxMMnuEWEHeSUCe40g==}
 
   iconv-lite@0.6.3:
     resolution: {integrity: sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==}
@@ -5623,8 +5623,8 @@ packages:
     engines: {node: '>= 20'}
     hasBin: true
 
-  marked@18.1.0:
-    resolution: {integrity: sha512-PamYXWWWg2nboG3oX5Ffzpy3EFZROqZJK9hSlMmUnekp7TxPs5DcT95vwd46m73/exfKCRVMtgXoPMI4FEJL6w==}
+  marked@18.1.1:
+    resolution: {integrity: sha512-zEGgrtUG8crk+TrMacJSVABU4DYDDkS8uqgU3ohrn/2fW9C2AEfUrO3m6IhpIpQpl7YcVpiXXC9cSMWDANT3dg==}
     engines: {node: '>= 20'}
     hasBin: true
 
@@ -7425,8 +7425,8 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
-  wkt-parser@1.5.6:
-    resolution: {integrity: sha512-cqHU3lzGt/gt2OqIORP0uVy5yeOX43WABmgFkmJsmcqH3HhQo9PiJG6ftytwGKmpQUbegeX7+pQc2BuNCRfcrw==}
+  wkt-parser@1.6.0:
+    resolution: {integrity: sha512-O2WMUagkdOKkgcfqZBUauysHVeifCwcs+zUd2QG7UIzVljLwK9g5xHUfL/TkQFwmQ3eF7oHFKGnMcb/kZdvbaw==}
 
   word-wrap@1.2.5:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
@@ -8209,7 +8209,7 @@ snapshots:
 
   '@humanwhocodes/retry@0.4.3': {}
 
-  '@iconify-json/material-icon-theme@1.2.71':
+  '@iconify-json/material-icon-theme@1.2.72':
     dependencies:
       '@iconify/types': 2.0.0
 
@@ -8421,7 +8421,7 @@ snapshots:
 
   '@kenjiuno/decompressrtf@0.1.4': {}
 
-  '@kenjiuno/msgreader@1.28.0':
+  '@kenjiuno/msgreader@1.29.0':
     dependencies:
       '@kenjiuno/decompressrtf': 0.1.4
       iconv-lite: 0.6.3
@@ -8597,19 +8597,19 @@ snapshots:
   '@open-file-viewer/core@0.1.49(@napi-rs/canvas@1.0.11)(lodash-es@4.17.23)(pdfjs-dist@6.4.299)':
     dependencies:
       '@aiden0z/pptx-renderer': 1.3.0(pdfjs-dist@6.4.299)
-      '@kenjiuno/msgreader': 1.28.0
+      '@kenjiuno/msgreader': 1.29.0
       '@mapbox/togeojson': 0.16.2
       ag-psd: 30.2.0
       docx-preview: 0.3.7
-      dompurify: 3.4.16
+      dompurify: 3.4.17
       emf-converter: 3.5.1(@napi-rs/canvas@1.0.11)
       heic2any: 0.0.4
       hls.js: 1.7.3
-      hyparquet: 1.31.3
+      hyparquet: 1.31.4
       jszip: 3.10.2
       leaflet: 1.9.4
       mammoth: 1.13.0
-      marked: 18.1.0
+      marked: 18.1.1
       mermaid: 11.13.0
       pako: 2.2.0
       postal-mime: 2.7.6
@@ -11417,7 +11417,7 @@ snapshots:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
-  dompurify@3.4.16:
+  dompurify@3.4.17:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
@@ -12400,7 +12400,7 @@ snapshots:
 
   human-signals@8.0.1: {}
 
-  hyparquet@1.31.3: {}
+  hyparquet@1.31.4: {}
 
   iconv-lite@0.6.3:
     dependencies:
@@ -12924,7 +12924,7 @@ snapshots:
 
   marked@17.0.1: {}
 
-  marked@18.1.0: {}
+  marked@18.1.1: {}
 
   math-intrinsics@1.1.0: {}
 
@@ -13824,7 +13824,7 @@ snapshots:
   proj4@2.22.0:
     dependencies:
       mgrs: 1.0.0
-      wkt-parser: 1.5.6
+      wkt-parser: 1.6.0
 
   promise-stream-reader@1.0.1: {}
 
@@ -15332,7 +15332,7 @@ snapshots:
       siginfo: 2.0.0
       stackback: 0.0.2
 
-  wkt-parser@1.5.6: {}
+  wkt-parser@1.6.0: {}
 
   word-wrap@1.2.5: {}
 
