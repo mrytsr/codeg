@@ -88,8 +88,10 @@ mod tauri_app {
     use crate::acp::manager::ConnectionManager;
     use crate::chat_channel::manager::ChatChannelManager;
     use crate::commands::{
-        acp as acp_commands, app_update as app_update_commands, automation as automation_commands,
-        background as background_commands, backup, browser as browser_commands,
+        acp as acp_commands, app_update as app_update_commands,
+        assistants as assistant_commands, automation as automation_commands,
+        background as background_commands, backup,
+        browser as browser_commands,
         canvas as canvas_commands,
         chat_authoring as chat_authoring_commands, chat_channel as chat_channel_commands,
         clipboard as clipboard_commands,
@@ -126,12 +128,14 @@ mod tauri_app {
     /// not: the app hears `Exit` alone, from inside the platform's own
     /// teardown, with the loop no longer delivering anything. Whichever
     /// arrives first does the work, and `APP_QUITTING` turns the other into a
-    /// no-op.
+    /// no-op. An update on Windows hears neither — the updater ends the process
+    /// as soon as the installer is running — so `commands::app_update` calls
+    /// this itself just before.
     ///
     /// The process ends soon after this returns, so everything here finishes
     /// before it does: nothing may be left to a spawned task, or to a window
     /// event that `Exit` would never see delivered.
-    fn shut_down(app: &tauri::AppHandle) {
+    pub(crate) fn shut_down(app: &tauri::AppHandle) {
         if APP_QUITTING.swap(true, Ordering::Relaxed) {
             return;
         }
@@ -621,9 +625,8 @@ mod tauri_app {
             // path, which is the same repair with consent attached.
             //
             // Two accepted defects live in `auto-launch`, which this plugin
-            // wraps, and are still unfixed as of its 0.6 line — so there is no
-            // version to upgrade to, and pinning past `auto-launch ^0.5` (what
-            // the plugin requires) would not help:
+            // wraps, and are still there in 0.6.0 — the line the plugin has
+            // required since 2.7 — so there is no version to upgrade to:
             //   * Windows writes the Run value as `{app_path} {args}` with the
             //     path unquoted. Per-user installs land under
             //     `C:\Users\<name>\AppData\Local\codeg\`, so a username with a
@@ -1700,6 +1703,11 @@ mod tauri_app {
                 conversations::update_conversation_title,
                 conversations::update_conversation_pinned,
                 conversations::update_conversation_model_selection,
+                assistant_commands::assistant_list,
+                assistant_commands::assistant_create,
+                assistant_commands::assistant_update,
+                assistant_commands::assistant_delete,
+                assistant_commands::assistant_reorder,
                 conversation_tags::list_conversation_tags,
                 conversation_tags::create_conversation_tag,
                 conversation_tags::update_conversation_tag,
@@ -1995,6 +2003,7 @@ mod tauri_app {
                 acp_commands::acp_scan_leaked_temp,
                 acp_commands::acp_reclaim_leaked_temp,
                 acp_commands::acp_download_agent_binary,
+                acp_commands::acp_update_system_agent,
                 acp_commands::acp_install_uv_tool,
                 acp_commands::acp_detect_agent_local_version,
                 acp_commands::acp_fetch_agent_latest_release,
@@ -2134,6 +2143,7 @@ mod tauri_app {
                 work_task_commands::work_task_deliver_pr,
                 work_task_commands::work_task_complete,
                 work_task_commands::work_task_archive,
+                work_task_commands::work_task_defer,
                 work_task_commands::work_task_cleanup,
                 work_task_commands::work_task_diff,
                 work_task_commands::work_task_changed_files,
@@ -2272,3 +2282,5 @@ mod tauri_app {
 
 #[cfg(feature = "tauri-runtime")]
 pub use tauri_app::run;
+#[cfg(feature = "tauri-runtime")]
+pub(crate) use tauri_app::shut_down;

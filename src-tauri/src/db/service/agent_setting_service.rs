@@ -45,6 +45,8 @@ fn default_enabled(agent_type: AgentType) -> bool {
             | AgentType::DeepSeek
             | AgentType::Qoder
             | AgentType::Antigravity
+            | AgentType::Kiro
+            | AgentType::ZCode
             // A user who just registered a custom agent wants to use it.
             | AgentType::Custom(_)
     )
@@ -386,5 +388,15 @@ mod tests {
         assert_eq!(row.model_source, "provider");
         assert_eq!(row.model_provider_id, Some(12));
         assert!(row.enabled);
+    }
+
+    // Every built-in starts enabled. The match above has no catch-all arm for
+    // "the rest", so a newly added agent missing from it silently ships
+    // disabled — which is how Kiro would have arrived.
+    #[test]
+    fn every_builtin_defaults_to_enabled() {
+        for agent in crate::models::agent::BUILTIN_AGENT_TYPES {
+            assert!(default_enabled(*agent), "{agent:?} defaults to disabled");
+        }
     }
 }

@@ -54,6 +54,9 @@ struct BackgroundNotification {
     status: String,
     summary: Option<String>,
     result: Option<String>,
+    /// The notification says the task will notify again (see
+    /// [`task_notification_is_interim`]).
+    interim: bool,
 }
 
 /// Record one `<task-notification>` payload under its task id. The same id can
@@ -73,11 +76,82 @@ fn record_task_notification(
         BackgroundNotification {
             status: capture_tag(task_notification_status_regex(), raw)
                 .unwrap_or_else(|| "completed".to_string()),
-            summary: capture_tag(task_notification_summary_regex(), raw),
-            result: capture_tag(task_notification_result_regex(), raw)
-                .map(|r| truncate_str(&r, BACKGROUND_RESULT_MAX_CHARS)),
+            summary: capture_tag(task_notification_summary_regex(), raw)
+                .map(|s| unescape_task_notification_text(&s)),
+            result: capture_tag(task_notification_result_regex(), raw).map(|r| {
+                truncate_str(
+                    &unescape_task_notification_text(&r),
+                    BACKGROUND_RESULT_MAX_CHARS,
+                )
+            }),
+            interim: task_notification_is_interim(raw),
         },
     );
+}
+
+/// Undo the escaping Claude Code applies to the text it writes inside a
+/// `<task-notification>`: `&` as `&amp;`, `<` as `&lt;`, `>` as `&gt;`, quotes
+/// as they are. Measured on CLI 2.1.296 and 2.1.300 with a sub-agent report
+/// holding `` `Vec<String>` `` and `a && b`, and borne out by a real history:
+/// every notification from 2.1.257 to 2.1.296 that had any of the three carried
+/// the entities, none the bare characters. Left escaped, the launch card showed
+/// `&lt;` in its summary line and inside the report's code, where markdown
+/// leaves entities alone. `&amp;` is undone last, so an entity the text itself
+/// spelled out (`&amp;lt;`) stays one (`&lt;`).
+pub(crate) fn unescape_task_notification_text(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+/// The sentences with which Claude Code's `<note>` says a `completed` agent
+/// notification is not the agent's last word. Both are the CLI's own text
+/// (`enqueueAgentNotification`, read from the 2.1.296 and 2.1.300 binaries):
+///
+/// * "This agent stopped with background work of its own still running. It
+///   may resume on its own when that work completes or reports, and the same
+///   task-id notifies again if it does; the result below may be interim." —
+///   the agent ended its run while a command or agent it started in the
+///   background still runs. Measured live on both CLIs: the agent picks up
+///   when that work ends and notifies again, with "finished" and the ordinary
+///   note. CLI 2.1.300 also words the summary "… is waiting on its own
+///   background work" (2.1.296 said "… finished" for this one too).
+/// * "… The agent is being resumed with them and will notify again. …" — new
+///   in 2.1.300: messages sent to the agent arrived after its last step, and
+///   it runs again with them.
+///
+/// The ordinary note ("A task-notification fires each time this agent stops
+/// with no live background children of its own. …") contains neither.
+const INTERIM_TASK_NOTE_PHRASES: [&str; 2] =
+    ["the result below may be interim", "will notify again"];
+
+fn task_notification_note_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?s)<note>(.*?)</note>").unwrap())
+}
+
+/// Whether a `<task-notification>` reports a stop the task will report on
+/// again: a `completed` agent notification whose `<note>` says so (see
+/// [`INTERIM_TASK_NOTE_PHRASES`]). Such a task is still alive: its result may
+/// be interim, and a later notification for the same task id replaces it.
+///
+/// Only the part before `<result>` is read, where the CLI puts its note, so a
+/// report that quotes those sentences cannot mark its own notification; and the
+/// one text before it the model writes, the agent's description in the
+/// summary, comes escaped ([`unescape_task_notification_text`]; measured with a
+/// description holding `<note>`), so a `<note>` there is always the CLI's. A
+/// notification without the note (every CLI before the note existed) is final,
+/// as it always was.
+pub(crate) fn task_notification_is_interim(raw: &str) -> bool {
+    let head = raw.split("<result>").next().unwrap_or(raw);
+    let completed = capture_tag(task_notification_status_regex(), head)
+        .is_none_or(|status| status == "completed");
+    completed
+        && capture_tag(task_notification_note_regex(), head).is_some_and(|note| {
+            INTERIM_TASK_NOTE_PHRASES
+                .iter()
+                .any(|phrase| note.contains(phrase))
+        })
 }
 
 /// The `<task-notification>` text of a background task that settled while a
@@ -1435,6 +1509,11 @@ impl ClaudeParser {
         let mut first_timestamp: Option<DateTime<Utc>> = None;
         let mut last_timestamp: Option<DateTime<Utc>> = None;
         let mut message_count: u32 = 0;
+        // Same rule as the detail parse: history a resume wrote out again is
+        // not more conversation (`ClaudeRecordAccumulator::seen_record_uuids`).
+        // Counted, the copies inflated the message count, and their older
+        // timestamps rewound the conversation's end.
+        let mut seen_record_uuids = std::collections::HashSet::new();
 
         for line in reader.lines() {
             let line = match line {
@@ -1449,6 +1528,16 @@ impl ClaudeParser {
                 Ok(v) => v,
                 Err(_) => continue,
             };
+
+            if let Some(uuid) = value
+                .get("uuid")
+                .and_then(|u| u.as_str())
+                .filter(|u| !u.is_empty())
+            {
+                if !seen_record_uuids.insert(uuid.to_string()) {
+                    continue;
+                }
+            }
 
             let msg_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
@@ -1726,6 +1815,17 @@ pub(crate) struct ClaudeRecordAccumulator {
     /// task id → LATEST `<task-notification>` payload (the same id can notify
     /// more than once — a resumed sub-agent re-notifies; last wins).
     background_notifications: std::collections::HashMap<String, BackgroundNotification>,
+    /// When each turn Claude Code opened ON ITS OWN began: the
+    /// `<task-notification>` user record a background task settles with while
+    /// the CLI is idle, which the CLI answers straight away. That record never
+    /// becomes a user turn — it only settles the launch card — so without a
+    /// marker [`super::backfill_turn_durations`] measured the reply from the
+    /// end of the previous one, charging it the whole idle stretch in between:
+    /// 79 minutes for a 16-second answer on a real transcript. A notification
+    /// that lands mid-turn is a `queued_command` attachment instead
+    /// ([`queued_task_notification`]) and opens nothing. Read through
+    /// [`Self::chronological_turn_starts`].
+    turn_starts: Vec<DateTime<Utc>>,
     /// `message.id` → index in `messages` of the line currently carrying that
     /// API call's usage. See [`Self::claim_assistant_usage`] for why only one
     /// line of a group may carry it.
@@ -1735,16 +1835,24 @@ pub(crate) struct ClaudeRecordAccumulator {
     /// thinking-only fragments from one response share a message without
     /// crossing text, tool, or user boundaries.
     pending_assistant_message_id: Option<String>,
-    /// `uuid`s of the `system`/`compact_boundary` records already turned into a
-    /// divider, because a transcript repeats them VERBATIM.
+    /// `uuid`s of the records already taken in, because a transcript can repeat
+    /// its history.
     ///
-    /// Every resume replays the surviving history into the same file, boundary
-    /// records included — same uuid, same timestamp, same `compactMetadata`.
-    /// Measured on one real 19,435-line transcript: 22 boundary records for 7
-    /// actual compactions, one of them written six times. Keyed on the record
-    /// uuid rather than the metadata so two genuine compactions that happen to
-    /// reduce the same amount still get a divider each.
-    seen_compaction_uuids: std::collections::HashSet<String>,
+    /// A resume can write the session's history into the same file again: the
+    /// same records — same uuid, same timestamp, same message — with only
+    /// bookkeeping changed (a `slug`, a `promptId`, trimmed tool output,
+    /// stripped image bytes, zeroed usage). Measured: one real 19,435-line
+    /// transcript held 22 compaction boundaries for 7 actual compactions, one
+    /// written six times; 9 of 400 recent transcripts on one machine hold a
+    /// second or third copy of the whole conversation, 38,341 repeated records
+    /// in all, every one matching its first copy in type and timestamp. Read
+    /// in file order, each copy came back as more conversation — the history
+    /// shown again, with no elapsed time on the copies (their timestamps run
+    /// backwards) — so a record whose uuid was already taken in is skipped
+    /// whole. The first copy wins: it is where the message happened, and the
+    /// only one still carrying the call's usage. Claude Code reads its session
+    /// the same way, as a tree keyed by uuid.
+    seen_record_uuids: std::collections::HashSet<String>,
     /// Where the `/compact` prompt belongs, once its local-command echo shows
     /// up: the index of the divider it produced. See the insert in `feed_value`
     /// for why the prompt can't simply be emitted where the CLI wrote it.
@@ -1758,11 +1866,6 @@ pub(crate) struct ClaudeRecordAccumulator {
     /// the divider, which is what made the reopened conversation disagree with
     /// the one that was just streaming.
     compaction_summary_slot: Option<usize>,
-    /// `uuid`s of the continuation records already rendered. A resume replays
-    /// each one together with its boundary, byte-identical (the same pairing
-    /// held for every replayed boundary measured), and the boundary's dedup
-    /// alone would leave the replayed summary to render on its own.
-    seen_compaction_summary_uuids: std::collections::HashSet<String>,
 }
 
 impl ClaudeRecordAccumulator {
@@ -1783,12 +1886,12 @@ impl ClaudeRecordAccumulator {
             open_goal: None,
             background_acks: std::collections::HashMap::new(),
             background_notifications: std::collections::HashMap::new(),
+            turn_starts: Vec::new(),
             usage_owner_by_message_id: std::collections::HashMap::new(),
             pending_assistant_message_id: None,
-            seen_compaction_uuids: std::collections::HashSet::new(),
+            seen_record_uuids: std::collections::HashSet::new(),
             compaction_prompt_slot: None,
             compaction_summary_slot: None,
-            seen_compaction_summary_uuids: std::collections::HashSet::new(),
         }
     }
 
@@ -1863,6 +1966,17 @@ impl ClaudeRecordAccumulator {
         }
     }
 
+    /// The turn-start markers ([`Self::turn_starts`]) in the chronological
+    /// order [`super::backfill_turn_durations`] walks them in. File order is
+    /// not time order: a resume replays history into the same file, its
+    /// notifications included.
+    pub(crate) fn chronological_turn_starts(&self) -> Vec<DateTime<Utc>> {
+        let mut starts = self.turn_starts.clone();
+        starts.sort_unstable();
+        starts.dedup();
+        starts
+    }
+
     /// Feed one raw JSONL line. Blank and non-JSON lines are skipped, mirroring
     /// the historical `BufReader::lines()` loop (whose per-line errors were
     /// skipped via `Err(_) => continue`).
@@ -1894,13 +2008,25 @@ impl ClaudeRecordAccumulator {
             open_goal,
             background_acks,
             background_notifications,
+            turn_starts,
             usage_owner_by_message_id,
             pending_assistant_message_id,
-            seen_compaction_uuids,
+            seen_record_uuids,
             compaction_prompt_slot,
             compaction_summary_slot,
-            seen_compaction_summary_uuids,
         } = self;
+
+        // A record already taken in is the history written out again by a
+        // resume, not more of it. See `seen_record_uuids`.
+        if let Some(uuid) = value
+            .get("uuid")
+            .and_then(|u| u.as_str())
+            .filter(|u| !u.is_empty())
+        {
+            if !seen_record_uuids.insert(uuid.to_string()) {
+                return;
+            }
+        }
 
         let msg_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
@@ -2081,6 +2207,11 @@ impl ClaudeRecordAccumulator {
                 {
                     record_task_notification(background_notifications, raw);
                 }
+                if is_task_notification_record(&value) {
+                    if let Some(timestamp) = parse_timestamp(&value) {
+                        turn_starts.push(timestamp);
+                    }
+                }
 
                 let mut content = extract_user_content(&value);
 
@@ -2103,11 +2234,6 @@ impl ClaudeRecordAccumulator {
                 // for it — which no measured transcript has — is still drawn
                 // as a system turn, so it never vanishes.
                 let role = if let Some(text) = context_continuation_text(&content) {
-                    // A resume replays it verbatim along with its boundary,
-                    // which is deduped already — this is its other half.
-                    if !uuid.is_empty() && !seen_compaction_summary_uuids.insert(uuid.clone()) {
-                        return;
-                    }
                     let summary = continuation_summary_text(text);
                     let folded = compaction_summary_slot
                         .take()
@@ -2441,13 +2567,9 @@ impl ClaudeRecordAccumulator {
                                 || format!("claude-compaction-{}", messages.len()),
                                 str::to_string,
                             );
-                        // A resume replays the surviving history into the same
-                        // file, boundary records included — so one compaction
-                        // can appear a dozen lines apart, byte-identical. Draw
-                        // it once. See `seen_compaction_uuids`.
-                        if !seen_compaction_uuids.insert(id.clone()) {
-                            return;
-                        }
+                        // A resume writes boundary records again with the
+                        // rest of the history; the copies never get here (see
+                        // `seen_record_uuids`), so each compaction draws once.
                         messages.push(UnifiedMessage {
                             id: format!("synth-compaction-{}", messages.len()),
                             role: MessageRole::Assistant,
@@ -2656,6 +2778,10 @@ impl ClaudeRecordAccumulator {
     /// renders that as "launched, result pending" WITHOUT claiming it is
     /// still running (a killed CLI leaves it null forever; deriving
     /// "running" from transcript alone is the zombie trap CC desktop hit).
+    /// `"interim": true` follows when the latest notification says the task
+    /// will notify again ([`task_notification_is_interim`]); the frontend then
+    /// reads its result as interim rather than as the task's end, again
+    /// without claiming the task still runs.
     /// Follows the parser's established output-rewrite pattern
     /// (`structuredPatch` diffs, `structurize_read_tool_output`).
     pub(crate) fn apply_background_lifecycle(&self, messages: &mut [UnifiedMessage]) {
@@ -2677,12 +2803,16 @@ impl ClaudeRecordAccumulator {
                     continue;
                 };
                 let notification = self.background_notifications.get(task_id);
-                let payload = serde_json::json!({
+                let mut payload = serde_json::json!({
                     "task_id": task_id,
                     "status": notification.map(|n| n.status.clone()),
                     "summary": notification.and_then(|n| n.summary.clone()),
                     "result": notification.and_then(|n| n.result.clone()),
                 });
+                // Only when set, so every other marker reads as it always did.
+                if notification.is_some_and(|n| n.interim) {
+                    payload["interim"] = serde_json::Value::Bool(true);
+                }
                 *output_preview = Some(format!("{BACKGROUND_TASK_MARKER}{payload}"));
             }
         }
@@ -2742,6 +2872,7 @@ impl ClaudeParser {
             acc.feed_line(line);
         }
         acc.finalize_background_lifecycle();
+        let turn_starts = acc.chronological_turn_starts();
 
         let ClaudeRecordAccumulator {
             messages,
@@ -2767,8 +2898,9 @@ impl ClaudeParser {
         // records; current ones log no timings at all, so without this every
         // reply lost its elapsed-time chip the moment the live timer stopped.
         // Runs before the facts are derived, so the usage dashboard's elapsed
-        // time is backfilled too.
-        super::backfill_turn_durations(&mut turns, &[]);
+        // time is backfilled too. The markers start the turns the CLI opened
+        // on its own (see `ClaudeRecordAccumulator::turn_starts`).
+        super::backfill_turn_durations(&mut turns, &turn_starts);
         // Read the context window *before* folding in delegated spend: the
         // gauge measures how full this conversation's own prompt is, and a
         // sub-agent's context is its own, not this one's.
@@ -4863,6 +4995,100 @@ mod tests {
         );
     }
 
+    /// A resume can write the session's whole history into the same file
+    /// again — same uuids and timestamps, a `slug` added, the usage of the
+    /// repeated call zeroed — before the next prompt. Read in file order, the
+    /// conversation came back twice, the copy with no elapsed time, and the
+    /// list counted it twice and ended it at the copy's old timestamp.
+    #[test]
+    fn a_history_written_out_again_by_a_resume_shows_once() {
+        let prompt = |uuid: &str, ts: &str, text: &str, slug: bool| {
+            let mut record = json!({
+                "type": "user", "timestamp": ts, "uuid": uuid,
+                "cwd": "/Users/test/proj", "sessionId": "sess-rewritten",
+                "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+            });
+            if slug {
+                record["slug"] = json!("velvety-sleeping-kitten");
+            }
+            record.to_string()
+        };
+        let reply = |uuid: &str, id: &str, ts: &str, text: &str, input: u64| {
+            json!({
+                "type": "assistant", "timestamp": ts, "uuid": uuid,
+                "message": {
+                    "id": id, "role": "assistant", "model": "claude-opus-5",
+                    "content": [{"type": "text", "text": text}],
+                    "usage": {
+                        "input_tokens": input, "output_tokens": input,
+                        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+                    },
+                },
+            })
+            .to_string()
+        };
+        let lines = vec![
+            prompt("u1", "2026-10-13T10:00:00.000Z", "fix the bug", false),
+            reply("a1", "m1", "2026-10-13T10:00:30.000Z", "Fixed it.", 10),
+            r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-13T11:00:00.000Z","sessionId":"sess-rewritten"}"#.to_string(),
+            r#"{"type":"last-prompt","lastPrompt":"fix the bug","sessionId":"sess-rewritten"}"#.to_string(),
+            // The rewrite.
+            prompt("u1", "2026-10-13T10:00:00.000Z", "fix the bug", true),
+            reply("a1", "m1", "2026-10-13T10:00:30.000Z", "Fixed it.", 0),
+            // What the resume was for.
+            prompt("u2", "2026-10-13T11:00:00.100Z", "now the tests", false),
+            reply("a2", "m2", "2026-10-13T11:00:20.100Z", "Tests pass.", 20),
+        ];
+        let detail = parse_lines("sess-rewritten", &lines);
+
+        assert_eq!(
+            turn_shapes(&detail),
+            vec![
+                "User:fix the bug",
+                "Assistant:Fixed it.",
+                "User:now the test",
+                "Assistant:Tests pass.",
+            ]
+        );
+        let replies: Vec<_> = detail
+            .turns
+            .iter()
+            .filter(|t| matches!(t.role, TurnRole::Assistant))
+            .collect();
+        assert_eq!(replies[0].duration_ms, Some(30_000));
+        assert_eq!(
+            replies[0].usage.as_ref().map(|u| u.input_tokens),
+            Some(10),
+            "the first copy keeps the call's real usage"
+        );
+        assert_eq!(replies[1].duration_ms, Some(20_000));
+
+        let summarize = |lines: &[String]| {
+            let path = std::env::temp_dir().join(format!(
+                "codeg-claude-rewritten-{}.jsonl",
+                uuid::Uuid::new_v4()
+            ));
+            fs::write(&path, lines.join("\n") + "\n").expect("write transcript");
+            let summary = ClaudeParser {
+                base_dir: PathBuf::new(),
+            }
+            .parse_jsonl_summary(&path)
+            .expect("parse summary")
+            .expect("summary present");
+            fs::remove_file(&path).expect("cleanup temp jsonl");
+            summary
+        };
+        let at = |ts: &str| Some(ts.parse::<DateTime<Utc>>().unwrap());
+        let summary = summarize(&lines);
+        assert_eq!(summary.message_count, 4);
+        assert_eq!(summary.ended_at, at("2026-10-13T11:00:20.100Z"));
+        // Read before the new prompt lands, the copy is the transcript's tail:
+        // its old timestamps must not wind the conversation's end back.
+        let summary = summarize(&lines[..6]);
+        assert_eq!(summary.message_count, 2);
+        assert_eq!(summary.ended_at, at("2026-10-13T11:00:00.000Z"));
+    }
+
     /// Live, claude-agent-acp hands the compaction its summary and the divider
     /// opens onto it behind a "Summary" toggle. The transcript keeps that
     /// summary in the continuation record written right after the boundary —
@@ -5210,11 +5436,12 @@ mod tests {
         }
         acc.finalize_background_lifecycle();
         let cwd = acc.cwd.clone();
+        let turn_starts = acc.chronological_turn_starts();
         let mut turns = group_into_turns(acc.messages);
         crate::parsers::relocate_orphaned_tool_results(&mut turns);
         crate::parsers::structurize_read_tool_output(&mut turns);
         crate::parsers::resolve_patch_line_numbers(&mut turns, cwd.as_deref());
-        crate::parsers::backfill_turn_durations(&mut turns, &[]);
+        crate::parsers::backfill_turn_durations(&mut turns, &turn_starts);
 
         assert_eq!(
             serde_json::to_string(&turns).unwrap(),
@@ -5953,6 +6180,52 @@ mod tests {
         // (which would have landed at 10:06:38.334Z, ~3min 19s later).
         let wrong = "2026-03-01T10:06:38.334Z".parse::<DateTime<Utc>>().unwrap();
         assert_ne!(completed_at, wrong);
+    }
+
+    /// A background task that settles while the CLI is idle makes Claude Code
+    /// open a turn on its own. The `<task-notification>` starting it never
+    /// becomes a user turn, so that reply was measured from the end of the
+    /// previous one, the idle stretch in between included — a real transcript
+    /// charged a 16-second answer 79 minutes. The reply the user prompted must
+    /// keep its own span either way.
+    #[test]
+    fn a_turn_opened_by_a_task_notification_is_timed_from_the_notification() {
+        let lines: Vec<String> = [
+            r#"{"type":"user","timestamp":"2026-10-14T11:00:00.000Z","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"build it in the background"}]}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-14T11:00:05.000Z","uuid":"a1","message":{"id":"m1","role":"assistant","model":"claude-opus-5","content":[{"type":"tool_use","id":"toolu_bg","name":"Bash","input":{"command":"pnpm build","run_in_background":true}}]}}"#,
+            r#"{"type":"user","timestamp":"2026-10-14T11:00:06.000Z","uuid":"u2","message":{"role":"user","content":[{"tool_use_id":"toolu_bg","type":"tool_result","content":"Command running in background with ID: bg1."}]},"toolUseResult":{"stdout":"","stderr":"","interrupted":false,"backgroundTaskId":"bg1"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-14T11:00:20.000Z","uuid":"a2","message":{"id":"m2","role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"Started, I will report back."}]}}"#,
+            // 79 idle minutes later the build settles and the CLI answers it.
+            r#"{"type":"user","timestamp":"2026-10-14T12:19:30.000Z","uuid":"u3","message":{"role":"user","content":"<task-notification>\n<task-id>bg1</task-id>\n<tool-use-id>toolu_bg</tool-use-id>\n<status>completed</status>\n<summary>Background command \"pnpm build\" completed</summary>\n</task-notification>"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-14T12:19:40.000Z","uuid":"a3","message":{"id":"m3","role":"assistant","model":"claude-opus-5","content":[{"type":"thinking","thinking":"","signature":"sig"}]}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-14T12:19:46.000Z","uuid":"a4","message":{"id":"m3","role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"The build passed."}]}}"#,
+        ]
+        .iter()
+        .map(|line| line.to_string())
+        .collect();
+        let detail = parse_lines("sess-notified", &lines);
+
+        let notified_at = "2026-10-14T12:19:30Z".parse::<DateTime<Utc>>().unwrap();
+        let span = |after_notification: bool| -> u64 {
+            detail
+                .turns
+                .iter()
+                .filter(|t| matches!(t.role, TurnRole::Assistant))
+                .filter(|t| (t.timestamp >= notified_at) == after_notification)
+                .filter_map(|t| t.duration_ms)
+                .sum()
+        };
+        assert_eq!(
+            detail
+                .turns
+                .iter()
+                .filter(|t| matches!(t.role, TurnRole::User))
+                .count(),
+            1,
+            "the notification must stay out of the thread"
+        );
+        assert_eq!(span(false), 20_000, "11:00:00 → 11:00:20");
+        assert_eq!(span(true), 16_000, "12:19:30 → 12:19:46, not the idle hour");
     }
 
     #[test]
@@ -8649,6 +8922,438 @@ mod tests {
                 ("assistant", "The review is back.".to_string()),
             ]
         );
+    }
+
+    /// The `<note>` of an agent notification, word for word as CLI 2.1.296 and
+    /// 2.1.300 write it (`enqueueAgentNotification`).
+    const INTERIM_WAITING_NOTE: &str = "This agent stopped with background work of its own still running. It may resume on its own when that work completes or reports, and the same task-id notifies again if it does; the result below may be interim.";
+    const FINAL_AGENT_NOTE: &str = "A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.";
+    /// What 2.1.300 adds to the note when messages reached the agent too late.
+    const LATE_MESSAGES_NOTE: &str = " One or more messages sent to this agent arrived after this run's last step, too late for the result below. The agent is being resumed with them and will notify again. Wait for that notification before resending.";
+
+    /// A `<task-notification>` in the layout the CLI writes it.
+    fn agent_notification(
+        task_id: &str,
+        status: &str,
+        summary: &str,
+        note: Option<&str>,
+        result: &str,
+    ) -> String {
+        let note = note.map_or(String::new(), |n| format!("<note>{n}</note>\n"));
+        format!(
+            "<task-notification>\n<task-id>{task_id}</task-id>\n<tool-use-id>toolu_01</tool-use-id>\n<output-file>/tmp/{task_id}.output</output-file>\n<status>{status}</status>\n<summary>{summary}</summary>\n{note}<result>{result}</result>\n<usage><subagent_tokens>15</subagent_tokens><tool_uses>1</tool_uses><duration_ms>289</duration_ms></usage>\n</task-notification>"
+        )
+    }
+
+    /// Measured live on CLI 2.1.296 and 2.1.300: a background sub-agent that
+    /// starts a background command of its own and ends its run while the
+    /// command runs notifies `completed` with the interim note, then again,
+    /// with the ordinary note, once the command is done and it has finished.
+    #[test]
+    fn an_interim_agent_notification_is_read_from_the_cli_note() {
+        let waiting_2300 = "Agent \"probe sub bg bash\" is waiting on its own background work";
+        let finished = "Agent \"probe sub bg bash\" finished";
+        let late = format!("{FINAL_AGENT_NOTE}{LATE_MESSAGES_NOTE}");
+        let cases: Vec<(String, bool)> = vec![
+            // 2.1.300 words the summary for it as well.
+            (
+                agent_notification(
+                    "a1",
+                    "completed",
+                    waiting_2300,
+                    Some(INTERIM_WAITING_NOTE),
+                    "ok",
+                ),
+                true,
+            ),
+            // 2.1.296 said "finished", with the same note.
+            (
+                agent_notification(
+                    "a1",
+                    "completed",
+                    finished,
+                    Some(INTERIM_WAITING_NOTE),
+                    "ok",
+                ),
+                true,
+            ),
+            // 2.1.300: resumed with messages that came after its last step.
+            (
+                agent_notification("a1", "completed", finished, Some(&late), "ok"),
+                true,
+            ),
+            // The final notification.
+            (
+                agent_notification("a1", "completed", finished, Some(FINAL_AGENT_NOTE), "ok"),
+                false,
+            ),
+            // A CLI from before the note.
+            (
+                agent_notification("a1", "completed", finished, None, "ok"),
+                false,
+            ),
+            // A stop that is no completion ends the task, whatever the note.
+            (
+                agent_notification(
+                    "a1",
+                    "failed",
+                    "Agent \"x\" failed: boom",
+                    Some(INTERIM_WAITING_NOTE),
+                    "",
+                ),
+                false,
+            ),
+            // A report that quotes the sentences, or a note, marks nothing.
+            (
+                agent_notification(
+                    "a1",
+                    "completed",
+                    finished,
+                    Some(FINAL_AGENT_NOTE),
+                    &format!("The CLI said: {INTERIM_WAITING_NOTE}"),
+                ),
+                false,
+            ),
+            (
+                agent_notification(
+                    "a1",
+                    "completed",
+                    finished,
+                    None,
+                    &format!("<note>{INTERIM_WAITING_NOTE}</note>"),
+                ),
+                false,
+            ),
+        ];
+        for (raw, interim) in cases {
+            assert_eq!(task_notification_is_interim(&raw), interim, "{raw}");
+        }
+    }
+
+    /// The launch card reads the interim result as interim until the agent's
+    /// final notification replaces it, as the live card does.
+    #[test]
+    fn an_interim_notification_marks_the_launch_card_until_the_final_one() {
+        let waiting = "Agent \"probe sub bg bash\" is waiting on its own background work";
+        let finished = "Agent \"probe sub bg bash\" finished";
+        let notification_record = |uuid: &str, ts: &str, raw: String| {
+            json!({
+                "type": "user", "uuid": uuid, "timestamp": ts,
+                "message": {"role": "user", "content": raw},
+            })
+        };
+        let mut records = vec![
+            json!({
+                "type": "assistant", "uuid": "a1", "timestamp": "2026-10-15T14:04:03.600Z",
+                "message": {"role": "assistant", "content": [{
+                    "type": "tool_use", "id": "toolu_01", "name": "Agent",
+                    "input": {"description": "probe sub bg bash", "prompt": "…", "subagent_type": "general-purpose"},
+                }]},
+            }),
+            json!({
+                "type": "user", "uuid": "u1", "timestamp": "2026-10-15T14:04:03.700Z",
+                "message": {"role": "user", "content": [{
+                    "tool_use_id": "toolu_01", "type": "tool_result",
+                    "content": [{"type": "text", "text": "Async agent launched successfully. agentId: a0a4bac773047ba2c"}],
+                }]},
+                "toolUseResult": {"isAsync": true, "status": "async_launched", "agentId": "a0a4bac773047ba2c"},
+            }),
+            notification_record(
+                "u2",
+                "2026-10-15T14:04:04.142Z",
+                agent_notification(
+                    "a0a4bac773047ba2c",
+                    "completed",
+                    waiting,
+                    Some(INTERIM_WAITING_NOTE),
+                    "ok",
+                ),
+            ),
+            json!({
+                "type": "assistant", "uuid": "a2", "timestamp": "2026-10-15T14:04:04.300Z",
+                "message": {"role": "assistant", "content": [{"type": "text", "text": "Noted."}]},
+            }),
+        ];
+        let marker = |detail: &ConversationDetail| -> serde_json::Value {
+            let raw = detail
+                .turns
+                .iter()
+                .flat_map(|t| t.blocks.iter())
+                .find_map(|b| match b {
+                    ContentBlock::ToolResult {
+                        output_preview: Some(o),
+                        ..
+                    } => o.strip_prefix(BACKGROUND_TASK_MARKER),
+                    _ => None,
+                })
+                .expect("the launch card carries a lifecycle marker");
+            serde_json::from_str(raw).unwrap()
+        };
+
+        let detail = parse_lines("interim", &record_lines(&records));
+        assert_eq!(
+            marker(&detail),
+            json!({
+                "task_id": "a0a4bac773047ba2c",
+                "status": "completed",
+                "summary": waiting,
+                "result": "ok",
+                "interim": true,
+            })
+        );
+
+        records.push(notification_record(
+            "u3",
+            "2026-10-15T14:04:12.383Z",
+            agent_notification(
+                "a0a4bac773047ba2c",
+                "completed",
+                finished,
+                Some(FINAL_AGENT_NOTE),
+                "ok",
+            ),
+        ));
+        let detail = parse_lines("interim", &record_lines(&records));
+        assert_eq!(
+            marker(&detail),
+            json!({
+                "task_id": "a0a4bac773047ba2c",
+                "status": "completed",
+                "summary": finished,
+                "result": "ok",
+            })
+        );
+    }
+
+    /// Claude Code escapes `&`, `<` and `>` in a notification's summary and
+    /// report (measured on CLI 2.1.296 and 2.1.300, text below as written);
+    /// the launch card shows them as the agent wrote them.
+    #[test]
+    fn a_notification_summary_and_report_read_unescaped() {
+        assert_eq!(
+            unescape_task_notification_text(
+                "`Vec&lt;String&gt;` &amp; `a &amp;&amp; b` in &lt;code&gt; \"q\" 'a'"
+            ),
+            "`Vec<String>` & `a && b` in <code> \"q\" 'a'"
+        );
+        // An entity the text itself spelled out stays one.
+        assert_eq!(
+            unescape_task_notification_text("&amp;lt;br&amp;gt; &amp;amp;"),
+            "&lt;br&gt; &amp;"
+        );
+
+        let records = vec![
+            json!({
+                "type": "assistant", "uuid": "a1", "timestamp": "2026-10-15T14:20:00.000Z",
+                "message": {"role": "assistant", "content": [{
+                    "type": "tool_use", "id": "toolu_01", "name": "Agent",
+                    "input": {"description": "probe <x> & \"y\"", "prompt": "…"},
+                }]},
+            }),
+            json!({
+                "type": "user", "uuid": "u1", "timestamp": "2026-10-15T14:20:00.100Z",
+                "message": {"role": "user", "content": [{
+                    "tool_use_id": "toolu_01", "type": "tool_result",
+                    "content": [{"type": "text", "text": "Async agent launched successfully. agentId: a980553ddc890e37a"}],
+                }]},
+                "toolUseResult": {"isAsync": true, "status": "async_launched", "agentId": "a980553ddc890e37a"},
+            }),
+            json!({
+                "type": "user", "uuid": "u2", "timestamp": "2026-10-15T14:20:02.000Z",
+                "message": {"role": "user", "content": agent_notification(
+                    "a980553ddc890e37a",
+                    "completed",
+                    "Agent \"probe &lt;x&gt; &amp; \"y\"\" finished",
+                    Some(FINAL_AGENT_NOTE),
+                    "Found it: `Vec&lt;String&gt;` &amp; `a &amp;&amp; b` in &lt;code&gt; \"q\" 'a'",
+                )},
+            }),
+        ];
+        let detail = parse_lines("escaped", &record_lines(&records));
+        let raw = detail
+            .turns
+            .iter()
+            .flat_map(|t| t.blocks.iter())
+            .find_map(|b| match b {
+                ContentBlock::ToolResult {
+                    output_preview: Some(o),
+                    ..
+                } => o.strip_prefix(BACKGROUND_TASK_MARKER),
+                _ => None,
+            })
+            .expect("the launch card carries a lifecycle marker");
+        let marker: serde_json::Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(marker["summary"], "Agent \"probe <x> & \"y\"\" finished");
+        assert_eq!(
+            marker["result"],
+            "Found it: `Vec<String>` & `a && b` in <code> \"q\" 'a'"
+        );
+    }
+
+    /// CLI 2.1.300 writes each main-loop API request into the transcript: the
+    /// system prompt and tools once per shape (`api-request-shape`), the
+    /// messages the transcript does not already hold (`api-request-blob`, the
+    /// prompt as sent among them), and one `api-request` per request, which the
+    /// reply's records name in `requestRef`. Record shapes as measured on a live
+    /// 2.1.300 session, trimmed. None of it is conversation: the parse must
+    /// read exactly as the same session without them (the 2.1.296 shape). (A
+    /// request still waiting on its reply is the newest timestamped record, so
+    /// like any record it moves the summary's `ended_at` to when it was sent.)
+    #[test]
+    fn the_api_request_records_of_cli_2_1_300_change_nothing_parsed() {
+        let shape = json!({
+            "type": "api-request-shape", "sessionId": "s1",
+            "shapeHash": "cc7642af",
+            "shape": {
+                "system": [{"type": "text", "text": "You are Claude Code."}],
+                "tools": [{"name": "Bash", "description": "Run a command", "input_schema": {"type": "object"}}],
+            },
+        });
+        let blob = |hash: &str, role: &str, text: &str| {
+            json!({
+                "type": "api-request-blob", "sessionId": "s1", "hash": hash,
+                "message": {"role": role, "content": [{"type": "text", "text": text}]},
+            })
+        };
+        let request = |id: &str, ts: &str, base: Option<&str>, tail: &[&str]| {
+            let mut r = json!({
+                "type": "api-request", "sessionId": "s1", "id": id, "timestamp": ts,
+                "version": "2.1.300", "querySource": "sdk", "shapeHash": "cc7642af",
+                "params": {
+                    "model": "claude-opus-5-5", "max_tokens": 128000,
+                    "thinking": {"type": "adaptive", "display": "updates"},
+                    "output_config": {"effort": "medium"},
+                },
+                "keep": 0, "tail": tail,
+                "cacheControl": [{"path": ["system", 0], "value": {"type": "ephemeral"}}],
+                "requestDigest": "d4bce501",
+            });
+            if let Some(base) = base {
+                r["base"] = json!(base);
+                r["keep"] = json!(2);
+            }
+            r
+        };
+        let assistant = |uuid: &str,
+                         ts: &str,
+                         request: &str,
+                         msg: &str,
+                         content: serde_json::Value| {
+            json!({
+                "type": "assistant", "sessionId": "s1", "uuid": uuid, "timestamp": ts, "requestRef": request,
+                "message": {
+                    "id": msg, "role": "assistant", "model": "claude-opus-5-5", "content": content,
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+                },
+            })
+        };
+        let with_requests = vec![
+            json!({
+                "type": "user", "sessionId": "s1", "uuid": "u1", "timestamp": "2026-10-15T13:55:16.940Z", "promptId": "p1",
+                "message": {"role": "user", "content": [{"type": "text", "text": "Run the records probe"}]},
+            }),
+            shape,
+            blob(
+                "696a9d59",
+                "user",
+                "<system-reminder>\nAttribution …\n</system-reminder>\nRun the records probe",
+            ),
+            blob(
+                "5e31db53",
+                "system",
+                "# Environment\nYou have been invoked in the following environment",
+            ),
+            request(
+                "r1",
+                "2026-10-15T13:55:16.968Z",
+                None,
+                &["696a9d59", "5e31db53"],
+            ),
+            assistant(
+                "a1",
+                "2026-10-15T13:55:17.010Z",
+                "r1",
+                "msg_1",
+                json!([{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "echo records-probe", "description": "probe command"}}]),
+            ),
+            json!({
+                "type": "user", "sessionId": "s1", "uuid": "u2", "timestamp": "2026-10-15T13:55:17.030Z", "promptId": "p1",
+                "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "records-probe"}]},
+                "toolUseResult": {"stdout": "records-probe", "stderr": "", "interrupted": false},
+            }),
+            blob(
+                "39e44cd0",
+                "system",
+                "<total_tokens>14999985 tokens left</total_tokens>",
+            ),
+            request(
+                "r2",
+                "2026-10-15T13:55:17.033Z",
+                Some("r1"),
+                &["b9052120", "a79caadf", "39e44cd0"],
+            ),
+            assistant(
+                "a2",
+                "2026-10-15T13:55:17.040Z",
+                "r2",
+                "msg_2",
+                json!([{"type": "text", "text": "done"}]),
+            ),
+            json!({"type": "last-prompt", "sessionId": "s1", "lastPrompt": "Run the records probe", "leafUuid": "a2"}),
+        ];
+        let without_requests: Vec<serde_json::Value> = with_requests
+            .iter()
+            .filter(|r| !r["type"].as_str().unwrap_or("").starts_with("api-request"))
+            .map(|r| {
+                let mut r = r.clone();
+                if let Some(o) = r.as_object_mut() {
+                    o.remove("requestRef");
+                }
+                r
+            })
+            .collect();
+        assert_eq!(with_requests.len() - without_requests.len(), 6);
+
+        let with = parse_lines("req", &record_lines(&with_requests));
+        let without = parse_lines("req", &record_lines(&without_requests));
+        assert_eq!(
+            serde_json::to_value(&with.turns).unwrap(),
+            serde_json::to_value(&without.turns).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&with.summary).unwrap(),
+            serde_json::to_value(&without.summary).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&with.session_stats).unwrap(),
+            serde_json::to_value(&without.session_stats).unwrap()
+        );
+        // One prompt, though the prompt as sent is in a blob too.
+        assert_eq!(
+            turn_texts(&with.turns),
+            vec![
+                ("user", "Run the records probe".to_string()),
+                ("assistant", "<Bash>".to_string()),
+                ("assistant", "done".to_string()),
+            ]
+        );
+
+        let summarize = |records: &[serde_json::Value]| {
+            let path = std::env::temp_dir().join(format!(
+                "codeg-claude-api-request-{}.jsonl",
+                uuid::Uuid::new_v4()
+            ));
+            fs::write(&path, record_lines(records).join("\n") + "\n").expect("write transcript");
+            let summary = ClaudeParser {
+                base_dir: PathBuf::new(),
+            }
+            .parse_jsonl_summary(&path)
+            .expect("parse summary")
+            .expect("summary present");
+            fs::remove_file(&path).expect("cleanup temp jsonl");
+            serde_json::to_value(summary).unwrap()
+        };
+        assert_eq!(summarize(&with_requests), summarize(&without_requests));
     }
 
     /// #948: built with an agent's launch env, the parser reads where THAT

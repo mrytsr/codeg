@@ -762,13 +762,105 @@
       "tabGeneral": "通用",
       "tabAgentDefaults": "子智能体配置",
       "agentDefaultsDescription": "多智能体协同在为委托调用启动子智能体时使用这些覆盖项。下方选项通过实时探测获取，所选即所用。",
+      "agentDefaultsAgentHint": "保持「默认」的选项沿用智能体自己的设置。",
+      "agentDefaultsDelegationOff": "多智能体协同已关闭，打开后才能修改这些设置。",
       "probing": "正在加载该智能体的可用配置项…",
       "probeFailed": "加载配置项失败：{detail}",
       "retry": "重试",
       "noConfigAvailable": "该智能体没有可配置项。",
       "modeLabel": "模式",
       "agentDefaultHint": "智能体默认：{value}",
-      "defaultOptionLabel": "默认（{value}）"
+      "defaultOptionLabel": "默认（{value}）",
+      "overrideCount": "已自定义 {count} 项",
+      "tabAssistants": "助手配置",
+      "booleanOn": "开启",
+      "booleanOff": "关闭",
+      "modelNotSwitched": "智能体没有切换到所选模型，下面的选项可能属于另一个模型。",
+      "unsavedChanges": "有未保存的修改",
+      "assistants": {
+        "description": "助手是可以被 @ 的委派预设：一个智能体、选定的每一项选项，加上常驻指令。委派给助手时，就按这套设置运行。",
+        "create": "新建助手",
+        "delegationOff": "多智能体协同已关闭，助手暂时不能被委派。",
+        "delegationOffAction": "前往「{tab}」",
+        "unsavedElsewhere": "{tabs}有未保存的修改。",
+        "unsavedGoBack": "返回",
+        "loadFailed": "加载助手失败：{detail}",
+        "emptyTitle": "还没有助手",
+        "empty": "新建一个，给智能体一套固定的设置和常驻指令，在任何会话里都能 @ 它。",
+        "reorderFailed": "调整助手顺序失败",
+        "saveFailed": "保存助手失败",
+        "duplicated": "已创建 {name}",
+        "deleteFailed": "删除助手失败",
+        "deleteTitle": "删除 {name}？",
+        "deleteDescription": "它会从设置和提及面板中消失，也不能再被委派。会话里已有的委派卡片仍会显示它。",
+        "cancel": "取消",
+        "delete": "删除",
+        "duplicate": "创建副本",
+        "move": "移动 {name}",
+        "enableAssistant": "启用 {name}",
+        "edit": "编辑 {name}",
+        "more": "{name} 的更多操作",
+        "agentNotInstalled": "未安装",
+        "agentDisabled": "已停用",
+        "createTitle": "新建助手",
+        "editTitle": "编辑助手",
+        "editorDescription": "委派给这个助手时，就按这里设定的智能体、选项和常驻指令运行。",
+        "nameLabel": "名称",
+        "namePlaceholder": "例如：代码审查员",
+        "descriptionLabel": "简介",
+        "descriptionPlaceholder": "什么时候用这个助手",
+        "descriptionHint": "显示在提及面板中，也会告诉发起委派的智能体什么时候该选这个助手。",
+        "agentLabel": "智能体",
+        "agentPlaceholder": "选择智能体",
+        "agentHint": "它的每一项选项都要选定。",
+        "instructionsLabel": "常驻指令",
+        "instructionsPlaceholder": "这个助手每次接任务时都要遵守的角色和工作要求",
+        "instructionsHint": "每次委派时随任务一起交给智能体，不会显示在子会话的消息里。",
+        "charCount": "{count} / {max}",
+        "save": "保存",
+        "createSubmit": "创建",
+        "pickAgentFirst": "先选择智能体，再选它的选项。",
+        "pickModelFirst": "选择模型后显示其余选项。",
+        "modelNotSwitched": "智能体没有切换到这个模型，读不到它的其余选项。可以重试，也可以换一个模型。",
+        "agentUnavailableHint": "这个智能体已停用或未安装，无法核对它的选项。下面是存着的选项；改选别的智能体才能修改。",
+        "optionsChanged": "智能体的选项有变化，请补选标出的 {count} 项。",
+        "missingCount": "还有 {count} 项未选",
+        "cannotSaveProbeFailed": "无法保存：读不到智能体的选项，无法确认每一项都已选定。请先重试。",
+        "cannotSaveModelNotSwitched": "无法保存：智能体没有切换到所选模型。请重试，或换一个模型。",
+        "cannotSaveStillLoading": "正在读取智能体的选项…",
+        "savedOptions": "存着的选项",
+        "savedNoOptions": "这个智能体没有存任何选项。",
+        "required": "必填",
+        "selectPlaceholder": "请选择",
+        "noValuesOffered": "没有可选值",
+        "recommended": "推荐",
+        "optionNew": "新增",
+        "optionUnavailable": "不可用（原为 {value}）",
+        "avatarChange": "更换头像",
+        "avatarMonogram": "字母",
+        "avatarEmoji": "Emoji",
+        "avatarImage": "图片",
+        "avatarMonogramHint": "取名称的第一个字。",
+        "avatarUseMonogram": "使用字母",
+        "avatarEmojiPlaceholder": "输入或粘贴 emoji",
+        "avatarEmojiUse": "使用",
+        "avatarUpload": "上传图片",
+        "avatarUploadHint": "会居中裁成正方形，并缩小到 128×128。",
+        "avatarTooLarge": "这张图片缩小之后仍然太大，请换一张。",
+        "avatarUnreadable": "无法把这个文件读成图片。",
+        "avatarColor": "颜色",
+        "errors": {
+          "emptyName": "请填写助手名称。",
+          "nameTooLong": "名称最多 {max} 个字。",
+          "duplicateName": "已经有一个名为“{name}”的助手。",
+          "descriptionTooLong": "简介最多 {max} 个字。",
+          "instructionsTooLong": "常驻指令最多 {max} 个字。",
+          "invalidAvatar": "这个头像不能用，请换一个。",
+          "avatarTooLarge": "头像图片太大。",
+          "invalidAgentOptions": "智能体的选项没有选齐。请重新打开助手，把每一项都选上。",
+          "notFound": "这个助手已经不存在了。"
+        }
+      }
     },
     "actions": {
       "dragSort": "拖拽排序",
@@ -780,6 +872,7 @@
       "install": "安装",
       "upgrade": "升级",
       "uninstall": "卸载",
+      "installGuide": "安装指南",
       "uninstalling": "卸载中...",
       "saveEnvVars": "保存环境变量",
       "saving": "保存中...",
@@ -1006,6 +1099,19 @@
       "tempReclaimConfirmAction": "删除",
       "tempReclaimCancel": "取消"
     },
+    "kiro": {
+      "configManagement": "配置管理",
+      "configDescription": "Kiro CLI 的登录状态、agent 与 MCP 服务器都保存在 ~/.kiro。模型、agent、thinking 与思考等级不在这里：Kiro 通过 ACP 上报它们，由输入框的选择器按会话管理。",
+      "permissionsTitle": "权限",
+      "permissionModeLabel": "权限模式",
+      "permissionModeAsk": "运行工具前询问（默认）",
+      "permissionModeTrustAll": "信任所有工具（--trust-all-tools）",
+      "permissionModeAskHint": "需要确认的工具调用（执行命令、写文件等）会先交给你确认；只读工具直接运行。",
+      "permissionModeTrustAllHint": "以 --trust-all-tools 启动会话：所有工具调用都不再弹确认，包括执行命令和写文件。对新会话生效。",
+      "apiKeyLabel": "API Key（可选）",
+      "apiKeyHint": "以 KIRO_API_KEY 传给 CLI。留空则使用 kiro-cli login 登录的账号；只有无法用浏览器登录的环境（服务器、Docker）才需要 API Key。",
+      "saveConfig": "保存 Kiro 配置"
+    },
     "deepseek": {
       "configManagement": "DeepSeek Harness 配置",
       "configDescription": "端点与密钥是 deepseek-acp 启动时读取的环境变量。模型和推理档位是会话级选择器，在输入框里切换。",
@@ -1222,7 +1328,7 @@
         "defaultAgent": "默认智能体",
         "defaultAgentHint": "新会话使用哪个主智能体。留空或填了无效名称时回落到 build。",
         "share": "会话分享",
-        "shareHint": "会话是否可以发布成分享链接。",
+        "shareHint": "会话是否可以发布成分享链接。OpenCode 已在 1.19.1 停止会话分享，从该版本起此项不再生效。",
         "shareManual": "手动（需要时才分享）",
         "shareAuto": "自动（每个新会话都分享）",
         "shareDisabled": "禁用",
@@ -1502,14 +1608,24 @@
       "saveQoderConfigFailed": "保存 Qoder 配置失败",
       "antigravitySaved": "已保存 Antigravity 配置",
       "antigravitySyncSkipped": "已保存，但没有改动 Antigravity 的 settings.json",
-      "saveAntigravityConfigFailed": "保存 Antigravity 配置失败"
+      "saveAntigravityConfigFailed": "保存 Antigravity 配置失败",
+      "kiroSaved": "Kiro 配置已保存",
+      "saveKiroFailed": "保存 Kiro 配置失败",
+      "systemAgentAlreadyLatest": "{name} 已是最新版本（{version}）"
+    },
+    "distribution": {
+      "system": "官方安装"
     },
     "version": {
       "statusLabel": "版本状态",
       "notInstalled": "未安装",
       "recommendedLocal": "推荐：{recommendedVersion} · 本地：{localVersion}",
       "localOnly": "本地：{localVersion}",
+      "localUndetected": "本地：未检测到版本",
       "localInstalled": "{versionText}。已安装。",
+      "systemInstalled": "{versionText}。由其官方安装程序安装和更新，Codeg 直接启动这份安装。",
+      "systemInstalledUpdatable": "{versionText}。通过官方安装程序安装；点击「升级」会运行它自带的更新程序。",
+      "systemMissing": "本机未找到。请用官方安装程序安装后再刷新。",
       "platformUnsupported": "{versionText}。当前平台不支持该 Agent。",
       "uvxNotReady": "{versionText}。uv 运行时未安装——请在下方 uv 预检项中安装后再使用该 Agent。",
       "clickInstall": "{versionText}。请点击右侧安装。",
@@ -1688,7 +1804,11 @@
     "customAgentRemoved": "已移除 {name}",
     "customAgentBadge": "自定义",
     "customAgentNotLaunchable": "该智能体在此环境无法启动：{reason}",
-    "providerSourceActiveHint": "此智能体使用共享模型供应商目录，原生模型设置已隐藏。"
+    "providerSourceActiveHint": "此智能体使用共享模型供应商目录，原生模型设置已隐藏。",
+    "zcode": {
+      "adapterInfo": "Codeg 通过 {adapterPackage} 桥接 ACP。请先安装并登录官方 ZCode；桥接器使用其运行时和现有配置。",
+      "runtimeHint": "请先安装并登录官方 ZCode，Codeg 仅安装 ACP 桥接器。自动检测失败时，可用 ZCODE_BIN 指定 CLI 入口、ZCODE_NODE 指定 Node.js。模型和凭据在 ZCode 中管理。"
+    }
   },
   "AgentVocabulary": {
     "deepseekModeDefault": "常规",
@@ -2125,7 +2245,8 @@
       "updatedAt": "更新时间",
       "none": "—",
       "copyField": "复制{field}",
-      "copiedField": "已复制{field}"
+      "copiedField": "已复制{field}",
+      "assistant": "助手"
     },
     "conversationCard": {
       "untitledConversation": "未命名会话",
@@ -3227,7 +3348,8 @@
         "mentionGroupAgent": "智能体",
         "mentionGroupSession": "会话",
         "mentionGroupCommit": "提交",
-        "mentionGroupSkill": "技能"
+        "mentionGroupSkill": "技能",
+        "mentionGroupAssistant": "助手"
       },
       "messageQueue": {
         "addToQueue": "加入队列",
@@ -3437,10 +3559,12 @@
         "downloadSvg": "下载为 SVG",
         "downloadPng": "下载为 PNG",
         "downloadMmd": "下载源码（.mmd）",
+        "downloadPuml": "下载源码（.puml）",
         "downloadFailed": "图表保存失败",
         "copySource": "复制源码",
         "copied": "已复制",
         "renderFailed": "Mermaid 错误：{message}",
+        "plantumlRenderFailed": "PlantUML 错误：{message}",
         "showSource": "查看源码",
         "retry": "重试"
       },
@@ -3592,9 +3716,14 @@
             "child_auth_required": "子智能体需登录",
             "child_rejected": "子代理拒绝该请求",
             "child_unknown": "子代理未知错误",
-            "unknown": "未知任务"
+            "unknown": "未知任务",
+            "assistant_not_found": "助手不存在",
+            "assistants_unsupported": "需要重启",
+            "assistant_support_unknown": "未响应"
           }
-        }
+        },
+        "unknownAssistant": "助手 #{id}",
+        "deletedAssistant": "（已删除）"
       },
       "contentParts": {
         "showingTailOutput": "为保证性能，流式输出时仅显示尾部内容。",
@@ -3612,6 +3741,8 @@
         "limit": "限制：{limit}",
         "pages": "页码：{pages}",
         "allowLarge": "超出大小限制",
+        "readImageLoading": "正在加载图片…",
+        "readImageError": "无法加载图片",
         "mode": "模式：{mode}",
         "cell": "单元：{cell}",
         "shellSession": "会话 {id}",
@@ -3967,6 +4098,7 @@
         "cardRunning": "后台运行中",
         "cardLaunchedPending": "已启动后台任务",
         "cardCompleted": "后台任务已完成",
+        "cardInterim": "后台任务：阶段性结果",
         "cardFinishedWithStatus": "后台任务已结束（{status}）",
         "cardResultPending": "结果尚未返回"
       },
@@ -4932,6 +5064,7 @@
     "manage": "管理远端工作区",
     "manageTitle": "远端工作区连接",
     "empty": "暂无远端连接",
+    "noMatches": "没有匹配的远端连接",
     "searchPlaceholder": "搜索远端工作区",
     "orderFailed": "保存远端工作区排序失败",
     "dragSort": "拖拽排序",
@@ -5073,7 +5206,8 @@
       "customAgents": "自定义智能体",
       "quickMessages": "快捷消息",
       "taskTemplates": "任务模板",
-      "preferences": "应用偏好（语言、外观、开关）"
+      "preferences": "应用偏好（语言、外观、开关）",
+      "assistants": "助手"
     },
     "scopeExcluded": {
       "conversations": "会话记录与历史",
@@ -5143,7 +5277,8 @@
       "customAgents": "{count} 个自定义智能体",
       "quickMessages": "{count} 条快捷消息",
       "taskTemplates": "{count} 个任务模板",
-      "preferences": "{count} 项应用偏好"
+      "preferences": "{count} 项应用偏好",
+      "assistants": "{count} 个助手"
     },
     "rollbackTitle": "撤销导入",
     "rollbackHint": "每次导入和每次还原前，都会先保存这台设备当时的配置，最近十份会保留下来。",
@@ -5159,7 +5294,8 @@
     "passphrase": "加密口令",
     "passphraseKeep": "留空则沿用已保存的口令",
     "passphrasePlaceholder": "加密口令",
-    "passphraseHint": "只保存在这台设备的钥匙串里，不会上传。请在你的其他设备上输入同一个口令。"
+    "passphraseHint": "只保存在这台设备的钥匙串里，不会上传。请在你的其他设备上输入同一个口令。",
+    "assistantsRenamed": "有 {count} 个助手与本机已有的助手重名，已自动改名。"
   },
   "backup": {
     "restore": {
@@ -5866,7 +6002,10 @@
     "cronApply": "应用",
     "cronPreviewLabel": "预览",
     "cronOpenBuilder": "打开计划生成器",
-    "branchDefault": "默认分支"
+    "branchDefault": "默认分支",
+    "booleanOn": "开启",
+    "booleanOff": "关闭",
+    "modelNotSwitched": "智能体没有切换到所选模型，下面的选项可能属于另一个模型。"
   },
   "Tasks": {
     "title": "待办任务",
@@ -5910,6 +6049,7 @@
     "statusFailed": "失败",
     "statusCanceled": "已取消",
     "statusInterrupted": "已中断",
+    "statusDeferred": "以后处理",
     "badgeCleanupFailed": "清理失败",
     "badgeWorktreeKept": "保留 worktree",
     "badgeWorktreeRemoved": "Worktree 已删除",
@@ -5962,6 +6102,7 @@
     "actionFollowUp": "继续处理",
     "actionAddNote": "补充说明",
     "followUpSubmit": "发送",
+    "followUpDialogDescription": "选个场景并写下要求，agent 会在原会话里接着处理这个任务，卡片随即回到进行中。",
     "followUpIntentRevise": "修改返工",
     "followUpIntentContinue": "继续推进",
     "followUpIntentQuestion": "提问答疑",
@@ -5974,6 +6115,8 @@
     "followUpPlaceholderRequeue": "可选：当时为什么取消？这次要注意什么？",
     "actionArchive": "归档",
     "actionUnarchive": "取消归档",
+    "actionDefer": "以后处理",
+    "actionUndefer": "移回等你处理",
     "archiveAllDone": "全部归档",
     "dropToStart": "松开即开始执行",
     "errorView": "查看",

@@ -8,9 +8,7 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use walkdir::WalkDir;
 
-use crate::acp::agent_mentions::{
-    contains_only_internal_agent_routes, strip_internal_agent_routes,
-};
+use crate::acp::agent_mentions::{contains_only_internal_frames, strip_internal_frames};
 use crate::acp::js_text::is_js_whitespace;
 use crate::models::*;
 use crate::parsers::codex_code_mode::{
@@ -581,12 +579,12 @@ impl CodexParser {
                                 }
 
                                 let visible_text =
-                                    strip_internal_agent_routes(&decode_user_text(raw_text));
+                                    strip_internal_frames(&decode_user_text(raw_text));
                                 let has_images = payload
                                     .get("images")
                                     .and_then(|v| v.as_array())
                                     .is_some_and(|images| !images.is_empty());
-                                if contains_only_internal_agent_routes(raw_text) && !has_images {
+                                if contains_only_internal_frames(raw_text) && !has_images {
                                     continue;
                                 }
                                 if skip_duplicate_user_record(
@@ -3533,7 +3531,7 @@ impl CodexParser {
                                     }
                                 }
 
-                                if blocks.is_empty() && contains_only_internal_agent_routes(&text) {
+                                if blocks.is_empty() && contains_only_internal_frames(&text) {
                                     continue;
                                 }
 
@@ -6196,7 +6194,7 @@ fn promotion_payload_type<'a>(msg_type: &str, value: &'a serde_json::Value) -> &
         let route_only = payload
             .and_then(|payload| payload.get("message"))
             .and_then(serde_json::Value::as_str)
-            .is_some_and(contains_only_internal_agent_routes);
+            .is_some_and(contains_only_internal_frames);
         let has_images = payload
             .and_then(|payload| payload.get("images"))
             .and_then(serde_json::Value::as_array)
@@ -6781,7 +6779,7 @@ fn strip_blocked_resource_mentions(input: &str) -> String {
     let blocked_re = Regex::new(r"@([^\s@]+)\s*\[blocked[^\]]*\]").expect("valid blocked regex");
     let image_tag_re = Regex::new(r"(?i)</?image\s*/?>").expect("valid image tag regex");
     let collapsed_ws_re = Regex::new(r"[ \t]{2,}").expect("valid whitespace regex");
-    let visible = strip_internal_agent_routes(input);
+    let visible = strip_internal_frames(input);
     let text = blocked_re.replace_all(&visible, "").to_string();
     let text = image_tag_re.replace_all(&text, "").to_string();
     let text = collapsed_ws_re.replace_all(&text, " ").to_string();
@@ -14589,6 +14587,84 @@ mod tests {
         );
 
         let _ = fs::remove_file(path);
+    }
+
+    /// `view_image` returns the picture itself: an `input_image` holding a
+    /// base64 data URL, and no text. That used to land on the card as the whole
+    /// JSON object, base64 included, under a card that showed no picture. The
+    /// call keeps the path it viewed, which is how the card shows the picture.
+    #[test]
+    fn view_image_output_carries_no_base64_text() {
+        let image = serde_json::json!({
+            "type": "input_image",
+            "image_url": "data:image/png;base64,iVBORw0KGgo=",
+            "detail": "high",
+        });
+        let lines = vec![
+            rollout_line(
+                "2026-07-20T08:40:00Z",
+                "event_msg",
+                serde_json::json!({"type": "user_message", "message": "look"}),
+            ),
+            rollout_line(
+                "2026-07-20T08:40:01Z",
+                "response_item",
+                serde_json::json!({
+                    "type": "function_call",
+                    "name": "view_image",
+                    "call_id": "call_v",
+                    "arguments": "{\"path\":\"/tmp/shot.png\",\"detail\":\"high\"}",
+                }),
+            ),
+            rollout_line(
+                "2026-07-20T08:40:02Z",
+                "response_item",
+                serde_json::json!({
+                    "type": "function_call_output",
+                    "call_id": "call_v",
+                    "output": [image],
+                }),
+            ),
+            // Code mode: the script hands the same picture back with `image()`.
+            rollout_line(
+                "2026-07-20T08:40:03Z",
+                "response_item",
+                serde_json::json!({
+                    "type": "custom_tool_call",
+                    "name": "exec",
+                    "call_id": "call_s",
+                    "input": "const r = await tools.view_image({path:\"/tmp/other.png\", detail:\"original\"});\nimage(r.image_url);\n",
+                }),
+            ),
+            rollout_line(
+                "2026-07-20T08:40:04Z",
+                "response_item",
+                serde_json::json!({
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_s",
+                    "output": [
+                        {"type": "input_text", "text": "Script completed\nWall time 0.0 seconds\nOutput:\n"},
+                        image,
+                    ],
+                }),
+            ),
+        ];
+        let detail = parse_lines(&lines, "view-image");
+
+        let uses = tool_uses(&detail);
+        for path in ["/tmp/shot.png", "/tmp/other.png"] {
+            assert!(
+                uses.iter().any(|(_, name, input)| name == "view_image"
+                    && input.as_deref().is_some_and(|i| i.contains(path))),
+                "a view_image card for {path}: {uses:?}"
+            );
+        }
+        let results = tool_results(&detail);
+        assert_eq!(results.len(), 2, "{results:?}");
+        for (id, output, is_error) in &results {
+            assert_eq!(output, &None, "{id}");
+            assert!(!is_error, "{id}");
+        }
     }
 
     /// `wait` / `write_stdin` carry a session id, never a command — which is

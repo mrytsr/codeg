@@ -24,6 +24,9 @@ import type {
   AgentType,
   AgentDelegationDefaults,
   AgentOptionsSnapshot,
+  AssistantDraft,
+  AssistantInfo,
+  AssistantPatch,
   Automation,
   AutomationRun,
   AutomationDraft,
@@ -566,6 +569,27 @@ export async function acpDownloadAgentBinary(
     version: version ?? null,
     taskId,
   })
+}
+
+/**
+ * Upgrade an agent codeg launches but does not install (Kiro CLI) through the
+ * vendor's own updater, streaming its output on the install topic. Resolves to
+ * the version found afterwards — the same one when nothing newer existed.
+ */
+export async function acpUpdateSystemAgent(
+  agentType: AgentType,
+  taskId: string
+): Promise<string | null> {
+  // The updater downloads a whole build (Kiro's are 150–360 MB), and the
+  // backend gives it up to 15 minutes (`SYSTEM_UPDATE_TIMEOUT`). Outlast that,
+  // so a slow update ends with the backend's own answer instead of the default
+  // 60 s web-call timeout — which would report a failure and free the Upgrade
+  // button while the updater is still running.
+  return getTransport().call(
+    "acp_update_system_agent",
+    { agentType, taskId },
+    { timeoutMs: 16 * 60_000 }
+  )
 }
 
 export async function acpInstallUvTool(taskId: string): Promise<void> {
@@ -2242,11 +2266,16 @@ export async function mcpUpsertLocalServer(params: {
   serverId: string
   spec: Record<string, unknown>
   apps: McpAppType[]
+  /** The spec the editor loaded before the edit (omit for a new server): an
+   * agent that keeps per-server settings of its own (Kiro) keeps them for
+   * every field the edit left alone. */
+  shownSpec?: Record<string, unknown> | null
 }): Promise<LocalMcpServer> {
   return getTransport().call("mcp_upsert_local_server", {
     serverId: params.serverId,
     spec: params.spec,
     apps: params.apps,
+    shownSpec: params.shownSpec ?? null,
   })
 }
 
@@ -2377,6 +2406,38 @@ export async function setFolderGroup(
   groupId: number | null
 ): Promise<void> {
   return getTransport().call("set_folder_group", { folderId, groupId })
+}
+
+/** Every assistant, tombstones included, in display order. */
+export async function assistantList(): Promise<AssistantInfo[]> {
+  return getTransport().call("assistant_list", {})
+}
+
+export async function assistantCreate(
+  draft: AssistantDraft
+): Promise<AssistantInfo> {
+  return getTransport().call("assistant_create", { draft })
+}
+
+/** Apply an edit; only the fields present change. */
+export async function assistantUpdate(
+  id: number,
+  patch: AssistantPatch
+): Promise<AssistantInfo> {
+  return getTransport().call("assistant_update", { id, patch })
+}
+
+/** Soft-delete; resolves to the tombstone. */
+export async function assistantDelete(id: number): Promise<AssistantInfo> {
+  return getTransport().call("assistant_delete", { id })
+}
+
+/** Persist the order after a drag (the complete list, first to last);
+ *  resolves to the rows whose position changed. */
+export async function assistantReorder(
+  ids: number[]
+): Promise<AssistantInfo[]> {
+  return getTransport().call("assistant_reorder", { ids })
 }
 
 export async function listConversationTags(): Promise<ConversationTagDetail[]> {
@@ -4113,6 +4174,16 @@ export async function workTaskArchive(
   archived: boolean
 ): Promise<void> {
   return getTransport().call("work_task_archive", { id, archived })
+}
+
+/** Put a reviewed / failed task aside to handle later ("以后处理" — it waits
+ *  under Done), or bring it back to "needs you". No status change: a follow-up,
+ *  retry or merge picks a deferred task back up on its own. */
+export async function workTaskDefer(
+  id: number,
+  deferred: boolean
+): Promise<void> {
+  return getTransport().call("work_task_defer", { id, deferred })
 }
 
 /** Remove the task's worktree + branch (also retries a failed cleanup). */

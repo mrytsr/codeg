@@ -1,4 +1,4 @@
-/** The fifteen agents codeg ships hand-written support for. */
+/** The seventeen agents codeg ships hand-written support for. */
 export type BuiltinAgentType =
   | "claude_code"
   | "codex"
@@ -15,6 +15,8 @@ export type BuiltinAgentType =
   | "deepseek"
   | "qoder"
   | "antigravity"
+  | "kiro"
+  | "zcode"
 
 /**
  * Which agent backs a conversation.
@@ -600,6 +602,11 @@ export interface DbConversationSummary {
    *  worktree path it originally ran in. Drives the "source worktree removed"
    *  badge. */
   origin_cwd?: string | null
+  /** The assistant a delegation child ran as, and its name when the
+   *  delegation started (off the child row's snapshot). Absent on every other
+   *  row. Prefer the assistant store's current name when it knows the id. */
+  assistant_id?: number
+  assistant_name?: string
   /**
    * Ids of the {@link ConversationTagDetail tags} on this conversation,
    * ascending. Absent when it has none (the backend omits an empty list). May
@@ -1103,6 +1110,8 @@ export const AGENT_DISPLAY_ORDER: BuiltinAgentType[] = [
   "deepseek",
   "qoder",
   "antigravity",
+  "kiro",
+  "zcode",
 ]
 
 const AGENT_DISPLAY_ORDER_INDEX = new Map<AgentType, number>(
@@ -1137,6 +1146,8 @@ export const ALL_AGENT_TYPES: BuiltinAgentType[] = [
   "deepseek",
   "qoder",
   "antigravity",
+  "kiro",
+  "zcode",
 ]
 
 export const MODEL_PROVIDER_AGENT_TYPES: BuiltinAgentType[] = [
@@ -1448,6 +1459,8 @@ export const AGENT_LABELS: Record<BuiltinAgentType, string> = {
   deepseek: "DeepSeek Harness",
   qoder: "Qoder",
   antigravity: "Google Antigravity",
+  kiro: "Kiro CLI",
+  zcode: "ZCode",
 }
 
 export const AGENT_COLORS: Record<BuiltinAgentType, string> = {
@@ -1466,6 +1479,8 @@ export const AGENT_COLORS: Record<BuiltinAgentType, string> = {
   deepseek: "bg-[#4D6BFE]",
   qoder: "bg-[#6C4CF1]",
   antigravity: "bg-[#1A73E8]",
+  kiro: "bg-[#9046FF]",
+  zcode: "bg-[#111827]",
 }
 
 // ACP connection status (matches Rust ConnectionStatus)
@@ -1655,12 +1670,124 @@ export interface AgentOptionsSnapshot {
    *  with no live session (the to-do task boxes) encode an attached image the
    *  way this agent takes it. Null when the agent advertised none. */
   prompt_capabilities?: PromptCapabilitiesInfo | null
+  /** The options the probe was asked to set but did not end up holding —
+   *  `model` here means the snapshot describes the agent's OTHER model, not
+   *  the one asked for (the applied options' `current_value` is rewritten to
+   *  the agent's own pick, so nothing else tells). Always sent by current
+   *  backends; absent only from one that predates it. */
+  unapplied_config_ids?: string[]
 }
 
 export interface AgentDelegationDefaults {
   mode_id?: string | null
   config_values: Record<string, string>
 }
+
+// ─── Assistants ────────────────────────────────────────────────────────────
+// Mirrors src-tauri/src/models/assistant.rs (snake_case wire form). An
+// assistant is a delegation preset the composer can @-mention: an identity, an
+// agent with EVERY option it advertises picked explicitly, and standing
+// instructions handed to the delegated child.
+
+/** Palette keys an avatar colour is picked from (not colours: the UI maps each
+ *  to its own light/dark treatment). Same list as the backend validates. */
+export const ASSISTANT_AVATAR_COLORS = [
+  "slate",
+  "red",
+  "orange",
+  "amber",
+  "green",
+  "teal",
+  "sky",
+  "blue",
+  "violet",
+  "pink",
+] as const
+export type AssistantAvatarColor = (typeof ASSISTANT_AVATAR_COLORS)[number]
+
+export type AssistantAvatar =
+  | { kind: "monogram"; color: AssistantAvatarColor }
+  | { kind: "emoji"; emoji: string; color: AssistantAvatarColor }
+  /** A cropped, downscaled `data:image/(png|jpeg|webp);base64,…` URL. */
+  | { kind: "image"; data_url: string }
+
+export type AssistantOptionKind = "select" | "boolean"
+
+/** One option of a saved selection, with the names the editor showed. */
+export interface AssistantOptionLabel {
+  id: string
+  kind: AssistantOptionKind
+  name: string
+  /** The picked value's display name. A boolean's is drawn from its value. */
+  value_label: string
+}
+
+/** The option list a selection was saved against. The settings list reads its
+ *  names without probing; the backend checks the selection is complete
+ *  against it. */
+export interface AssistantLabelSnapshot {
+  agent: string
+  mode: string | null
+  options: AssistantOptionLabel[]
+}
+
+/** The agent, its complete selection and the option list — always submitted
+ *  together. */
+export interface AssistantAgentConfig {
+  agent_type: AgentType
+  agent_options: AgentDelegationDefaults
+  label_snapshot: AssistantLabelSnapshot
+}
+
+export interface AssistantInfo {
+  id: number
+  uid: string
+  name: string
+  description: string
+  avatar: AssistantAvatar
+  agent_type: AgentType
+  /** May arrive without `config_values` when empty (serde skips it). */
+  agent_options: AgentDelegationDefaults
+  label_snapshot: AssistantLabelSnapshot
+  instructions: string
+  enabled: boolean
+  sort_order: number
+  /** Bumped by every write; a client keeps the higher one of two copies. */
+  revision: number
+  created_at: string
+  updated_at: string
+  /** Set on a soft-deleted assistant. Tombstones are kept so history can
+   *  still draw it. */
+  deleted_at: string | null
+}
+
+export interface AssistantDraft {
+  name: string
+  description: string
+  avatar: AssistantAvatar
+  agent_config: AssistantAgentConfig
+  instructions: string
+  enabled: boolean
+}
+
+/** An edit: only the fields present change. */
+export interface AssistantPatch {
+  name?: string
+  description?: string
+  avatar?: AssistantAvatar
+  agent_config?: AssistantAgentConfig
+  instructions?: string
+  enabled?: boolean
+}
+
+/** Payload for `assistant://changed` — always whole rows. Mirrors the Rust
+ *  `AssistantChange` (serde `tag = "kind"`). `resync`: re-read the list. */
+export type AssistantChange =
+  | { kind: "upsert"; assistant: AssistantInfo }
+  | { kind: "reordered"; assistants: AssistantInfo[] }
+  | { kind: "resync" }
+
+export const ASSISTANT_CHANGED_EVENT = "assistant://changed"
 
 // ─── Automations ───────────────────────────────────────────────────────────
 // Mirrors src-tauri/src/models/automation.rs. Wire form is snake_case (serde
@@ -1844,6 +1971,12 @@ export interface WorkTask {
   /** Planned start of a to-do task (ISO); null = no plan. Consumed the moment
    *  the task is claimed, by the scheduler or by hand. */
   scheduled_at: string | null
+  /** The user put this reviewed / failed task aside to handle later (ISO
+   *  instant; "以后处理"): the board files it under Done and the attention badge
+   *  stops counting it, while it stays as resumable as it was. Cleared by every
+   *  way out of review / failed — a follow-up, retry, merge, completion or
+   *  cancel. Absent/null = not put aside (read it through `isDeferred`). */
+  deferred_at?: string | null
   /** Forge provenance ('forge_issue' | 'forge_pr'); absent = not forge-sourced. */
   source_kind?: string | null
   /** Canonical source key ({provider}:{host}:{owner_repo}:{kind}:{number}). */
@@ -2198,6 +2331,9 @@ export interface ForgeTaskLink {
   source_key: string
   task_id: number
   status: WorkTaskStatus
+  /** The task was put aside to handle later (see `WorkTask.deferred_at`) —
+   *  the chip names that instead of its review / failure. Absent = false. */
+  deferred?: boolean
   verdict: string | null
   updated_at: string
 }
@@ -2692,6 +2828,11 @@ export interface ToolCallImageWire {
  * notification names its `Bash` call too, whose card has no marker to flip (the
  * store leaves it alone); absent when the notification names no call (an MCP
  * call moved to the background).
+ *
+ * `interim` (absent unless true) marks a notification whose note says the
+ * sub-agent will notify again: it stopped while background work of its own
+ * still runs, or it is being resumed. Its result may be interim, it is not the
+ * task's end, and it raises no "finished" notification.
  */
 export interface BackgroundSettledInfo {
   task_id: string
@@ -2699,6 +2840,7 @@ export interface BackgroundSettledInfo {
   summary?: string | null
   tool_use_id?: string | null
   result?: string | null
+  interim?: boolean
 }
 
 export type AcpEvent =
@@ -3008,6 +3150,10 @@ export type AcpEvent =
       task_preview?: string | null
       /** Broker-minted task id (the `task_id=` embedded in the running ack). */
       task_id?: string | null
+      /** The assistant the child runs as (`agent_type` is then its agent).
+       *  Absent for a plain agent delegation. */
+      assistant_id?: number | null
+      assistant_name?: string | null
     }
   /**
    * The child sub-session has finished (or errored / timed out / been
@@ -3025,6 +3171,9 @@ export type AcpEvent =
        *  snapshot replay) can bind the correct agent instead of a default. */
       agent_type: AgentType
       result: DelegationResultSummary
+      /** Mirrors `delegation_started`'s assistant identity. */
+      assistant_id?: number | null
+      assistant_name?: string | null
     }
   /**
    * The user's submitted prompt, broadcast on the connection stream so OTHER
@@ -3241,6 +3390,9 @@ export interface ActiveDelegationState {
    *  hosts whose tool call `raw_input` never carries the arguments). */
   task_preview?: string | null
   task_id?: string | null
+  /** The assistant the child runs as, mirrored for the same reason. */
+  assistant_id?: number | null
+  assistant_name?: string | null
 }
 
 /** Lifecycle of a live-feedback note (mirror of Rust `FeedbackStatus`). */
@@ -3578,6 +3730,15 @@ export interface AcpAgentInfo {
    * most-reported confusion.
    */
   is_acp_adapter: boolean
+  /**
+   * The vendor's install page for an agent codeg launches but never installs
+   * (`distribution_type === "system"`, e.g. Kiro CLI). Absent for every agent
+   * codeg installs itself.
+   */
+  install_url?: string | null
+  /** Whether that install can be upgraded from Settings through the vendor's
+   * own updater (`acpUpdateSystemAgent`). */
+  supports_self_update?: boolean
   /**
    * For custom agents, where the definition came from ("registry" | "manual");
    * null for built-ins. A manual definition's registry_version is user-typed,
@@ -4295,6 +4456,8 @@ export type McpAppType =
   | "deepseek"
   | "qoder"
   | "antigravity"
+  | "kiro"
+  | "zcode"
   | "pi"
 
 export interface LocalMcpServer {
@@ -4820,8 +4983,9 @@ export interface AdapterInfo {
   native_cmd: string
   /** Display name for the vendor CLI, e.g. "Codex CLI". */
   native_label: string
-  /** Where the user's own vendor CLI was found. codeg never launches it. */
+  /** Where the vendor CLI was found; required runtimes use this installation. */
   native_path: string | null
+  native_required?: boolean
   /** Config dir both read, so installing the adapter needs no second login. */
   shared_config_dir: string
   docs_url: string
