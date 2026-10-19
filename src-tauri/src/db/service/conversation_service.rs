@@ -137,6 +137,7 @@ async fn create_inner(
         origin_cwd: Set(None),
         assistant_id: Set(assistant_id),
         assistant_snapshot: Set(assistant_snapshot),
+        source: Set(None),
     };
     Ok(model.insert(conn).await?)
 }
@@ -328,6 +329,23 @@ pub async fn seed_model_if_empty(
 /// conversation id is not knowable to any client until that broadcast, so
 /// locking first makes an auto-title backfill on this row impossible rather
 /// than merely unlikely.
+/// Record where conversation `conversation_id` was started from (see
+/// `conversation::Model::source`). Written once, right after the row is
+/// created and before it is announced, so the first upsert carries it.
+pub async fn set_source(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    source: &str,
+) -> Result<(), DbError> {
+    use sea_orm::sea_query::Expr;
+    conversation::Entity::update_many()
+        .col_expr(conversation::Column::Source, Expr::value(source))
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .exec(conn)
+        .await?;
+    Ok(())
+}
+
 pub async fn lock_title(conn: &DatabaseConnection, conversation_id: i32) -> Result<(), DbError> {
     use sea_orm::sea_query::Expr;
     conversation::Entity::update_many()
@@ -981,6 +999,7 @@ struct CarriedOverRow {
     origin_cwd: Option<String>,
     assistant_id: Option<i32>,
     assistant_snapshot: Option<String>,
+    source: Option<String>,
 }
 
 impl CarriedOverRow {
@@ -1026,6 +1045,8 @@ impl CarriedOverRow {
             // so it keeps drawing as it.
             assistant_id: row.assistant_id,
             assistant_snapshot: row.assistant_snapshot.clone(),
+            // Carried: the history was started where the conversation was.
+            source: row.source.clone(),
         }
     }
 
@@ -1060,6 +1081,7 @@ impl CarriedOverRow {
             origin_cwd: Set(self.origin_cwd),
             assistant_id: Set(self.assistant_id),
             assistant_snapshot: Set(self.assistant_snapshot),
+            source: Set(self.source),
         }
     }
 }
@@ -1243,6 +1265,7 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
             .as_deref()
             .and_then(AssistantRunSnapshot::name_from_json),
         assistant_id: r.assistant_id,
+        source: r.source,
         // Backfilled by `fill_summary_extras`, like `child_count`.
         tag_ids: Vec::new(),
     }

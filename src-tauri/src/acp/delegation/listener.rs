@@ -36,8 +36,9 @@ use crate::acp::delegation::transport::{
     BrokerComputerVerifyRequest, BrokerComputerWindowsRequest, BrokerCommitFeedbackRequest,
     BrokerFeedbackRequest, BrokerListAssistantsRequest, BrokerMessage, BrokerRequest,
     BrokerCreateAutomationRequest, BrokerCreateWorkTaskRequest, BrokerResponse,
-    BrokerResumeTaskRequest, BrokerSessionRequest, BrokerStatusRequest,
-    BrokerTaskCompleteRequest, BrokerTaskProgressRequest,
+    BrokerResultSchemaRequest, BrokerResumeTaskRequest, BrokerSessionRequest,
+    BrokerStatusRequest, BrokerSubmitResultRequest, BrokerTaskCompleteRequest,
+    BrokerTaskProgressRequest,
 };
 use crate::acp::delegation::assistants::assistant_not_found_message;
 use crate::acp::delegation::types::{
@@ -48,6 +49,7 @@ use crate::acp::feedback::{PendingFeedback, SessionFeedbackAccess};
 use crate::acp::question::{QuestionOutcome, SessionQuestionAccess};
 #[cfg(unix)]
 use crate::acp::scratch_dir::{is_inside_sweep_scope, SUN_PATH_CAP};
+use crate::acp::result_tool::ResultToolAccess;
 use crate::acp::session_info::{SessionInfo, SessionInfoAccess};
 use crate::acp::work_task_tools::{TaskReportAck, WorkTaskToolAccess};
 use serde_json::Value;
@@ -173,6 +175,10 @@ pub struct DelegationListener {
     /// (`computer_*`). Desktop-only like the browser — server mode gets
     /// `NoComputerDesktop` — and like it, re-checks its switch at call time.
     pub computer: Arc<dyn ComputerToolAccess>,
+    /// The schema `submit_result` takes, and the results handed in with it,
+    /// on the root connection of a `codeg-cli` run given `--output-schema`.
+    /// Same token → parent-connection scoping as the delegation arms.
+    pub results: Arc<dyn ResultToolAccess>,
 }
 
 impl DelegationListener {
@@ -188,6 +194,7 @@ impl DelegationListener {
         authoring: Arc<dyn ChatAuthoringAccess>,
         browser: Arc<dyn BrowserToolAccess>,
         computer: Arc<dyn ComputerToolAccess>,
+        results: Arc<dyn ResultToolAccess>,
     ) -> Arc<Self> {
         Arc::new(Self {
             broker,
@@ -200,6 +207,7 @@ impl DelegationListener {
             authoring,
             browser,
             computer,
+            results,
         })
     }
 
@@ -570,6 +578,19 @@ impl DelegationListener {
             }
             BrokerMessage::TaskComplete(req) => {
                 task_ack_response(self.process_task_complete(req).await)?
+            }
+            // Both bounded and quick — a lookup, and a check against a
+            // compiled schema — so no peer-close race either.
+            BrokerMessage::ResultSchema(req) => BrokerResponse {
+                outcome: serde_json::json!({ "schema": self.process_result_schema(req).await }),
+            },
+            BrokerMessage::SubmitResult(req) => {
+                let outcome = self.process_submit_result(req).await;
+                BrokerResponse {
+                    outcome: serde_json::to_value(&outcome).map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("encode: {e}"))
+                    })?,
+                }
             }
             BrokerMessage::CreateAutomation(req) => {
                 // A bounded DB write. Like SessionInfo it never long-polls, so
@@ -1148,6 +1169,27 @@ impl DelegationListener {
                 &req.verdict,
                 req.summary.as_deref(),
             )
+            .await
+    }
+
+    /// Validate the token and look up the schema `submit_result` takes on the
+    /// caller's connection. An invalid token hears what a connection asked
+    /// for no result hears.
+    async fn process_result_schema(&self, req: BrokerResultSchemaRequest) -> Option<Value> {
+        let entry = self.tokens.lookup(&req.token).await?;
+        self.results.schema(&entry.parent_connection_id).await
+    }
+
+    /// Validate the token and check the result against the caller's schema.
+    async fn process_submit_result(
+        &self,
+        req: BrokerSubmitResultRequest,
+    ) -> crate::cli_run::output_schema::SubmitOutcome {
+        let Some(entry) = self.tokens.lookup(&req.token).await else {
+            return crate::cli_run::output_schema::SubmitOutcome::not_asked();
+        };
+        self.results
+            .submit(&entry.parent_connection_id, req.result)
             .await
     }
 
@@ -2028,6 +2070,7 @@ mod tests {
             Arc::new(StubAuthoring::default()),
             Arc::new(NoBrowserTabs),
             Arc::new(NoComputerDesktop),
+            Arc::new(crate::acp::result_tool::NoResultTool),
         )
     }
 
@@ -2052,6 +2095,7 @@ mod tests {
             Arc::new(StubAuthoring::default()),
             Arc::new(NoBrowserTabs),
             Arc::new(NoComputerDesktop),
+            Arc::new(crate::acp::result_tool::NoResultTool),
         )
     }
 
@@ -2077,6 +2121,7 @@ mod tests {
             Arc::new(StubAuthoring::default()),
             Arc::new(NoBrowserTabs),
             Arc::new(NoComputerDesktop),
+            Arc::new(crate::acp::result_tool::NoResultTool),
         )
     }
 
@@ -2101,6 +2146,7 @@ mod tests {
             Arc::new(StubAuthoring::default()),
             Arc::new(NoBrowserTabs),
             Arc::new(NoComputerDesktop),
+            Arc::new(crate::acp::result_tool::NoResultTool),
         )
     }
 
@@ -2127,6 +2173,7 @@ mod tests {
             authoring,
             Arc::new(NoBrowserTabs),
             Arc::new(NoComputerDesktop),
+            Arc::new(crate::acp::result_tool::NoResultTool),
         )
     }
 
@@ -2152,6 +2199,7 @@ mod tests {
             Arc::new(StubAuthoring::default()),
             browser,
             Arc::new(NoComputerDesktop),
+            Arc::new(crate::acp::result_tool::NoResultTool),
         )
     }
 
@@ -4074,6 +4122,7 @@ mod tests {
             Arc::new(StubAuthoring::default()),
             Arc::new(NoBrowserTabs),
             computer,
+            Arc::new(crate::acp::result_tool::NoResultTool),
         )
     }
 
@@ -4394,5 +4443,111 @@ mod tests {
         .await;
         assert_eq!(refused["assistants"], json!([]));
         assert_eq!(refused["error"], "invalid token");
+    }
+
+    /// Records what reaches the result-tool access, and answers as a run's
+    /// schema would.
+    struct StubResults {
+        schema: Value,
+        seen: std::sync::Mutex<Vec<(String, Value)>>,
+    }
+
+    #[async_trait]
+    impl crate::acp::result_tool::ResultToolAccess for StubResults {
+        async fn schema(&self, parent_connection_id: &str) -> Option<Value> {
+            (parent_connection_id == "parent-conn").then(|| self.schema.clone())
+        }
+
+        async fn submit(
+            &self,
+            parent_connection_id: &str,
+            result: Value,
+        ) -> crate::cli_run::output_schema::SubmitOutcome {
+            self.seen
+                .lock()
+                .unwrap()
+                .push((parent_connection_id.to_string(), result.clone()));
+            crate::cli_run::OutputSchema::compile(self.schema.clone())
+                .unwrap()
+                .submit(result)
+        }
+    }
+
+    /// The schema and each result are the caller's own connection's, by its
+    /// token; a token that is not one is told nothing and changes nothing.
+    #[tokio::test]
+    async fn result_messages_reach_the_callers_connection_by_its_token() {
+        let schema = serde_json::json!({"type": "object", "required": ["verdict"]});
+        let results = Arc::new(StubResults {
+            schema: schema.clone(),
+            seen: Default::default(),
+        });
+        let broker = Arc::new(DelegationBroker::new(
+            Arc::new(MockSpawner::new()) as Arc<dyn ConnectionSpawner>,
+            Arc::new(AlwaysRootLookup) as Arc<dyn ConversationDepthLookup>,
+        ));
+        let tokens = Arc::new(TokenRegistry::default());
+        tokens
+            .register(
+                "tok".into(),
+                TokenEntry {
+                    parent_connection_id: "parent-conn".into(),
+                    working_dir: PathBuf::from("/tmp"),
+                },
+            )
+            .await;
+        let listener = DelegationListener::new(
+            broker,
+            tokens,
+            Arc::new(StaticParentLookup(Some(1))),
+            Arc::new(StubFeedback::default()),
+            Arc::new(StubQuestion::default()),
+            Arc::new(StubSessionInfo::default()),
+            Arc::new(StubTaskTools),
+            Arc::new(StubAuthoring::default()),
+            Arc::new(NoBrowserTabs),
+            Arc::new(NoComputerDesktop),
+            results.clone(),
+        );
+        let ask = |token: &str| {
+            BrokerMessage::ResultSchema(BrokerResultSchemaRequest {
+                token: token.into(),
+            })
+        };
+        let hand_in = |token: &str, result: Value| {
+            BrokerMessage::SubmitResult(BrokerSubmitResultRequest {
+                token: token.into(),
+                result,
+            })
+        };
+        assert_eq!(serve(listener.clone(), ask("tok")).await["schema"], schema);
+        assert!(serve(listener.clone(), ask("nope")).await["schema"].is_null());
+
+        let refused = serve(listener.clone(), hand_in("tok", serde_json::json!({}))).await;
+        assert_eq!(refused["accepted"], false);
+        assert!(refused["errors"][0].as_str().unwrap().contains("verdict"));
+        let accepted = serve(
+            listener.clone(),
+            hand_in("tok", serde_json::json!({"verdict": "pass"})),
+        )
+        .await;
+        assert_eq!(accepted["accepted"], true);
+        let stranger = serve(
+            listener.clone(),
+            hand_in("nope", serde_json::json!({"verdict": "pass"})),
+        )
+        .await;
+        assert_eq!(stranger["accepted"], false);
+        assert_eq!(
+            results.seen.lock().unwrap().len(),
+            2,
+            "an unknown token reaches nothing"
+        );
+        assert!(results
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(conn, _)| conn == "parent-conn"));
     }
 }

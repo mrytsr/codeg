@@ -3097,7 +3097,9 @@ export function SidebarConversationList({
               ? t("noRecentChats")
               : recentFilter === "folders"
                 ? t("noRecentFolders")
-                : t("noRecent")}
+                : recentFilter === "cli"
+                  ? t("noRecentCli")
+                  : t("noRecent")}
         </div>
       )
     }
