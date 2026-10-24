@@ -972,6 +972,7 @@ fn upsert_tool_call(
                 is_error,
                 agent_stats: None,
                 images,
+                exit_code: None,
             });
         }
     }

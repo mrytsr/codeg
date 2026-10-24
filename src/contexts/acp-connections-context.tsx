@@ -75,6 +75,7 @@ import type {
   PromptCapabilitiesInfo,
   PromptInputBlock,
   RemoteControlInfo,
+  ToolApprovalInfo,
   ToolCallImageWire,
   UserMessageBlock,
 } from "@/lib/types"
@@ -97,6 +98,11 @@ import {
   mergeAsyncTasks,
   upsertAsyncTask,
 } from "@/lib/async-tasks"
+import {
+  EMPTY_TOOL_APPROVALS,
+  mergeToolApprovals,
+  type ToolApprovalMap,
+} from "@/lib/activity/approval"
 import { contentBlocksFromUserMessage } from "@/lib/user-message-blocks"
 import { presentSessionNotice, splitHeadline } from "@/lib/session-notices"
 import { presentPluginLoadFailures } from "@/lib/plugin-load-failures"
@@ -401,6 +407,15 @@ export interface ConnectionState {
    *  merge/settle contract). Retained resolved — entries double as per-id
    *  revision watermarks; the banner splits active from resolved itself. */
   sessionFailures: SessionFailureRecord[]
+  /**
+   * This connection's answered permission requests, by tool call id: what the
+   * transcript draws as a chip on each call's row. Set by `tool_approval` and
+   * merged from a snapshot's `tool_approvals` (`mergeToolApprovals`: the later
+   * decision per call wins, so a stale snapshot can only add). Kept for the
+   * connection's life, not per turn — a finished turn's rows keep their chips,
+   * and the reloaded history carries the backend's stored copy as well.
+   */
+  toolApprovals: ToolApprovalMap
   /** AIR async tasks — Claude's background shells / workflows / monitors (see
    *  `lib/async-tasks.ts` for the merge contract). Retained after they settle,
    *  because the adapter keeps revising a finished task; the strip filters to
@@ -456,8 +471,8 @@ export interface ConnectionState {
   isDelegationChild: boolean
   /**
    * For delegation-child entries: the parent's `tool_use_id` that owns
-   * this child. The DelegatedSubThread component uses this to resolve
-   * the child connection state from its parent-side identifier. Null
+   * this child. The delegation row uses this to resolve the child
+   * connection state from its parent-side identifier. Null
    * for non-delegation connections.
    */
   parentToolUseId: string | null
@@ -725,6 +740,13 @@ type Action =
        * Omit for unconditional clears (e.g. cancel paths).
        */
       requestId?: string
+    }
+  | {
+      // What an answered permission request decided about its tool call
+      // (`tool_approval` event), for the chip on that call's row.
+      type: "TOOL_APPROVAL"
+      contextKey: string
+      approval: ToolApprovalInfo
     }
   | {
       type: "SET_PENDING_QUESTION"
@@ -1113,7 +1135,7 @@ function parseClaudeApiRetryEvent(
   }
 }
 
-function extractPermissionToolCallId(toolCall: unknown): string | null {
+export function extractPermissionToolCallId(toolCall: unknown): string | null {
   const record = asRecord(toolCall)
   if (!record) return null
   const candidates = [
@@ -1928,6 +1950,7 @@ function connectionsReducer(
         pendingPlanApproval: null,
         claudeApiRetry: null,
         sessionFailures: [],
+        toolApprovals: EMPTY_TOOL_APPROVALS,
         asyncTasks: [],
         error: null,
         errorLevel: "error",
@@ -1993,6 +2016,7 @@ function connectionsReducer(
         pendingPlanApproval: null,
         claudeApiRetry: null,
         sessionFailures: [],
+        toolApprovals: EMPTY_TOOL_APPROVALS,
         asyncTasks: [],
         error: null,
         errorLevel: "error",
@@ -2076,6 +2100,13 @@ function connectionsReducer(
         current.sessionFailures,
         action.patch.sessionFailures
       )
+      // Approval records merge on both branches too, by the same reasoning:
+      // the later decision per call wins, so even a stale snapshot can only
+      // add calls this client attached too late to see answered.
+      const mergedToolApprovals = mergeToolApprovals(
+        current.toolApprovals,
+        action.patch.toolApprovals
+      )
       // Async tasks contribute on both branches — a client that attached
       // mid-episode has no other way to learn about work already running — but
       // NOT by the same rule, because the rows carry no revision. On the fresh
@@ -2115,6 +2146,7 @@ function connectionsReducer(
           mergedPromptCapabilities === current.promptCapabilities &&
           mergedHasPrompted === current.hasPrompted &&
           mergedSessionFailures === current.sessionFailures &&
+          mergedToolApprovals === current.toolApprovals &&
           mergedAsyncTasks === current.asyncTasks
         ) {
           return state
@@ -2130,6 +2162,7 @@ function connectionsReducer(
           supportsFork: mergedSupportsFork,
           hasPrompted: mergedHasPrompted,
           sessionFailures: mergedSessionFailures,
+          toolApprovals: mergedToolApprovals,
           asyncTasks: mergedAsyncTasks,
         })
         return next
@@ -2195,6 +2228,7 @@ function connectionsReducer(
         // replay for it, so its teardown gates hold.
         backgroundOutstanding: action.patch.backgroundOutstanding,
         sessionFailures: mergedSessionFailures,
+        toolApprovals: mergedToolApprovals,
         asyncTasks: mergedAsyncTasks,
         // Current state, like `status`: the session's error as the backend
         // holds it. Never a notification — that fired when it happened.
@@ -2719,6 +2753,16 @@ function connectionsReducer(
         ...conn,
         pendingPermission: null,
       })
+      return next
+    }
+
+    case "TOOL_APPROVAL": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      const merged = mergeToolApprovals(conn.toolApprovals, [action.approval])
+      if (merged === conn.toolApprovals) return state
+      const next = new Map(state)
+      next.set(action.contextKey, { ...conn, toolApprovals: merged })
       return next
     }
 
@@ -3340,6 +3384,24 @@ export function useConnectionStore(): ConnectionStoreApi {
     )
   }
   return ctx
+}
+
+/**
+ * A fixed store in place of `AcpConnectionsProvider` — for surfaces that render
+ * chat cards outside a workspace (the activity gallery page, component tests).
+ */
+export function StaticConnectionStoreProvider({
+  store,
+  children,
+}: {
+  store: ConnectionStoreApi
+  children: ReactNode
+}) {
+  return (
+    <ConnectionStoreContext.Provider value={store}>
+      {children}
+    </ConnectionStoreContext.Provider>
+  )
 }
 
 /** The store, or `null` outside `AcpConnectionsProvider` — for a card that
@@ -5190,6 +5252,16 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             type: "PERMISSION_CLEARED",
             contextKey,
             requestId: e.request_id,
+          })
+          break
+        case "tool_approval":
+          // Touches no live message content (the chip is drawn from the
+          // connection's approval map), so like `permission_resolved` it needs
+          // no streaming flush.
+          dispatch({
+            type: "TOOL_APPROVAL",
+            contextKey,
+            approval: e.approval,
           })
           break
         case "permission_queue_depth":
