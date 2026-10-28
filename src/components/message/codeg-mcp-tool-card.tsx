@@ -194,7 +194,7 @@ export function CodegMcpToolCard({
     // a failure is the word at the end (the ring carries the icon), and the
     // label is in the light ink of the delegation checks it sits among.
     <>
-      <span className="flex min-w-0 flex-1 items-start gap-1">
+      <span className="flex min-w-0 items-start gap-1">
         <span
           title={label}
           className={cn(

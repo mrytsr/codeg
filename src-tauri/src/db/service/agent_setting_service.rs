@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
+use sea_orm::sea_query::Expr;
 use sea_orm::DatabaseConnection;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, ConnectionTrait, DbBackend, EntityTrait,
@@ -49,6 +50,7 @@ fn default_enabled(agent_type: AgentType) -> bool {
             | AgentType::ZCode
             | AgentType::Trae
             | AgentType::CommandCode
+            | AgentType::MiniMaxCode
             // A user who just registered a custom agent wants to use it.
             | AgentType::Custom(_)
     )
@@ -237,6 +239,31 @@ pub async fn set_catalog_model_selection(
     active.catalog_model_id = Set(Some(model_id.to_string()));
     active.updated_at = Set(Utc::now());
     active.update(conn).await?;
+    Ok(())
+}
+
+/// Update the enabled flag and env alone, in one statement that leaves the
+/// model provider column out — a binding made meanwhile is never undone.
+pub async fn update_preferences(
+    conn: &DatabaseConnection,
+    agent_type: AgentType,
+    enabled: bool,
+    env_json: Option<String>,
+) -> Result<(), DbError> {
+    let agent_type_str = serde_json::to_string(&agent_type)
+        .map_err(|e| DbError::Migration(format!("agent_type serialize failed: {e}")))?;
+    let updated = agent_setting::Entity::update_many()
+        .col_expr(agent_setting::Column::Enabled, Expr::value(enabled))
+        .col_expr(agent_setting::Column::EnvJson, Expr::value(env_json))
+        .col_expr(agent_setting::Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(agent_setting::Column::AgentType.eq(agent_type_str.clone()))
+        .exec(conn)
+        .await?;
+    if updated.rows_affected == 0 {
+        return Err(DbError::Migration(format!(
+            "agent setting not found: {agent_type_str}"
+        )));
+    }
     Ok(())
 }
 

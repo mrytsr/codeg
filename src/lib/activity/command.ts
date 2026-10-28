@@ -381,10 +381,55 @@ export interface CommandExit {
 
 /** `[terminal exited: exit code: 1]`, `…: signal: SIGKILL]`, `…: finished]`. */
 const TERMINAL_EXIT_RE = /\[terminal exited: ([^\]]*)\]\s*$/
-/** Claude Code / OpenCode: an `Exit code 1` line opening or closing the output. */
+/** Claude Code / OpenCode 1.x: an `Exit code 1` line opening or closing the
+ *  output. */
 const EXIT_CODE_LINE_RE = /^exit code[:\s]\s*(-?\d+)\s*$/i
 /** Codex CLI framing: `Process exited with code 1` among the metadata lines. */
 const PROCESS_EXITED_RE = /^process exited with code\s+(-?\d+)\s*$/i
+/**
+ * OpenCode 2's shell notice, a result block of its own after the output:
+ * `Exited with code 1`, or `Killed by SIGTERM` (packages/core/src/shell/
+ * result.ts `notice`, unchanged since 2.0.28). OpenCode completes such a
+ * command successfully, so the notice is the result's only word on it.
+ */
+const OPENCODE_EXITED_RE = /^exited with code\s+(-?\d+)\s*$/i
+const OPENCODE_KILLED_RE = /^killed by\s+(SIG[A-Z0-9]+)\s*$/i
+
+/**
+ * `_meta` key carrying a command's exit code where the agent reports it as a
+ * field (OpenCode 2's `rawOutput.metadata.exit`, lifted by the backend).
+ * Backend twin: `EXIT_CODE_META_KEY` in `src-tauri/src/acp/connection.rs`.
+ */
+export const EXIT_CODE_META_KEY = "codeg.exitCode"
+
+/** The exit code a call's `_meta` reports (see {@link EXIT_CODE_META_KEY}). */
+export function exitFromMeta(meta: unknown): CommandExit | null {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null
+  const code = (meta as Record<string, unknown>)[EXIT_CODE_META_KEY]
+  return typeof code === "number" && Number.isInteger(code)
+    ? { code, signal: null }
+    : null
+}
+
+/**
+ * The exit the AGENT reported in its framing of a command's result, as
+ * opposed to anything the program printed: OpenCode 2's closing notice (see
+ * {@link OPENCODE_EXITED_RE}). Only the result's last line is read — anywhere
+ * else the same words are the program's own output.
+ */
+export function extractAgentReportedExit(
+  source: string | null | undefined
+): CommandExit | null {
+  if (!source) return null
+  const lines = source.split("\n").map((line) => line.trim())
+  const last = lines.filter((line) => line.length > 0).pop()
+  if (!last) return null
+  const exited = last.match(OPENCODE_EXITED_RE)
+  if (exited) return { code: Number(exited[1]), signal: null }
+  const killed = last.match(OPENCODE_KILLED_RE)
+  if (killed) return { code: null, signal: killed[1]! }
+  return null
+}
 
 function exitFromTerminalLine(text: string): CommandExit | null {
   const match = text.trimEnd().match(TERMINAL_EXIT_RE)
@@ -414,7 +459,7 @@ function exitFromFramingLines(text: string): CommandExit | null {
   }
   const last = nonEmpty[nonEmpty.length - 1]!.match(EXIT_CODE_LINE_RE)
   if (last) return { code: Number(last[1]), signal: null }
-  return null
+  return extractAgentReportedExit(text)
 }
 
 /**

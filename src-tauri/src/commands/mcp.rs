@@ -79,6 +79,8 @@ pub enum McpAppType {
     Trae,
     /// Serializes as `command_code`, matching `AgentType::as_wire`.
     CommandCode,
+    #[serde(rename = "minimax_code")]
+    MiniMaxCode,
     /// Serializes as `pi`, matching `AgentType::as_wire`. Scan-only: codeg
     /// reads and round-trips the pi MCP EXTENSION's config, but pi is not an
     /// assignable target and gets no MCP over the ACP wire. See the pi section
@@ -96,7 +98,7 @@ pub enum McpAppType {
 /// server come back on the next refresh. Both used to keep their own hand-typed
 /// copy of this list; one shared constant plus [`tests::all_mcp_apps_is_exhaustive`]
 /// (which fails to compile when a variant is added) is what keeps them honest.
-const ALL_MCP_APPS: [McpAppType; 19] = [
+const ALL_MCP_APPS: [McpAppType; 20] = [
     McpAppType::ClaudeCode,
     McpAppType::Codex,
     McpAppType::Gemini,
@@ -116,6 +118,7 @@ const ALL_MCP_APPS: [McpAppType; 19] = [
     McpAppType::ZCode,
     McpAppType::Trae,
     McpAppType::CommandCode,
+    McpAppType::MiniMaxCode,
 ];
 
 #[derive(Debug, Clone, Serialize)]
@@ -429,9 +432,7 @@ pub async fn mcp_install_from_marketplace(
         // Every selected agent was excluded (e.g. only Codex for an SSE server);
         // fail instead of reporting success while writing nothing (and possibly
         // returning a pre-existing server with the same id). See issue #325.
-        return Err(mcp_invalid_input(
-            "none of the selected agents can host this MCP server's transport (e.g. Codex does not support SSE)",
-        ));
+        return Err(no_hostable_app_error(&normalized_apps, &canonical_spec));
     }
     // A selected-but-excluded app can't host this transport; remove any stale entry
     // for this id there so it can't win scan precedence and reclassify the spec.
@@ -488,9 +489,7 @@ pub async fn mcp_upsert_local_server(
         // Every selected agent was excluded (e.g. only Codex chosen for an SSE
         // server). Surface a clear error rather than silently write nothing and then
         // fail the reload below.
-        return Err(mcp_invalid_input(
-            "none of the selected agents can host this MCP server's transport (e.g. Codex does not support SSE)",
-        ));
+        return Err(no_hostable_app_error(&target_apps, &canonical_spec));
     }
 
     // Nothing below is reversible, and the walk REMOVES the server from every
@@ -560,9 +559,7 @@ pub async fn mcp_set_server_apps(
         // an SSE server). Fail before mutating rather than silently delete the
         // server; an explicit empty `apps` still means "remove from all" and is
         // allowed to fall through.
-        return Err(mcp_invalid_input(
-            "none of the selected agents can host this MCP server's transport (e.g. Codex does not support SSE)",
-        ));
+        return Err(no_hostable_app_error(&target_apps, &current.spec));
     }
     let current_set = current.apps.iter().copied().collect::<BTreeSet<_>>();
 
@@ -619,16 +616,16 @@ fn normalize_apps(apps: Vec<McpAppType>) -> Vec<McpAppType> {
 /// spec. Kiro is the same case (its config knows `stdio`/`http`/`registry` and its
 /// client speaks only streamable HTTP), and so is TRAE CLI, whose `traecli.toml`
 /// is Codex's schema, and Command Code, whose `mcp.json` knows only `stdio` and
-/// `http`. Write paths preflight-exclude such (app, spec) pairs instead of
-/// writing a misrepresented entry or aborting the whole multi-agent operation.
-/// See issue #325.
+/// `http`. OpenCode 2 is the same again: its remote client speaks streamable
+/// HTTP only, with no SSE fallback. Write paths preflight-exclude such (app,
+/// spec) pairs instead of writing a misrepresented entry or aborting the whole
+/// multi-agent operation. See issue #325.
 fn app_can_host_spec(app: McpAppType, canonical_spec: &Value) -> bool {
     // ZCode's first integration validates stdio only. Do not offer remote
     // transports merely because the bridge advertises them.
     if app == McpAppType::ZCode {
         return canonical_spec.get("type").and_then(Value::as_str) == Some("stdio");
     }
-    let is_sse = canonical_spec.get("type").and_then(Value::as_str) == Some("sse");
     !(matches!(
         app,
         McpAppType::Codex
@@ -636,7 +633,35 @@ fn app_can_host_spec(app: McpAppType, canonical_spec: &Value) -> bool {
             | McpAppType::Kiro
             | McpAppType::Trae
             | McpAppType::CommandCode
-    ) && is_sse)
+            | McpAppType::OpenCode
+    ) && spec_is_sse(canonical_spec))
+}
+
+fn spec_is_sse(canonical_spec: &Value) -> bool {
+    canonical_spec.get("type").and_then(Value::as_str) == Some("sse")
+}
+
+/// The error for a save none of whose selected agents can host the server's
+/// transport. When OpenCode was the only one picked for an SSE server, say so
+/// and what to do about it; the general message names Codex, the usual case.
+fn no_hostable_app_error(selected: &[McpAppType], canonical_spec: &Value) -> AppCommandError {
+    if matches!(selected, [McpAppType::OpenCode]) && spec_is_sse(canonical_spec) {
+        return opencode_sse_unsupported();
+    }
+    mcp_invalid_input(
+        "none of the selected agents can host this MCP server's transport (e.g. Codex does not support SSE)",
+    )
+}
+
+/// OpenCode 2 has no SSE client: `core/src/mcp/client.ts` connects remote
+/// servers through `StreamableHTTPClientTransport` alone, where 1.x fell back
+/// to SSE. An SSE server written into its config would be dialed over
+/// streamable HTTP and fail, so codeg refuses to write one.
+fn opencode_sse_unsupported() -> AppCommandError {
+    mcp_invalid_input(
+        "OpenCode 2 has no SSE client, so it cannot run SSE MCP servers. Switch the server to streamable HTTP (type \"http\") if it supports it, or leave OpenCode unselected.",
+    )
+    .with_i18n("errors.opencodeSseUnsupported", BTreeMap::new())
 }
 
 #[derive(Debug, Clone)]
@@ -808,11 +833,16 @@ fn codex_config_toml_path() -> PathBuf {
     codex_home_dir().join("config.toml")
 }
 
+/// OpenCode 2's global config file: the `opencode.jsonc` or `opencode.json`
+/// that wins in `$OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`, else
+/// `~/.config/opencode` (see `acp::opencode_config`).
 fn opencode_config_path() -> PathBuf {
-    home_dir_or_default()
-        .join(".config")
-        .join("opencode")
-        .join("opencode.json")
+    crate::acp::opencode_config::config_file().unwrap_or_else(|| {
+        home_dir_or_default()
+            .join(".config")
+            .join("opencode")
+            .join(crate::acp::opencode_config::CONFIG_FILE_NAMES[0])
+    })
 }
 
 fn gemini_config_path() -> PathBuf {
@@ -1273,7 +1303,13 @@ fn canonicalize_opencode_spec(spec: &Value, source: &str) -> Result<Value, AppCo
     }
 }
 
-fn canonical_to_opencode_spec(spec: &Value) -> Result<Value, AppCommandError> {
+/// The keys of an OpenCode 2 `mcp.servers.<id>` entry for `spec` that codeg
+/// writes: `type`, `command` (the executable and its arguments, one array),
+/// `environment` and `cwd` for a local server, `url` and `headers` for a
+/// remote one (`packages/schema/src/mcp.ts`). Never `enabled` — 2.x's flag is
+/// `disabled`, and a server codeg writes is one it wants on — and never SSE,
+/// which OpenCode 2 cannot run.
+fn canonical_to_opencode_spec(spec: &Value) -> Result<Map<String, Value>, AppCommandError> {
     let canonical = canonicalize_spec(spec, "OpenCode conversion")?;
     let obj = canonical.as_object().ok_or_else(|| {
         mcp_invalid_input("OpenCode conversion: canonical spec must be an object")
@@ -1316,19 +1352,17 @@ fn canonical_to_opencode_spec(spec: &Value) -> Result<Value, AppCommandError> {
                 out.insert("cwd".to_string(), Value::String(cwd.to_string()));
             }
         }
-        "http" | "sse" => {
+        "http" => {
             let url = obj.get("url").and_then(Value::as_str).ok_or_else(|| {
                 mcp_invalid_input("OpenCode conversion: remote MCP spec missing url")
             })?;
             out.insert("type".to_string(), Value::String("remote".to_string()));
             out.insert("url".to_string(), Value::String(url.to_string()));
-            if typ == "sse" {
-                out.insert("transport".to_string(), Value::String("sse".to_string()));
-            }
             if let Some(headers) = obj_as_string_map(obj.get("headers")) {
                 out.insert("headers".to_string(), Value::Object(headers));
             }
         }
+        "sse" => return Err(opencode_sse_unsupported()),
         _ => {
             return Err(mcp_invalid_input(format!(
                 "OpenCode conversion: unsupported MCP type '{typ}'"
@@ -1336,9 +1370,7 @@ fn canonical_to_opencode_spec(spec: &Value) -> Result<Value, AppCommandError> {
         }
     }
 
-    out.insert("enabled".to_string(), Value::Bool(true));
-
-    Ok(Value::Object(out))
+    Ok(out)
 }
 
 fn json_to_toml_value(value: &Value) -> Option<toml::Value> {
@@ -2122,37 +2154,135 @@ fn remove_codex_server(id: &str) -> Result<bool, AppCommandError> {
     Ok(removed)
 }
 
+// ---------------------------------------------------------------------------
+// OpenCode  (<config dir>/opencode.json(c)  →  `mcp.servers.<id>`)
+// ---------------------------------------------------------------------------
+//
+// OpenCode 2 keeps MCP servers in `mcp.servers.<id>` and still loads 1.x's
+// direct `mcp.<id>` entries — every key of `mcp` but `servers` and `timeout`
+// names one — with a native entry winning over a 1.x entry of the same id
+// (`core/src/config/normalize.ts`). Its switch is `disabled: true`, the inverse
+// of 1.x's `enabled`; a 1.x entry that is only `{ "enabled": … }`, once the way
+// to turn a server off from another file, is dropped with a warning and so
+// configures nothing. `mcpServers` is no OpenCode key at all.
+//
+// codeg reads both shapes and writes only the native one, through the CST
+// (`acp::opencode_config::edit_object`) so the rest of the file — comments
+// included — is kept. It manages the servers OpenCode would run: a switched-off
+// entry is not an assignment, and nothing but saving it ON touches it.
+
+/// The keys of `mcp` that are never server ids.
+const OPENCODE_MCP_RESERVED: [&str; 2] = ["servers", "timeout"];
+
+/// A 1.x direct server entry: an object whose `type` is `local` or `remote`.
+fn is_opencode_direct_entry(value: &Value) -> bool {
+    matches!(
+        value.get("type").and_then(Value::as_str),
+        Some("local" | "remote")
+    )
+}
+
+/// `mcp.servers` when it is the native server map rather than a 1.x server
+/// that happens to be named `servers` (which OpenCode reads as such).
+fn opencode_native_servers(mcp: &Map<String, Value>) -> Option<&Map<String, Value>> {
+    mcp.get("servers")
+        .filter(|value| !is_opencode_direct_entry(value))
+        .and_then(Value::as_object)
+}
+
+fn is_switched_off(entry: &Value, flag: &str, off: bool) -> bool {
+    entry.get(flag) == Some(&Value::Bool(off))
+}
+
+fn invalid_opencode_config(path: &Path, err: &str) -> AppCommandError {
+    mcp_configuration_invalid(format!(
+        "invalid OpenCode config at {}: {err}",
+        path.display()
+    ))
+}
+
+/// A server entry in the shape OpenCode 2 accepts, as a canonical spec: `type`
+/// `local` with `command` as an array of strings, or `remote` with a `url`.
+fn opencode_entry_spec(entry: &Value, source: &str) -> Result<Value, AppCommandError> {
+    let obj = entry
+        .as_object()
+        .ok_or_else(|| mcp_invalid_input(format!("{source}: must be a JSON object")))?;
+    match obj.get("type").and_then(Value::as_str) {
+        Some("local") => {
+            let command_ok = obj
+                .get("command")
+                .and_then(Value::as_array)
+                .is_some_and(|parts| !parts.is_empty() && parts.iter().all(Value::is_string));
+            if !command_ok {
+                return Err(mcp_invalid_input(format!(
+                    "{source}: a local server needs `command` as an array of strings"
+                )));
+            }
+        }
+        Some("remote") => {
+            if obj.get("url").and_then(Value::as_str).is_none() {
+                return Err(mcp_invalid_input(format!(
+                    "{source}: a remote server needs a `url`"
+                )));
+            }
+        }
+        _ => {
+            return Err(mcp_invalid_input(format!(
+                "{source}: `type` must be \"local\" or \"remote\""
+            )));
+        }
+    }
+    canonicalize_opencode_spec(entry, source)
+}
+
 fn read_opencode_servers() -> Result<BTreeMap<String, Value>, AppCommandError> {
-    let path = opencode_config_path();
-    let root = read_json_file(&path)?;
+    read_opencode_servers_at(&opencode_config_path())
+}
 
+/// The servers OpenCode would run from the config at `path`.
+fn read_opencode_servers_at(path: &Path) -> Result<BTreeMap<String, Value>, AppCommandError> {
     let mut out = BTreeMap::new();
+    let Some(text) = read_config_to_string(path)? else {
+        return Ok(out);
+    };
+    let root = crate::acp::opencode_config::parse_object(&text)
+        .map_err(|e| invalid_opencode_config(path, &e))?;
+    let Some(mcp) = root.get("mcp").and_then(Value::as_object) else {
+        return Ok(out);
+    };
 
-    if let Some(servers) = root.get("mcpServers").and_then(Value::as_object) {
-        for (id, spec) in servers {
-            match canonicalize_spec(spec, "OpenCode mcpServers") {
-                Ok(normalized) => {
-                    out.insert(id.to_string(), normalized);
+    // Ids a valid native entry holds, on or off: those 1.x entries lose.
+    let mut native_ids = BTreeSet::new();
+    if let Some(servers) = opencode_native_servers(mcp) {
+        for (id, entry) in servers {
+            match opencode_entry_spec(entry, &format!("OpenCode mcp.servers.{id}")) {
+                Ok(spec) => {
+                    native_ids.insert(id.as_str());
+                    if !is_switched_off(entry, "disabled", true) {
+                        out.insert(id.clone(), spec);
+                    }
                 }
                 Err(err) => {
-                    tracing::warn!("[MCP] skip invalid OpenCode mcpServers entry id={id}: {err}");
+                    tracing::warn!("[MCP] skip invalid OpenCode mcp.servers entry id={id}: {err}");
                 }
             }
         }
     }
 
-    if let Some(servers) = root.get("mcp").and_then(Value::as_object) {
-        for (id, spec) in servers {
-            if out.contains_key(id) {
-                continue;
+    for (id, entry) in mcp {
+        if OPENCODE_MCP_RESERVED.contains(&id.as_str())
+            || native_ids.contains(id.as_str())
+            || !is_opencode_direct_entry(entry)
+            || is_switched_off(entry, "enabled", false)
+        {
+            continue;
+        }
+        match opencode_entry_spec(entry, &format!("OpenCode mcp.{id}")) {
+            Ok(spec) => {
+                out.insert(id.clone(), spec);
             }
-            match canonicalize_opencode_spec(spec, "OpenCode mcp") {
-                Ok(normalized) => {
-                    out.insert(id.to_string(), normalized);
-                }
-                Err(err) => {
-                    tracing::warn!("[MCP] skip invalid OpenCode mcp entry id={id}: {err}");
-                }
+            Err(err) => {
+                tracing::warn!("[MCP] skip invalid OpenCode mcp entry id={id}: {err}");
             }
         }
     }
@@ -2161,68 +2291,259 @@ fn read_opencode_servers() -> Result<BTreeMap<String, Value>, AppCommandError> {
 }
 
 fn upsert_opencode_server(id: &str, spec: &Value) -> Result<(), AppCommandError> {
-    let path = opencode_config_path();
-    let mut root = read_json_file(&path)?;
-    if !root.is_object() {
-        root = json!({});
-    }
+    upsert_opencode_server_at(&opencode_config_path(), id, spec)
+}
 
-    let obj = root.as_object_mut().ok_or_else(|| {
-        mcp_configuration_invalid(format!("invalid JSON root in {}", path.display()))
-    })?;
-
-    if obj.get("mcpServers").map(Value::is_object).unwrap_or(false) {
-        let canonical = canonicalize_spec(spec, "OpenCode write mcpServers")?;
-        let map = obj
-            .get_mut("mcpServers")
-            .and_then(Value::as_object_mut)
-            .ok_or_else(|| {
-                mcp_configuration_invalid(format!("invalid mcpServers in {}", path.display()))
-            })?;
-        map.insert(id.to_string(), canonical);
-    } else {
-        if !obj.get("mcp").map(Value::is_object).unwrap_or(false) {
-            obj.insert("mcp".to_string(), Value::Object(Map::new()));
+/// The config at `path`, parsed, when codeg can add an `mcp.servers` entry to
+/// it: `mcp`, if present, is an object, and so is `mcp.servers` — OpenCode's
+/// server map, not a 1.x server that happens to be named `servers`. Shared by
+/// the writer and [`preflight_opencode_upsert_at`], so the two can never
+/// disagree about what is editable.
+fn editable_opencode_config(
+    path: &Path,
+    text: &str,
+) -> Result<Map<String, Value>, AppCommandError> {
+    let root = crate::acp::opencode_config::parse_object(text)
+        .map_err(|e| invalid_opencode_config(path, &e))?;
+    let mcp = match root.get("mcp") {
+        None => None,
+        Some(Value::Object(mcp)) => Some(mcp),
+        Some(_) => {
+            return Err(mcp_configuration_invalid(format!(
+                "`mcp` in {} is not an object; fix it by hand first",
+                path.display()
+            )))
         }
-        let converted = canonical_to_opencode_spec(spec)?;
-        let map = obj
-            .get_mut("mcp")
-            .and_then(Value::as_object_mut)
-            .ok_or_else(|| {
-                mcp_configuration_invalid(format!("invalid mcp in {}", path.display()))
-            })?;
-        map.insert(id.to_string(), converted);
+    };
+    if let Some(servers) = mcp.and_then(|mcp| mcp.get("servers")) {
+        if !servers.is_object() || is_opencode_direct_entry(servers) {
+            return Err(mcp_configuration_invalid(format!(
+                "`mcp.servers` in {} is not OpenCode's server map; fix it by hand first",
+                path.display()
+            )));
+        }
+    }
+    Ok(root)
+}
+
+/// [`preflight_antigravity_upsert`]'s OpenCode twin: the scan accepts a config
+/// whose `mcp` or `mcp.servers` the writer then refuses (`{"mcp": {"servers":
+/// null}}` reads as no servers), so without this, moving a server to OpenCode
+/// could strip it from its other agents and then fail to add it here.
+fn preflight_opencode_upsert(targets: &BTreeSet<McpAppType>) -> Result<(), AppCommandError> {
+    if !targets.contains(&McpAppType::OpenCode) {
+        return Ok(());
+    }
+    preflight_opencode_upsert_at(&opencode_config_path())
+}
+
+fn preflight_opencode_upsert_at(path: &Path) -> Result<(), AppCommandError> {
+    match read_config_to_string(path)? {
+        Some(text) => editable_opencode_config(path, &text).map(|_| ()),
+        None => Ok(()),
+    }
+}
+
+/// The transport-specific keys of a native entry, which go when the server
+/// switches transport.
+const OPENCODE_LOCAL_KEYS: [&str; 3] = ["command", "environment", "cwd"];
+const OPENCODE_REMOTE_KEYS: [&str; 3] = ["url", "headers", "oauth"];
+
+/// Write `id` as an `mcp.servers` entry that OpenCode runs.
+///
+/// codeg decides `type`, `command`/`environment` or `url`/`headers`, and `cwd`
+/// when the spec names one; every other key of an existing entry — `codemode`,
+/// `timeout`, `oauth`, `protocol`, a `cwd` the spec does not name — stays as
+/// the user set it. Saving means "on", so `disabled` goes, and with it the 1.x
+/// `enabled` and the `transport` older codeg releases wrote (neither is an
+/// OpenCode 2 key). A 1.x `mcp.<id>` entry of the same id is removed in the
+/// same edit; when the server is new to `mcp.servers`, the settings it carried
+/// move over in OpenCode 2's shape.
+fn upsert_opencode_server_at(path: &Path, id: &str, spec: &Value) -> Result<(), AppCommandError> {
+    use crate::acp::opencode_config;
+
+    let managed = canonical_to_opencode_spec(spec)?;
+    let text = read_config_to_string(path)?.unwrap_or_default();
+    let root = editable_opencode_config(path, &text)?;
+    let mcp = root.get("mcp").and_then(Value::as_object);
+    let has_native_object = mcp
+        .and_then(opencode_native_servers)
+        .and_then(|servers| servers.get(id))
+        .is_some_and(Value::is_object);
+    let legacy = mcp
+        .filter(|_| !OPENCODE_MCP_RESERVED.contains(&id))
+        .and_then(|mcp| mcp.get(id));
+
+    let mut fresh = managed.clone();
+    if !has_native_object {
+        if let Some(legacy) = legacy {
+            for (key, value) in opencode_legacy_extras(legacy, &managed) {
+                fresh.entry(key).or_insert(value);
+            }
+        }
     }
 
-    write_json_file(&path, &root)
+    let mut applied = false;
+    let updated = opencode_config::edit_object(&text, |root| {
+        let Some(mcp) = root.object_value_or_create("mcp") else {
+            return;
+        };
+        if legacy.is_some() {
+            opencode_config::remove_property(&mcp, id);
+        }
+        let Some(servers) = mcp.object_value_or_create("servers") else {
+            return;
+        };
+        match servers.object_value(id) {
+            Some(entry) => apply_opencode_managed_keys(&entry, &managed),
+            None => opencode_config::set_property(&servers, id, &Value::Object(fresh)),
+        }
+        applied = true;
+    })
+    .map_err(|e| invalid_opencode_config(path, &e))?;
+    if !applied {
+        return Err(mcp_configuration_invalid(format!(
+            "could not edit `mcp.servers` in {}",
+            path.display()
+        )));
+    }
+    opencode_config::write_atomic(path, &updated).map_err(mcp_configuration_invalid)
+}
+
+/// Set codeg's keys on an existing native entry in place, keeping the rest
+/// (and the comments around it).
+fn apply_opencode_managed_keys(entry: &jsonc_parser::cst::CstObject, managed: &Map<String, Value>) {
+    use crate::acp::opencode_config::{remove_property, set_property};
+
+    let local = managed.get("type").and_then(Value::as_str) == Some("local");
+    let (decided, other_transport): (&[&str], &[&str]) = if local {
+        (&["type", "command", "environment"], &OPENCODE_REMOTE_KEYS)
+    } else {
+        (&["type", "url", "headers"], &OPENCODE_LOCAL_KEYS)
+    };
+    for key in other_transport
+        .iter()
+        .chain(&["disabled", "enabled", "transport"])
+    {
+        remove_property(entry, key);
+    }
+    for key in decided {
+        match managed.get(*key) {
+            Some(value) => set_property(entry, key, value),
+            None => {
+                remove_property(entry, key);
+            }
+        }
+    }
+    if let Some(cwd) = managed.get("cwd") {
+        set_property(entry, "cwd", cwd);
+    }
+}
+
+/// What a 1.x direct entry set beyond codeg's keys, in OpenCode 2's shape —
+/// the conversion OpenCode applies when it loads one (`migrateMcp` in
+/// `core/src/v1/config/migrate.ts`): a bare-number `timeout` bounds every
+/// phase, and OAuth's camelCase fields become snake_case.
+fn opencode_legacy_extras(legacy: &Value, managed: &Map<String, Value>) -> Map<String, Value> {
+    let mut out = Map::new();
+    let Some(obj) = legacy
+        .as_object()
+        .filter(|_| is_opencode_direct_entry(legacy))
+    else {
+        return out;
+    };
+    let local = managed.get("type").and_then(Value::as_str) == Some("local");
+    if let Some(codemode @ Value::Bool(_)) = obj.get("codemode") {
+        out.insert("codemode".to_string(), codemode.clone());
+    }
+    match obj.get("timeout") {
+        Some(Value::Number(ms)) if ms.as_u64().is_some_and(|ms| ms > 0) => {
+            out.insert(
+                "timeout".to_string(),
+                json!({ "startup": ms, "catalog": ms, "execution": ms }),
+            );
+        }
+        Some(timeout @ Value::Object(_)) => {
+            out.insert("timeout".to_string(), timeout.clone());
+        }
+        _ => {}
+    }
+    if local {
+        if let Some(cwd @ Value::String(_)) = obj.get("cwd") {
+            out.insert("cwd".to_string(), cwd.clone());
+        }
+    } else {
+        match obj.get("oauth") {
+            Some(Value::Bool(false)) => {
+                out.insert("oauth".to_string(), Value::Bool(false));
+            }
+            Some(Value::Object(oauth)) => {
+                let renamed = oauth
+                    .iter()
+                    .map(|(key, value)| {
+                        let key = match key.as_str() {
+                            "clientId" => "client_id",
+                            "clientSecret" => "client_secret",
+                            "callbackPort" => "callback_port",
+                            "redirectUri" => "redirect_uri",
+                            other => other,
+                        };
+                        (key.to_string(), value.clone())
+                    })
+                    .collect();
+                out.insert("oauth".to_string(), Value::Object(renamed));
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 fn remove_opencode_server(id: &str) -> Result<bool, AppCommandError> {
-    let path = opencode_config_path();
-    if !path.exists() {
-        return Ok(false);
-    }
+    remove_opencode_server_at(&opencode_config_path(), id)
+}
 
-    let mut root = read_json_file(&path)?;
-    let Some(obj) = root.as_object_mut() else {
+/// Stop OpenCode from running `id`: remove its native entry when that is on,
+/// and a 1.x entry that runs — or would run once the native one is gone.
+/// Entries that are switched off stay as the user left them.
+fn remove_opencode_server_at(path: &Path, id: &str) -> Result<bool, AppCommandError> {
+    use crate::acp::opencode_config;
+
+    let Some(text) = read_config_to_string(path)? else {
         return Ok(false);
     };
-
-    let mut removed = false;
-
-    if let Some(servers) = obj.get_mut("mcpServers").and_then(Value::as_object_mut) {
-        removed |= servers.remove(id).is_some();
+    let root =
+        opencode_config::parse_object(&text).map_err(|e| invalid_opencode_config(path, &e))?;
+    let Some(mcp) = root.get("mcp").and_then(Value::as_object) else {
+        return Ok(false);
+    };
+    let native = opencode_native_servers(mcp).and_then(|servers| servers.get(id));
+    let remove_native = native.is_some_and(|entry| !is_switched_off(entry, "disabled", true));
+    let remove_legacy = !OPENCODE_MCP_RESERVED.contains(&id)
+        && mcp.get(id).is_some_and(|entry| {
+            is_opencode_direct_entry(entry) && !is_switched_off(entry, "enabled", false)
+        })
+        && (native.is_none() || remove_native);
+    if !remove_native && !remove_legacy {
+        return Ok(false);
     }
 
-    if let Some(servers) = obj.get_mut("mcp").and_then(Value::as_object_mut) {
-        removed |= servers.remove(id).is_some();
-    }
-
-    if removed {
-        write_json_file(&path, &root)?;
-    }
-
-    Ok(removed)
+    let updated = opencode_config::edit_object(&text, |root| {
+        let Some(mcp) = root.object_value("mcp") else {
+            return;
+        };
+        if remove_native {
+            if let Some(servers) = mcp.object_value("servers") {
+                opencode_config::remove_property(&servers, id);
+            }
+        }
+        if remove_legacy {
+            opencode_config::remove_property(&mcp, id);
+        }
+    })
+    .map_err(|e| invalid_opencode_config(path, &e))?;
+    opencode_config::write_atomic(path, &updated).map_err(mcp_configuration_invalid)?;
+    Ok(true)
 }
 
 // ---------------------------------------------------------------------------
@@ -2608,6 +2929,13 @@ fn write_deepseek_json_file(path: &Path, value: &Value) -> Result<(), AppCommand
     Ok(())
 }
 
+// MiniMax Code client MCP assignments belong to Codeg, not the native CLI
+// profile. Forward this canonical stdio/http/sse store over ACP; the CLI also
+// loads its own MCP config, and session entries win same-name conflicts.
+fn read_minimax_code_servers() -> Result<BTreeMap<String, Value>, AppCommandError> {
+    read_deepseek_servers_at(&crate::acp::minimax_code::mcp_json_path())
+}
+
 fn read_deepseek_servers() -> Result<BTreeMap<String, Value>, AppCommandError> {
     read_deepseek_servers_at(&deepseek_mcp_json_path())
 }
@@ -2977,12 +3305,18 @@ fn preflight_antigravity_upsert(targets: &BTreeSet<McpAppType>) -> Result<(), Ap
 /// here by construction rather than left to each call site remembering it: the
 /// mutations are only reachable through `mutate`, which this runs after the
 /// preflight has passed. Adding another agent with a refusable config means
-/// extending [`preflight_antigravity_upsert`], not auditing the callers again.
+/// adding its check here, not auditing the callers again.
 fn with_upsert_preflight<T>(
     upsert_targets: &BTreeSet<McpAppType>,
     mutate: impl FnOnce() -> Result<T, AppCommandError>,
 ) -> Result<T, AppCommandError> {
-    with_preflight(|| preflight_antigravity_upsert(upsert_targets), mutate)
+    with_preflight(
+        || {
+            preflight_antigravity_upsert(upsert_targets)?;
+            preflight_opencode_upsert(upsert_targets)
+        },
+        mutate,
+    )
 }
 
 /// The ordering itself, with the check injected so a test can force a refusal
@@ -3146,7 +3480,7 @@ impl LocalMcpReader {
     }
 }
 
-fn local_mcp_readers() -> [LocalMcpReader; 19] {
+fn local_mcp_readers() -> [LocalMcpReader; 20] {
     [
         LocalMcpReader::new("Claude Code", McpAppType::ClaudeCode, read_claude_servers),
         LocalMcpReader::new("Codex", McpAppType::Codex, read_codex_servers),
@@ -3173,6 +3507,11 @@ fn local_mcp_readers() -> [LocalMcpReader; 19] {
             "Command Code",
             McpAppType::CommandCode,
             read_command_code_servers,
+        ),
+        LocalMcpReader::new(
+            "MiniMax Code",
+            McpAppType::MiniMaxCode,
+            read_minimax_code_servers,
         ),
         // Scan-only, so it reads last: the merge below is first-writer-wins,
         // and a pi entry that won would decide the transport every save of
@@ -3338,6 +3677,9 @@ fn upsert_server_for_app(app: McpAppType, id: &str, spec: &Value) -> Result<(), 
         McpAppType::ZCode => upsert_deepseek_server_at(&zcode_mcp_json_path(), id, spec),
         McpAppType::Trae => upsert_trae_server(id, spec),
         McpAppType::CommandCode => upsert_command_code_server(id, spec),
+        McpAppType::MiniMaxCode => {
+            upsert_deepseek_server_at(&crate::acp::minimax_code::mcp_json_path(), id, spec)
+        }
     }
 }
 
@@ -3385,6 +3727,8 @@ pub fn read_servers_for_agent_type(
         // Command Code loads `~/.commandcode/mcp.json` natively — see the
         // Command Code section below for why it rides the forward skip list.
         AgentType::CommandCode => read_command_code_servers(),
+        // MiniMax Code receives client-owned assignments over the ACP wire.
+        AgentType::MiniMaxCode => read_minimax_code_servers(),
         // Custom agents get MCP purely over the ACP wire (`session/new`'s
         // `mcpServers`); codeg deliberately knows nothing about their native
         // config files, so there is no per-agent store to read back here.
@@ -4195,16 +4539,20 @@ fn remove_trae_server_at(path: &Path, id: &str) -> Result<bool, AppCommandError>
 // `transport` discriminant — `{transport: "stdio", enabled, command, args,
 // env}` or `{transport: "http", enabled, url, headers}`, plus an `oauth` block
 // for a server that signs in. The loader behind its `mcp` commands
-// (`parseStoredMcpServer`, read against 1.84.0 and 1.86.3) takes `transport`
-// first, then `type` as an alias, and otherwise infers stdio from `command`
-// and http from `url`. It models no `cwd`, and an entry with any other
-// transport (`sse` included) or a non-boolean `enabled` fails and is dropped
-// while the rest of the file still loads. codeg reads entries the same way, so
-// its list matches `command-code mcp list`, and writes only what that loader
-// models. The loader that starts a session's servers is looser: it connects an
-// `sse` entry with its HTTP client and treats a non-boolean `enabled` as
-// unset, so such a hand-written entry still starts although neither list
-// shows it.
+// (`parseStoredMcpServer`, read against 1.84.0, 1.86.3 and 1.88.0) takes
+// `transport` first, then `type` as an alias, and otherwise infers stdio from
+// `command` and http from `url`. It models no `cwd`, and an entry with any
+// other transport (`sse` included) or a non-boolean `enabled` fails and is
+// dropped while the rest of the file still loads. codeg reads entries the same
+// way, so its list matches `command-code mcp list`, and writes only what that
+// loader models. The loader that starts a session's servers is looser: it
+// connects an `sse` entry with its HTTP client and treats a non-boolean
+// `enabled` as unset, so such a hand-written entry still starts although
+// neither list shows it. The `oauth` block is the one place codeg's list sides
+// with the session instead: `mcp list` also drops an entry whose `oauth` block
+// it cannot parse (`oauth: {}`, live on 1.86.3 and 1.88.0) or whose OAuth url
+// is neither https nor loopback http, which the session still starts and
+// codeg, reading no `oauth` rules, still lists.
 //
 // `command-code acp` loads this file itself, so `CommandCode` is on the ACP
 // forward skip list in `connection.rs`; the codeg-mcp companion still arrives
@@ -4384,7 +4732,7 @@ fn remove_command_code_server_at(path: &Path, id: &str) -> Result<bool, AppComma
 //
 // Cursor's CLI (and IDE — the file is shared) reads its user-global MCP config
 // from `~/.cursor/mcp.json` — a JSON file with a top-level `mcpServers`
-// object. The CLI (checked against 2026.10.19-6bbf2c4) parses each entry with
+// object. The CLI (checked against 2026.10.22-27dcf5f) parses each entry with
 // a Zod union: stdio when it has a `command` and its optional `type` is
 // `"stdio"`, otherwise remote when it has a `url` and its optional `type` is
 // `"http"` or `"sse"`. A remote entry tries streamable HTTP first and falls
@@ -4413,7 +4761,7 @@ fn remove_command_code_server_at(path: &Path, id: &str) -> Result<bool, AppComma
 fn cursor_mcp_json_path() -> PathBuf {
     // Deliberately NOT `resolve_cursor_config_dir()`: the CLI reads its
     // user-level MCP config from a hardcoded `~/.cursor/mcp.json` (every
-    // loader in the 2026.07.16 bundle joins `homedir()`, and 2026.10.19's
+    // loader in the 2026.07.16 bundle joins `homedir()`, and 2026.10.22's
     // still do), even when `CURSOR_CONFIG_DIR`/`XDG_CONFIG_HOME` relocate
     // chats + cli-config.json.
     dirs::home_dir().unwrap_or_default().join(".cursor").join("mcp.json")
@@ -5392,6 +5740,9 @@ fn remove_server_for_app(app: McpAppType, id: &str) -> Result<bool, AppCommandEr
         McpAppType::ZCode => remove_deepseek_server_at(&zcode_mcp_json_path(), id),
         McpAppType::Trae => remove_trae_server(id),
         McpAppType::CommandCode => remove_command_code_server(id),
+        McpAppType::MiniMaxCode => {
+            remove_deepseek_server_at(&crate::acp::minimax_code::mcp_json_path(), id)
+        }
     }
 }
 
@@ -8975,7 +9326,8 @@ mod tests {
                 | McpAppType::Pi
                 | McpAppType::ZCode
                 | McpAppType::Trae
-                | McpAppType::CommandCode => {}
+                | McpAppType::CommandCode
+                | McpAppType::MiniMaxCode => {}
             }
         }
 
@@ -9034,6 +9386,7 @@ mod tests {
             (McpAppType::ZCode, AgentType::ZCode),
             (McpAppType::Trae, AgentType::Trae),
             (McpAppType::CommandCode, AgentType::CommandCode),
+            (McpAppType::MiniMaxCode, AgentType::MiniMaxCode),
         ] {
             let wire = serde_json::to_value(app).expect("serialize app type");
             assert_eq!(
@@ -9047,6 +9400,68 @@ mod tests {
                 app
             );
         }
+    }
+
+    #[test]
+    fn minimax_code_mcp_overlay_round_trips_all_transports() {
+        use crate::models::agent::AgentType;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("mcp/minimax_code.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let auth_path = dir.path().join("auth.json");
+        fs::write(&auth_path, "leave native login untouched").unwrap();
+        fs::write(&path, r#"{"other":{"keep":true},"mcpServers":{"existing":{"command":"existing","env":{"KEEP":"yes"}}}}"#).unwrap();
+        temp_env::with_vars(
+            [
+                ("CODEG_HOME", Some(dir.path())),
+                ("MINIMAX_DATA_DIR", Some(dir.path())),
+            ],
+            || {
+                assert_eq!(crate::acp::minimax_code::mcp_json_path(), path);
+                for (id, spec) in [
+                    (
+                        "stdio",
+                        json!({"type":"stdio","command":"tool","args":["serve"],"env":{"TEST":"value"}}),
+                    ),
+                    (
+                        "http",
+                        json!({"type":"http","url":"https://example.test/mcp","headers":{"X-Test":"value"}}),
+                    ),
+                    (
+                        "sse",
+                        json!({"type":"sse","url":"https://example.test/events"}),
+                    ),
+                ] {
+                    assert!(app_can_host_spec(McpAppType::MiniMaxCode, &spec));
+                    upsert_server_for_app(McpAppType::MiniMaxCode, id, &spec).unwrap();
+                    let read = read_servers_for_agent_type(AgentType::MiniMaxCode).unwrap();
+                    assert_eq!(read[id]["type"], spec["type"]);
+                    assert_eq!(read["existing"]["env"]["KEEP"], "yes");
+                    assert!(remove_server_for_app(McpAppType::MiniMaxCode, id).unwrap());
+                    assert!(!read_servers_for_agent_type(AgentType::MiniMaxCode)
+                        .unwrap()
+                        .contains_key(id));
+                }
+                let saved: Value =
+                    serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+                assert_eq!(saved["other"]["keep"], true);
+                assert_eq!(saved["mcpServers"].as_object().unwrap().len(), 1);
+                assert_eq!(
+                    fs::read_to_string(&auth_path).unwrap(),
+                    "leave native login untouched"
+                );
+                fs::write(&path, "{broken").unwrap();
+                assert!(upsert_server_for_app(
+                    McpAppType::MiniMaxCode,
+                    "new",
+                    &json!({"command":"tool"})
+                )
+                .is_err());
+                assert_eq!(fs::read_to_string(&path).unwrap(), "{broken");
+                assert!(!dir.path().join("mcp.json").exists());
+            },
+        );
     }
 
     #[test]
@@ -10358,5 +10773,445 @@ mod zcode_transport_tests {
         assert!(shared.apps.contains(&McpAppType::ZCode) && shared.apps.contains(&McpAppType::Pi));
         assert_eq!(shared.spec["command"], "zcode-tool");
         assert!(app_can_host_spec(McpAppType::ZCode, &shared.spec));
+    }
+}
+
+#[cfg(test)]
+mod opencode_tests {
+    use super::*;
+
+    fn write(path: &Path, text: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    fn read_value(path: &Path) -> Value {
+        crate::acp::opencode_config::parse(&fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn stdio(command: &str, args: &[&str]) -> Value {
+        json!({ "type": "stdio", "command": command, "args": args })
+    }
+
+    /// OpenCode 2 runs `mcp.servers.<id>` and still loads 1.x's direct
+    /// `mcp.<id>` entries; codeg lists what it would run.
+    #[test]
+    fn reads_native_and_legacy_entries_the_way_opencode_2_loads_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.jsonc");
+        write(
+            &path,
+            r#"{
+  // native servers
+  "mcp": {
+    "timeout": { "catalog": 5000 },
+    "servers": {
+      "native-local": { "type": "local", "command": ["npx", "-y", "pkg"], "environment": { "K": "V" }, "codemode": false },
+      "native-remote": { "type": "remote", "url": "https://h/mcp", "headers": { "A": "b" } },
+      "native-off": { "type": "local", "command": ["off"], "disabled": true },
+      "shadowed": { "type": "local", "command": ["native"], "disabled": true },
+      "servers": { "type": "local", "command": ["named-servers"] },
+      "no-type": { "command": ["x"] },
+      "string-command": { "type": "local", "command": "x" },
+    },
+    "legacy": { "type": "local", "command": ["legacy"], "enabled": true },
+    "legacy-off": { "type": "local", "command": ["off"], "enabled": false },
+    "legacy-sse": { "type": "remote", "url": "https://h/sse", "transport": "sse", "enabled": true },
+    "shadowed": { "type": "local", "command": ["legacy"] },
+    "enabled-only": { "enabled": false },
+  },
+  "mcpServers": { "not-opencode": { "command": "x" } },
+}"#,
+        );
+        let servers = read_opencode_servers_at(&path).unwrap();
+        assert_eq!(
+            servers.keys().map(String::as_str).collect::<Vec<_>>(),
+            [
+                "legacy",
+                "legacy-sse",
+                "native-local",
+                "native-remote",
+                "servers"
+            ],
+            "off entries, a 1.x entry under an off native one, enabled-only and malformed \
+             entries, `mcp.timeout` and `mcpServers` are not servers OpenCode runs"
+        );
+        assert_eq!(
+            servers["native-local"],
+            json!({ "type": "stdio", "command": "npx", "args": ["-y", "pkg"], "env": { "K": "V" } })
+        );
+        assert_eq!(
+            servers["native-remote"],
+            json!({ "type": "http", "url": "https://h/mcp", "headers": { "A": "b" } })
+        );
+        assert_eq!(servers["legacy-sse"]["type"], "sse");
+        assert_eq!(servers["servers"]["command"], "named-servers");
+    }
+
+    #[test]
+    fn a_config_opencode_cannot_parse_is_an_error_and_a_missing_one_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.json");
+        assert!(read_opencode_servers_at(&path).unwrap().is_empty());
+        write(&path, "{ \"mcp\": ");
+        assert!(read_opencode_servers_at(&path).is_err());
+        assert!(upsert_opencode_server_at(&path, "x", &stdio("x", &[])).is_err());
+        assert!(remove_opencode_server_at(&path, "x").is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{ \"mcp\": ");
+    }
+
+    /// The scan reads `{"mcp": {"servers": null}}` as "no servers", but the
+    /// writer refuses it. The multi-app commands remove a server from its old
+    /// agents before adding it to new ones, so the preflight they run first
+    /// must refuse exactly what the writer refuses — or a move to OpenCode
+    /// strips the server everywhere and then fails to add it.
+    #[test]
+    fn the_opencode_preflight_refuses_exactly_what_the_writer_refuses() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.json");
+        assert!(preflight_opencode_upsert_at(&path).is_ok(), "no file yet");
+        for (doc, refused) in [
+            (r#"{ "mcp": { "servers": null } }"#, true),
+            (r#"{ "mcp": { "servers": [] } }"#, true),
+            (r#"{ "mcp": 5 }"#, true),
+            // A 1.x server named `servers`, which OpenCode runs as one.
+            (
+                r#"{ "mcp": { "servers": { "type": "local", "command": ["x"] } } }"#,
+                true,
+            ),
+            ("{ \"mcp\": ", true),
+            (r#"{ "mcp": { "servers": {} } }"#, false),
+            (
+                r#"{ "mcp": { "old": { "type": "local", "command": ["o"] } } }"#,
+                false,
+            ),
+            (r#"{ "model": "a/b" }"#, false),
+        ] {
+            write(&path, doc);
+            assert!(read_opencode_servers_at(&path).is_ok() || doc == "{ \"mcp\": ");
+            assert_eq!(
+                preflight_opencode_upsert_at(&path).is_err(),
+                refused,
+                "preflight disagrees about {doc}"
+            );
+            let written = upsert_opencode_server_at(&path, "x", &stdio("x", &[]));
+            assert_eq!(written.is_err(), refused, "writer disagrees about {doc}");
+            if refused {
+                assert_eq!(
+                    fs::read_to_string(&path).unwrap(),
+                    doc,
+                    "refused edit wrote"
+                );
+            }
+        }
+
+        // OpenCode is preflighted only as a target: a config it would refuse
+        // must not block a save that never mentions it.
+        assert!(preflight_opencode_upsert(&BTreeSet::from([McpAppType::ClaudeCode])).is_ok());
+    }
+
+    #[test]
+    fn upsert_writes_a_native_entry_into_a_new_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.json");
+        upsert_opencode_server_at(
+            &path,
+            "fs",
+            &json!({ "type": "stdio", "command": "npx", "args": ["-y", "fs-mcp"], "env": { "ROOT": "/tmp" }, "cwd": "/srv" }),
+        )
+        .unwrap();
+        upsert_opencode_server_at(
+            &path,
+            "web",
+            &json!({ "type": "http", "url": "https://h/mcp", "headers": { "Authorization": "Bearer x" } }),
+        )
+        .unwrap();
+        assert_eq!(
+            read_value(&path),
+            json!({ "mcp": { "servers": {
+                "fs": { "type": "local", "command": ["npx", "-y", "fs-mcp"], "environment": { "ROOT": "/tmp" }, "cwd": "/srv" },
+                "web": { "type": "remote", "url": "https://h/mcp", "headers": { "Authorization": "Bearer x" } }
+            } } })
+        );
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("enabled"), "{text}");
+    }
+
+    /// A save is codeg wanting the server ON: `disabled` goes, the keys codeg
+    /// decides follow the spec, and what the user set beyond them stays.
+    #[test]
+    fn upsert_updates_an_existing_entry_in_place_and_keeps_what_codeg_does_not_manage() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.json");
+        write(
+            &path,
+            r#"{
+  "mcp": {
+    "servers": {
+      "fs": {
+        "type": "local",
+        "command": ["old"],
+        "environment": { "OLD": "1" },
+        "cwd": "/kept",
+        "disabled": true,
+        "enabled": true,
+        "codemode": false,
+        "timeout": { "execution": 60000 },
+        "protocol": "auto"
+      }
+    }
+  }
+}"#,
+        );
+        upsert_opencode_server_at(&path, "fs", &stdio("npx", &["fs-mcp"])).unwrap();
+        assert_eq!(
+            read_value(&path)["mcp"]["servers"]["fs"],
+            json!({
+                "type": "local",
+                "command": ["npx", "fs-mcp"],
+                "cwd": "/kept",
+                "codemode": false,
+                "timeout": { "execution": 60000 },
+                "protocol": "auto"
+            })
+        );
+
+        // Switching transport drops the other transport's keys only.
+        upsert_opencode_server_at(
+            &path,
+            "fs",
+            &json!({ "type": "http", "url": "https://h/mcp" }),
+        )
+        .unwrap();
+        assert_eq!(
+            read_value(&path)["mcp"]["servers"]["fs"],
+            json!({
+                "type": "remote",
+                "url": "https://h/mcp",
+                "codemode": false,
+                "timeout": { "execution": 60000 },
+                "protocol": "auto"
+            })
+        );
+        assert_eq!(
+            read_opencode_servers_at(&path).unwrap()["fs"],
+            json!({ "type": "http", "url": "https://h/mcp" })
+        );
+    }
+
+    /// A 1.x entry of the same id goes in the same edit; its settings move to
+    /// the native entry in OpenCode 2's shape, the way OpenCode converts them.
+    #[test]
+    fn upsert_replaces_a_legacy_entry_and_carries_its_settings_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.json");
+        write(
+            &path,
+            &json!({ "mcp": {
+                "remote": {
+                    "type": "remote",
+                    "url": "https://old/mcp",
+                    "enabled": false,
+                    "transport": "sse",
+                    "codemode": false,
+                    "timeout": 30000,
+                    "oauth": { "clientId": "id", "callbackPort": 1234, "scope": "s" }
+                },
+                "other": { "type": "local", "command": ["untouched"] },
+                "enabled-only": { "enabled": false }
+            } })
+            .to_string(),
+        );
+        upsert_opencode_server_at(
+            &path,
+            "remote",
+            &json!({ "type": "http", "url": "https://new/mcp" }),
+        )
+        .unwrap();
+        let mcp = read_value(&path)["mcp"].clone();
+        assert!(mcp.get("remote").is_none(), "{mcp}");
+        assert_eq!(
+            mcp["other"],
+            json!({ "type": "local", "command": ["untouched"] })
+        );
+        assert_eq!(mcp["enabled-only"], json!({ "enabled": false }));
+        assert_eq!(
+            mcp["servers"]["remote"],
+            json!({
+                "type": "remote",
+                "url": "https://new/mcp",
+                "codemode": false,
+                "timeout": { "startup": 30000, "catalog": 30000, "execution": 30000 },
+                "oauth": { "client_id": "id", "callback_port": 1234, "scope": "s" }
+            })
+        );
+    }
+
+    /// OpenCode 2 has no SSE client: the conversion fails with a message that
+    /// says what to do, and nothing is written.
+    #[test]
+    fn sse_is_refused_for_opencode_with_an_actionable_error() {
+        let sse = json!({ "type": "sse", "url": "https://h/sse" });
+        let canonical = canonicalize_spec(&sse, "test").unwrap();
+        assert!(!app_can_host_spec(McpAppType::OpenCode, &canonical));
+        assert!(app_can_host_spec(
+            McpAppType::OpenCode,
+            &json!({ "type": "http", "url": "https://h/mcp" })
+        ));
+
+        let err = canonical_to_opencode_spec(&sse).unwrap_err();
+        assert_eq!(
+            err.i18n_key.as_deref(),
+            Some("errors.opencodeSseUnsupported")
+        );
+        assert!(err.message.contains("streamable HTTP"), "{}", err.message);
+
+        // Picking OpenCode alone for an SSE server gets the same message.
+        let err = no_hostable_app_error(&[McpAppType::OpenCode], &canonical);
+        assert_eq!(
+            err.i18n_key.as_deref(),
+            Some("errors.opencodeSseUnsupported")
+        );
+        let err = no_hostable_app_error(&[McpAppType::Codex], &canonical);
+        assert!(err.i18n_key.is_none());
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.json");
+        assert!(upsert_opencode_server_at(&path, "s", &sse).is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn remove_deletes_both_forms_and_never_takes_servers_or_timeout_for_an_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.json");
+        let original = json!({ "mcp": {
+            "timeout": { "catalog": 1000 },
+            "servers": {
+                "both": { "type": "local", "command": ["native"] },
+                "servers": { "type": "local", "command": ["a server named servers"] },
+                "off": { "type": "local", "command": ["off"], "disabled": true }
+            },
+            "both": { "type": "local", "command": ["legacy"] },
+            "legacy-off": { "type": "local", "command": ["x"], "enabled": false }
+        } });
+        write(&path, &original.to_string());
+
+        assert!(remove_opencode_server_at(&path, "both").unwrap());
+        let mcp = read_value(&path)["mcp"].clone();
+        assert!(
+            mcp.get("both").is_none() && mcp["servers"].get("both").is_none(),
+            "{mcp}"
+        );
+
+        // A server named `servers` is an entry of the map, never the map.
+        assert!(remove_opencode_server_at(&path, "servers").unwrap());
+        let mcp = read_value(&path)["mcp"].clone();
+        assert!(mcp["servers"].get("servers").is_none(), "{mcp}");
+        assert!(mcp["servers"].get("off").is_some(), "{mcp}");
+        assert_eq!(mcp["timeout"], json!({ "catalog": 1000 }));
+
+        // Switched-off entries are not assignments: removing leaves them be.
+        assert!(!remove_opencode_server_at(&path, "off").unwrap());
+        assert!(!remove_opencode_server_at(&path, "legacy-off").unwrap());
+        assert!(!remove_opencode_server_at(&path, "timeout").unwrap());
+        let mcp = read_value(&path)["mcp"].clone();
+        assert_eq!(mcp["legacy-off"], original["mcp"]["legacy-off"]);
+        assert!(mcp["servers"].get("off").is_some());
+    }
+
+    /// The user's comments and formatting outside the entry codeg writes
+    /// survive both an upsert and a remove.
+    #[test]
+    fn upsert_and_remove_keep_comments_in_an_opencode_jsonc() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.jsonc");
+        let original = r#"{
+  // My OpenCode setup.
+  "model": "anthropic/claude-sonnet-5-5", // default model
+  "mcp": {
+    /* servers I rely on */
+    "servers": {
+      "keep": {
+        "type": "remote",
+        "url": "https://keep/mcp", // keep this comment
+      },
+    },
+  },
+}
+"#;
+        write(&path, original);
+        upsert_opencode_server_at(&path, "added", &stdio("npx", &["added-mcp"])).unwrap();
+        let upserted = fs::read_to_string(&path).unwrap();
+        for comment in [
+            "// My OpenCode setup.",
+            "// default model",
+            "/* servers I rely on */",
+            "// keep this comment",
+        ] {
+            assert!(upserted.contains(comment), "{comment} lost:\n{upserted}");
+        }
+        let servers = read_opencode_servers_at(&path).unwrap();
+        assert_eq!(
+            servers.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["added", "keep"]
+        );
+
+        assert!(remove_opencode_server_at(&path, "added").unwrap());
+        let removed = fs::read_to_string(&path).unwrap();
+        for comment in [
+            "// My OpenCode setup.",
+            "// default model",
+            "/* servers I rely on */",
+            "// keep this comment",
+        ] {
+            assert!(removed.contains(comment), "{comment} lost:\n{removed}");
+        }
+        let value = read_value(&path);
+        assert_eq!(value["model"], "anthropic/claude-sonnet-5-5");
+        assert_eq!(
+            read_opencode_servers_at(&path)
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+            ["keep"]
+        );
+    }
+
+    /// The file is the one OpenCode reads: `$OPENCODE_CONFIG_DIR` over
+    /// `$XDG_CONFIG_HOME/opencode`, `opencode.jsonc` over `opencode.json`.
+    #[test]
+    fn the_config_path_follows_opencode_config_dir_and_prefers_jsonc() {
+        let dir = tempfile::tempdir().unwrap();
+        let (xdg, own) = (dir.path().join("xdg"), dir.path().join("own"));
+        temp_env::with_vars(
+            [
+                ("OPENCODE_CONFIG_DIR", None::<&Path>),
+                ("XDG_CONFIG_HOME", Some(xdg.as_path())),
+            ],
+            || {
+                assert_eq!(
+                    opencode_config_path(),
+                    xdg.join("opencode").join("opencode.json")
+                )
+            },
+        );
+        write(&own.join("opencode.jsonc"), "{}");
+        temp_env::with_vars(
+            [
+                ("OPENCODE_CONFIG_DIR", Some(own.as_path())),
+                ("XDG_CONFIG_HOME", Some(xdg.as_path())),
+            ],
+            || {
+                assert_eq!(opencode_config_path(), own.join("opencode.jsonc"));
+                upsert_opencode_server("fs", &json!({ "type": "stdio", "command": "fs-mcp" }))
+                    .unwrap();
+                assert!(read_opencode_servers().unwrap().contains_key("fs"));
+                assert!(
+                    !xdg.exists(),
+                    "nothing lands in the directory OpenCode skips"
+                );
+            },
+        );
     }
 }

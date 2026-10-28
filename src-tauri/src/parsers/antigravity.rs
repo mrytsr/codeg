@@ -419,6 +419,46 @@ struct ErrorDetails {
     full_error: String,
 }
 
+/// `exa.cortex_pb.AskQuestionOption`.
+#[derive(Clone, PartialEq, ::prost::Message)]
+struct AntigravityAskOption {
+    #[prost(string, tag = "1")]
+    id: String,
+    #[prost(string, tag = "2")]
+    text: String,
+}
+
+/// `exa.cortex_pb.AskQuestionEntry`: one question of an `ask_question` step and
+/// the user's answer to it. Checked against the 1.4.1 and 1.4.3 descriptors
+/// and live runs: options are numbered `"1"`, `"2"`, …; a question the user
+/// dismissed (or never reached, once an earlier one was dismissed) is
+/// `skipped` with nothing chosen; a multi-select question is still answered
+/// with one option, because the ACP server asks it as a single-choice
+/// permission request.
+#[derive(Clone, PartialEq, ::prost::Message)]
+struct AntigravityAskItem {
+    #[prost(string, tag = "1")]
+    question: String,
+    #[prost(message, repeated, tag = "2")]
+    options: Vec<AntigravityAskOption>,
+    #[prost(bool, tag = "3")]
+    is_multi_select: bool,
+    /// `selected_option_ids`.
+    #[prost(string, repeated, tag = "4")]
+    chosen_ids: Vec<String>,
+    #[prost(string, tag = "5")]
+    write_in_response: String,
+    #[prost(bool, tag = "6")]
+    skipped: bool,
+}
+
+/// `exa.cortex_pb.CortexStepAskQuestion`, carried on `Step` field 154.
+#[derive(Clone, PartialEq, ::prost::Message)]
+struct AntigravityAskQuestions {
+    #[prost(message, repeated, tag = "1")]
+    items: Vec<AntigravityAskItem>,
+}
+
 #[derive(Clone, PartialEq, ::prost::Message)]
 struct ErrorMessageStep {
     #[prost(message, optional, tag = "3")]
@@ -465,6 +505,8 @@ struct Step {
     file_change: Option<FileChange>,
     #[prost(message, optional, tag = "116")]
     agency_tool_call: Option<AgencyToolCall>,
+    #[prost(message, optional, tag = "154")]
+    ask_question: Option<AntigravityAskQuestions>,
 }
 
 /// `CortexStepStatus.CORTEX_STEP_STATUS_ERROR`. The other eleven values are not
@@ -1322,6 +1364,58 @@ fn step_outcome(step: &Step) -> Option<StepOutcome> {
         });
     }
 
+    if let Some(ask) = step.ask_question.as_ref() {
+        // The `{answers, declined}` envelope the question card reads, keyed by
+        // question text (the model's `ask_question` arguments carry no header).
+        // Selections are the options' text, trimmed the way the card trims the
+        // option strings it reads from those arguments; a written-in answer
+        // rides along as one more selection, which the card shows as "Other".
+        let answers: Vec<serde_json::Value> = ask
+            .items
+            .iter()
+            .map(|item| {
+                let mut selected: Vec<String> = item
+                    .chosen_ids
+                    .iter()
+                    .map(|id| {
+                        item.options
+                            .iter()
+                            .find(|opt| &opt.id == id)
+                            .map(|opt| opt.text.trim().to_string())
+                            .unwrap_or_else(|| id.clone())
+                    })
+                    .collect();
+                let write_in = item.write_in_response.trim();
+                if !write_in.is_empty() {
+                    selected.push(write_in.to_string());
+                }
+                serde_json::json!({
+                    "header": "",
+                    "question": item.question,
+                    "multi_select": item.is_multi_select,
+                    "selected": selected,
+                })
+            })
+            .collect();
+        // Dismissing the card skips every question with nothing chosen; record
+        // that as the live bridge does (a decline), not as "no selection".
+        let declined = !ask.items.is_empty()
+            && ask.items.iter().all(|item| {
+                item.skipped
+                    && item.chosen_ids.is_empty()
+                    && item.write_in_response.trim().is_empty()
+            });
+        let payload = if declined {
+            serde_json::json!({ "answers": [], "declined": true })
+        } else {
+            serde_json::json!({ "answers": answers, "declined": false })
+        };
+        return Some(StepOutcome {
+            output: serde_json::to_string(&payload).ok().and_then(non_empty_capped),
+            is_error: status_error,
+        });
+    }
+
     if let Some(err) = step.error_message.as_ref() {
         let message = err
             .error
@@ -2114,5 +2208,163 @@ mod tests {
                 .join("antigravity-acp")
                 .join("conversations")
         );
+    }
+
+    /// One question of an `ask_question` step, options numbered from `"1"` the
+    /// way antigravity-acp 1.4.1 records them.
+    fn ask_item(question: &str, options: &[&str], chosen: &[&str]) -> AntigravityAskItem {
+        AntigravityAskItem {
+            question: question.into(),
+            options: options
+                .iter()
+                .enumerate()
+                .map(|(i, text)| AntigravityAskOption {
+                    id: (i + 1).to_string(),
+                    text: (*text).into(),
+                })
+                .collect(),
+            chosen_ids: chosen.iter().map(|id| (*id).into()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Round-trip one `ask_question` step (`Step` field 154) through the store
+    /// and return the tool call's name and its result envelope.
+    fn ask_step_outcome(items: Vec<AntigravityAskItem>) -> (String, serde_json::Value) {
+        let dir = tempfile::tempdir().unwrap();
+        let step = Step {
+            status: 3,
+            metadata: Some(StepMetadata {
+                created_at: ts(1_700_000_000),
+                tool_call: Some(ChatToolCall {
+                    id: "call_1".into(),
+                    name: "ask_question".into(),
+                    arguments_json: "{}".into(),
+                }),
+                ..Default::default()
+            }),
+            ask_question: Some(AntigravityAskQuestions { items }),
+            ..Default::default()
+        };
+        write_steps(dir.path(), "test-session", &[step]);
+        let parsed = project_steps(&read_steps(&dir.path().join("test-session.db")));
+        let blocks: Vec<&ContentBlock> = parsed.turns.iter().flat_map(|t| &t.blocks).collect();
+        let name = blocks
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::ToolUse { tool_name, .. } => Some(tool_name.clone()),
+                _ => None,
+            })
+            .expect("the ask_question call");
+        let outputs: Vec<&String> = blocks
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::ToolResult {
+                    output_preview: Some(out),
+                    ..
+                } => Some(out),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(outputs.len(), 1, "one result for the ask");
+        (
+            name,
+            serde_json::from_str(outputs[0]).expect("JSON envelope"),
+        )
+    }
+
+    #[test]
+    fn antigravity_ask_question_step_outcome_generates_json_envelope() {
+        let (name, val) = ask_step_outcome(vec![
+            ask_item(
+                "您希望接下来优先开展哪一类开发任务？",
+                &[
+                    "(Recommended) 核心业务功能的新增与实现",
+                    "现有功能的优化与缺陷修复",
+                ],
+                &["1"],
+            ),
+            ask_item(
+                "在开发交付与流程配合上，您倾向于哪种模式？",
+                &[
+                    "(Recommended) 快速迭代交付，先实现最小可行版本（MVP）供确认",
+                    "阶段性里程碑交付，按完整模块验收",
+                ],
+                &["2"],
+            ),
+        ]);
+        // The card is keyed to this name (`ask_question` → "question" in the
+        // frontend's tool-name aliases).
+        assert_eq!(name, "ask_question");
+        assert_eq!(
+            val,
+            serde_json::json!({
+                "answers": [
+                    {
+                        "header": "",
+                        "question": "您希望接下来优先开展哪一类开发任务？",
+                        "multi_select": false,
+                        "selected": ["(Recommended) 核心业务功能的新增与实现"],
+                    },
+                    {
+                        "header": "",
+                        "question": "在开发交付与流程配合上，您倾向于哪种模式？",
+                        "multi_select": false,
+                        "selected": ["阶段性里程碑交付，按完整模块验收"],
+                    },
+                ],
+                "declined": false,
+            })
+        );
+    }
+
+    /// A multi-select question keeps its kind even though the ACP server could
+    /// only take one pick for it; a written-in answer and padded option text
+    /// come out the way the card reads them.
+    #[test]
+    fn antigravity_ask_question_outcome_keeps_multi_select_and_write_in() {
+        let mut multi = ask_item("Pick tags", &["Alpha", "Beta", " Gamma "], &["3"]);
+        multi.is_multi_select = true;
+        let mut write_in = ask_item("Anything else?", &["No", "Later"], &[]);
+        write_in.write_in_response = " Ship it on Friday ".into();
+        let (_, val) = ask_step_outcome(vec![multi, write_in]);
+        assert_eq!(val["declined"], false);
+        assert_eq!(val["answers"][0]["multi_select"], true);
+        assert_eq!(val["answers"][0]["selected"], serde_json::json!(["Gamma"]));
+        assert_eq!(val["answers"][1]["multi_select"], false);
+        assert_eq!(
+            val["answers"][1]["selected"],
+            serde_json::json!(["Ship it on Friday"])
+        );
+    }
+
+    /// Dismissing the card leaves every question skipped with nothing chosen:
+    /// that reads as a decline, as the live bridge records it. Dismissing a
+    /// later question keeps the earlier answer.
+    #[test]
+    fn antigravity_ask_question_outcome_reads_a_dismissed_card_as_declined() {
+        let skipped = |mut item: AntigravityAskItem| {
+            item.skipped = true;
+            item
+        };
+        let (_, all_skipped) = ask_step_outcome(vec![
+            skipped(ask_item("Which area first?", &["Backend", "Frontend"], &[])),
+            skipped(ask_item("Pick tags", &["Alpha", "Beta"], &[])),
+        ]);
+        assert_eq!(
+            all_skipped,
+            serde_json::json!({ "answers": [], "declined": true })
+        );
+
+        let (_, partly) = ask_step_outcome(vec![
+            ask_item("Which area first?", &["Backend", "Frontend"], &["2"]),
+            skipped(ask_item("Pick tags", &["Alpha", "Beta"], &[])),
+        ]);
+        assert_eq!(partly["declined"], false);
+        assert_eq!(
+            partly["answers"][0]["selected"],
+            serde_json::json!(["Frontend"])
+        );
+        assert_eq!(partly["answers"][1]["selected"], serde_json::json!([]));
     }
 }

@@ -20,6 +20,9 @@ pub mod cli_access;
 /// path validation and URI encoding stay compiled in every mode so their tests
 /// run without the tauri stack.
 pub mod clipboard;
+/// Codex's model list: user saves through the commit coordinator, and the
+/// provider-list commands (both runtimes).
+pub mod codex_catalog;
 /// The ✨ commit message generator (both runtimes).
 pub mod commit_message;
 /// Computer use: sharing windows, the helper, the agent reads — the desktop
@@ -58,6 +61,9 @@ pub mod model_provider;
 pub mod model_provider_file;
 pub mod model_provider_launch;
 pub mod model_provider_probe;
+/// OpenCode 2's provider credentials, through OpenCode's own API (both
+/// runtimes).
+pub mod opencode_credentials;
 #[cfg(feature = "tauri-runtime")]
 pub mod notification;
 pub mod office_tools;

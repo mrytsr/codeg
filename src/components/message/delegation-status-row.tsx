@@ -232,19 +232,19 @@ export const DelegationStatusRow = memo(function DelegationStatusRow({
   // reads `done · 42s`.
   const row = (
     <>
-      <span className="flex min-w-0 flex-1 items-start gap-1">
+      <span className="flex min-w-0 items-start gap-1">
         <span className="flex min-w-0 items-baseline gap-2">
           <span
             className={cn(
               "min-w-0 truncate font-medium",
-              isRunning ? "activity-shimmer" : "text-muted-foreground"
+              isRunning ? "activity-shimmer" : "text-activity-secondary"
             )}
             title={taskId ?? undefined}
           >
             {label}
           </span>
           {results.length > 1 && (
-            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            <span className="shrink-0 text-xs tabular-nums text-activity-secondary">
               ×{results.length}
             </span>
           )}

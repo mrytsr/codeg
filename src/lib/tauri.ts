@@ -243,7 +243,6 @@ export async function acpUpdateAgentPreferences(
     enabled: boolean
     env: Record<string, string>
     config_json?: string | null
-    opencode_auth_json?: string | null
     codex_auth_json?: string | null
     codex_config_toml?: string | null
   }
@@ -253,7 +252,6 @@ export async function acpUpdateAgentPreferences(
     enabled: params.enabled,
     env: params.env,
     configJson: params.config_json ?? null,
-    opencodeAuthJson: params.opencode_auth_json ?? null,
     codexAuthJson: params.codex_auth_json ?? null,
     codexConfigToml: params.codex_config_toml ?? null,
   })

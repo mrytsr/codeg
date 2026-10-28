@@ -48,6 +48,7 @@ import { PetManagerSection } from "./pet-manager-section"
 import { FontSettingsSection } from "./font-settings-section"
 import { WorkspaceBackgroundSection } from "./workspace-background-section"
 import { CustomStyleSection } from "./custom-style-section"
+import { ChatHtmlSettingsSection } from "./chat-html-settings"
 
 /**
  * 屏幕可用宽度（CSS px），用作聊天宽度滑块上限的依据——主窗口铺满屏幕时聊天列
@@ -294,6 +295,8 @@ export function AppearanceSettings() {
             </span>
           </label>
         </section>
+
+        <ChatHtmlSettingsSection />
 
         {/* ===== Chat content width ===== */}
         <section className="rounded-xl border bg-card p-4 space-y-4">

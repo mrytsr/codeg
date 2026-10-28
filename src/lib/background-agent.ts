@@ -152,19 +152,23 @@ export function parseBackgroundTaskMarker(
 /**
  * Whether a LIVE wire tool output is an async sub-agent launch ack —
  * Claude Code's ("Async agent launched successfully. … You will be
- * notified…") or Grok's `spawn_subagent(background: true)` ack ("Subagent
+ * notified…"), Grok's `spawn_subagent(background: true)` ack ("Subagent
  * started in background.\nsubagent_id: …\nUse get_command_or_subagent_output
- * …"). Presentation-only: used to show a "running in background" state
- * instead of dumping the internal ack text while the turn's wire data is
- * still what the card renders (the parser marker — or, for Grok, the live
- * `subagent_finished` settle — replaces it).
+ * …") or OpenCode 2's `subagent(background: true)` one ("The subagent is
+ * working in the background (sessionID: …)", packages/core/src/tool/plugin/
+ * subagent.ts `backgroundResult`, 2.2.0). Presentation-only: used to show a
+ * "running in background" state instead of dumping the internal ack text while
+ * the turn's wire data is still what the card renders (the parser marker — or,
+ * for Grok, the live `subagent_finished` settle — replaces it).
  */
 export function isAsyncLaunchAckText(
   output: string | null | undefined
 ): boolean {
   if (!output) return false
+  const text = output.trimStart()
   return (
     output.includes("Async agent launched successfully") ||
-    output.trimStart().startsWith("Subagent started in background")
+    text.startsWith("Subagent started in background") ||
+    text.startsWith("The subagent is working in the background (sessionID:")
   )
 }

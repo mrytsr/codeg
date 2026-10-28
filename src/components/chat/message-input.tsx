@@ -4,6 +4,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -124,6 +125,7 @@ import {
   clearMessageInputDraftV2,
   loadMessageInputDraftV2,
   saveMessageInputDraftV2,
+  setLiveComposerContent,
 } from "@/lib/message-input-draft"
 import { rankByTextMatch } from "@/lib/fuzzy-text-match"
 import {
@@ -535,6 +537,21 @@ export function MessageInput({
     setComposerEmpty(ed ? isComposerEmpty(ed) : true)
   }, [])
 
+  // What this composer holds that its saved draft may not show yet — typing
+  // inside the save debounce, image attachments (never saved), a file still
+  // being read or uploaded — reported per draft key for the tab store, which
+  // reads it before tidying a "blank" draft tab away. An intake is reported
+  // the moment it starts; the rest once React has committed it (below).
+  const composerId = useId()
+  const reportIntakeStart = useCallback(() => {
+    if (!effectiveDraftStorageKey) return
+    setLiveComposerContent(
+      effectiveDraftStorageKey,
+      `${composerId}:intake`,
+      true
+    )
+  }, [composerId, effectiveDraftStorageKey])
+
   // Attachments (images → thumbnail strip, files → inline badges) and the "+"
   // menu's insertable shortcuts. Both are shared with the to-do task composers,
   // so paste/drop/pick and the skill/quick-message entries behave identically
@@ -547,6 +564,7 @@ export function MessageInput({
     attachmentTabId,
     defaultPath,
     logLabel: "MessageInput",
+    onIntakeStart: reportIntakeStart,
   })
   const {
     attachments,
@@ -1058,6 +1076,32 @@ export function MessageInput({
   const imageAttachments = attach.imageAttachments
   const hasAttachments = attachments.length > 0
   const hasSendableContent = !composerEmpty || hasAttachments
+  // The committed half of the report above: what the composer holds, and
+  // whether an intake is still in flight (once it settles, what it brought is
+  // already in `hasSendableContent` here). `intakeRevision` re-runs this after
+  // every intake, even one that started and settled within one render batch,
+  // where `intakePending` reads false both times.
+  const { intakePending, intakeRevision } = attach
+  useEffect(() => {
+    if (!effectiveDraftStorageKey) return
+    const intakeId = `${composerId}:intake`
+    setLiveComposerContent(
+      effectiveDraftStorageKey,
+      composerId,
+      hasSendableContent
+    )
+    setLiveComposerContent(effectiveDraftStorageKey, intakeId, intakePending)
+    return () => {
+      setLiveComposerContent(effectiveDraftStorageKey, composerId, false)
+      setLiveComposerContent(effectiveDraftStorageKey, intakeId, false)
+    }
+  }, [
+    composerId,
+    effectiveDraftStorageKey,
+    hasSendableContent,
+    intakePending,
+    intakeRevision,
+  ])
 
   // ── Slash command autocomplete ──
   //
@@ -1398,7 +1442,7 @@ export function MessageInput({
   // reproduces the shortcut everywhere in the box. Reading the clipboard happens
   // inside the menu-click / keydown user gesture, so the async Clipboard API has
   // the activation it needs.
-  const handleContextPaste = useCallback(async () => {
+  const pasteFromClipboard = useCallback(async () => {
     if (disabled) return
     const editor = editorRef.current?.getEditor()
     if (!editor) return
@@ -1441,6 +1485,17 @@ export function MessageInput({
       toast.error(t("pasteUnavailable"))
     }
   }, [disabled, attach, t])
+  // Content is on its way from the first clipboard read on: counted as an
+  // intake, so draft tidying never takes this composer for blank meanwhile.
+  const handleContextPaste = useCallback(async () => {
+    if (disabled) return
+    const settle = attach.beginIntake()
+    try {
+      await pasteFromClipboard()
+    } finally {
+      settle()
+    }
+  }, [attach, disabled, pasteFromClipboard])
 
   // Bridges the composer's Ctrl/⌘+Shift+V key to the plain-text paste above.
   // Returns whether the shortcut was consumed: when disabled or when the async

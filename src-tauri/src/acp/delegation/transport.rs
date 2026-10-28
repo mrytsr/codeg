@@ -54,6 +54,7 @@
 //! error to the LLM, which is preferable to silent misbehavior.
 
 use std::io;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -549,11 +550,93 @@ where
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("decode: {e}")))
 }
 
-/// One-shot client round-trip: connect, write one [`BrokerMessage`], read the
-/// response, drop the connection. The three public helpers below differ only
-/// in which message they build, so the connect/write/read is shared here.
-#[cfg(unix)]
+/// When the listener is checked on during a round trip that has not answered
+/// yet, and how long each check may take. See [`message_round_trip`].
+#[derive(Debug, Clone, Copy)]
+struct LivenessChecks {
+    /// Wait between checks; the first comes this long into the round trip.
+    every: Duration,
+    /// How long one `Ping` may take to come back.
+    budget: Duration,
+    /// Failed checks in a row that end the round trip.
+    misses: u32,
+}
+
+/// A dead codeg is given up on in about 40 s; a codeg merely slow to answer
+/// one `Ping` (a loaded machine) is not.
+const LIVENESS_CHECKS: LivenessChecks = LivenessChecks {
+    every: Duration::from_secs(10),
+    budget: Duration::from_secs(10),
+    misses: 2,
+};
+
+/// One client round trip — connect, write one [`BrokerMessage`], read the
+/// response, drop the connection — that gives up once the listener stops
+/// answering, instead of waiting for a reply that cannot come.
+///
+/// Some round trips are long by design (`get_delegation_status` with
+/// `wait_ms: 0`, `ask_user_question`, `browser_eval`), so no deadline fits
+/// them all; what tells a long answer from a dead listener is whether the
+/// listener still answers a `Ping`, sent on a connection of its own while the
+/// call waits. A codeg that stopped serving — paused by macOS when memory ran
+/// out, say — leaves the connection queued in the socket's backlog: `connect`
+/// succeeds, and without this every tool call hung until the agent's own MCP
+/// timeout (30 minutes for Claude Code).
 async fn message_round_trip(socket_path: &str, msg: &BrokerMessage) -> io::Result<BrokerResponse> {
+    round_trip_checking_liveness(socket_path, msg, LIVENESS_CHECKS).await
+}
+
+async fn round_trip_checking_liveness(
+    socket_path: &str,
+    msg: &BrokerMessage,
+    checks: LivenessChecks,
+) -> io::Result<BrokerResponse> {
+    let exchange = raw_round_trip(socket_path, msg);
+    tokio::pin!(exchange);
+    let mut missed = 0;
+    loop {
+        // The exchange keeps going while a check is out: an answer that lands
+        // mid-check is taken as soon as it does.
+        let check = async {
+            tokio::time::sleep(checks.every).await;
+            listener_answers(socket_path, checks.budget).await
+        };
+        tokio::select! {
+            result = &mut exchange => return result,
+            alive = check => {
+                missed = if alive { 0 } else { missed + 1 };
+                if missed >= checks.misses {
+                    return Err(listener_not_answering(checks));
+                }
+            }
+        }
+    }
+}
+
+/// Whether the listener answers a `Ping` within `budget`.
+async fn listener_answers(socket_path: &str, budget: Duration) -> bool {
+    matches!(
+        tokio::time::timeout(budget, raw_round_trip(socket_path, &BrokerMessage::Ping)).await,
+        Ok(Ok(resp)) if resp.outcome.get("ok").and_then(Value::as_bool) == Some(true)
+    )
+}
+
+fn listener_not_answering(checks: LivenessChecks) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        format!(
+            "codeg stopped answering ({} liveness checks in a row got no reply within {}s), \
+             so this call was abandoned. Check that the codeg app is running and responsive \
+             (macOS can pause an app when the system runs out of memory), then try again.",
+            checks.misses,
+            checks.budget.as_secs()
+        ),
+    )
+}
+
+/// One round trip with no liveness check: connect, write, read, drop.
+#[cfg(unix)]
+async fn raw_round_trip(socket_path: &str, msg: &BrokerMessage) -> io::Result<BrokerResponse> {
     use tokio::net::UnixStream;
     let mut stream = UnixStream::connect(socket_path).await?;
     write_frame(&mut stream, msg).await?;
@@ -562,7 +645,7 @@ async fn message_round_trip(socket_path: &str, msg: &BrokerMessage) -> io::Resul
 
 /// Windows path uses named pipes; the address format is `\\.\pipe\<name>`.
 #[cfg(windows)]
-async fn message_round_trip(socket_path: &str, msg: &BrokerMessage) -> io::Result<BrokerResponse> {
+async fn raw_round_trip(socket_path: &str, msg: &BrokerMessage) -> io::Result<BrokerResponse> {
     let mut stream = open_named_pipe_with_retry(socket_path)
         .await
         .map_err(|e| io::Error::other(format!("open pipe: {e}")))?;
@@ -842,9 +925,10 @@ pub async fn client_computer_act_round_trip(
 /// indicator to tell "listening" from "socket file exists but nobody is
 /// accepting", and by the companion's assistant-support probe.
 /// Callers should wrap this in their own timeout — a socket whose peer accepts
-/// but never answers would otherwise park here.
+/// but never answers would otherwise park here. Itself the liveness check, so
+/// it is not checked on.
 pub async fn client_ping(socket_path: &str) -> io::Result<BrokerResponse> {
-    message_round_trip(socket_path, &BrokerMessage::Ping).await
+    raw_round_trip(socket_path, &BrokerMessage::Ping).await
 }
 
 /// Fetch the assistant roster (see [`BrokerMessage::ListAssistants`]).
@@ -1122,5 +1206,80 @@ mod tests {
         assert_eq!(resp.outcome["kind"], "ok");
         assert_eq!(resp.outcome["text"], "hello");
         server.await.unwrap();
+    }
+
+    #[cfg(unix)]
+    const QUICK_CHECKS: LivenessChecks = LivenessChecks {
+        every: Duration::from_millis(50),
+        budget: Duration::from_millis(50),
+        misses: 2,
+    };
+
+    #[cfg(unix)]
+    fn progress() -> BrokerMessage {
+        BrokerMessage::TaskProgress(BrokerTaskProgressRequest {
+            token: "tok".into(),
+            message: "half way".into(),
+        })
+    }
+
+    /// A codeg that stopped serving — the process paused, its accept loop
+    /// gone — still has its socket listening: `connect` lands in the backlog
+    /// and nothing ever answers. The round trip gives up instead of waiting
+    /// for the agent's own timeout.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_listener_that_stopped_accepting_is_given_up_on() {
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let path = dir.path().join("codeg-mcp.sock");
+        let _never_accepted = tokio::net::UnixListener::bind(&path).unwrap();
+        let path = path.to_string_lossy().to_string();
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            round_trip_checking_liveness(&path, &progress(), QUICK_CHECKS),
+        )
+        .await
+        .expect("gave up rather than hanging");
+        let err = result.expect_err("no answer can come");
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        assert!(err.to_string().contains("codeg stopped answering"), "{err}");
+    }
+
+    /// A long answer from a listener that is still serving is waited for:
+    /// only an unanswered `Ping` ends a round trip.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_slow_answer_from_a_live_listener_is_waited_for() {
+        use tokio::net::UnixListener;
+
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let path = dir.path().join("codeg-mcp.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let server = tokio::spawn(async move {
+            loop {
+                let (mut conn, _) = listener.accept().await.unwrap();
+                tokio::spawn(async move {
+                    let msg: BrokerMessage = read_frame(&mut conn).await.unwrap();
+                    if !matches!(msg, BrokerMessage::Ping) {
+                        // Ten checks' worth of waiting.
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                    let outcome = match msg {
+                        BrokerMessage::Ping => json!({ "ok": true }),
+                        _ => json!({ "recorded": true }),
+                    };
+                    write_frame(&mut conn, &BrokerResponse { outcome })
+                        .await
+                        .unwrap();
+                });
+            }
+        });
+
+        let resp = round_trip_checking_liveness(&path.to_string_lossy(), &progress(), QUICK_CHECKS)
+            .await
+            .expect("a live listener's answer");
+        assert_eq!(resp.outcome["recorded"], true);
+        server.abort();
     }
 }

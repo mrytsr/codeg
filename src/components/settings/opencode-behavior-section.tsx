@@ -14,32 +14,32 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Button } from "@/components/ui/button"
 import {
-  OPENCODE_AUTOUPDATE_MODES,
   OPENCODE_NUMBER_FIELDS,
-  OPENCODE_SHARE_MODES,
+  OPENCODE_TOGGLE_DEFAULTS,
+  OPENCODE_UPDATE_MODES,
   readOpenCodeBehavior,
-  setOpenCodeAutoUpdate,
+  removeIgnoredLegacyKeys,
   setOpenCodeDefaultAgent,
   setOpenCodeNumber,
-  setOpenCodeShare,
   setOpenCodeToggle,
-  type OpenCodeAutoUpdate,
+  setOpenCodeUpdate,
   type OpenCodeNumberField,
-  type OpenCodeShareMode,
   type OpenCodeToggleField,
+  type OpenCodeUpdateMode,
 } from "@/lib/opencode-behavior"
 import { isOpenCodeConfigEditable } from "@/lib/opencode-permissions"
 
 /** Radix Select rejects "" as a value, so "not configured" needs a sentinel. */
 const UNSET = "__opencode_behavior_unset__"
 
-const DOCS_URL = "https://opencode.ai/docs/config/"
+const DOCS_URL = "https://opencode.ai/v2/docs/config"
 
 /**
- * Visual editor for the OpenCode config keys that shape a session's behavior:
- * which agent it starts in, whether it shares, how it compacts, and how much
- * tool output survives before it is spilled to disk.
+ * Visual editor for the OpenCode 2 config keys that shape a session's behavior:
+ * which agent it starts in, how it compacts, which experimental tools it has,
+ * and how much tool output survives before it is spilled to disk.
  *
  * These were reachable only through the raw-JSON box next to it, which meant
  * every one of them required knowing the key name and its schema type. The
@@ -72,12 +72,13 @@ export function OpenCodeBehaviorSection({
    */
   const numberLabels = useMemo<Record<OpenCodeNumberField, string>>(
     () => ({
-      subagent_depth: t("openCode.behavior.fields.subagentDepth"),
-      "compaction.tail_turns": t("openCode.behavior.fields.tailTurns"),
-      "compaction.preserve_recent_tokens": t(
+      "experimental.subagent_depth": t(
+        "openCode.behavior.fields.subagentDepth"
+      ),
+      "compaction.keep.tokens": t(
         "openCode.behavior.fields.preserveRecentTokens"
       ),
-      "compaction.reserved": t("openCode.behavior.fields.reserved"),
+      "compaction.buffer": t("openCode.behavior.fields.reserved"),
       "tool_output.max_lines": t("openCode.behavior.fields.maxLines"),
       "tool_output.max_bytes": t("openCode.behavior.fields.maxBytes"),
     }),
@@ -86,31 +87,20 @@ export function OpenCodeBehaviorSection({
 
   const numberHints = useMemo<Record<OpenCodeNumberField, string>>(
     () => ({
-      subagent_depth: t("openCode.behavior.hints.subagentDepth"),
-      "compaction.tail_turns": t("openCode.behavior.hints.tailTurns"),
-      "compaction.preserve_recent_tokens": t(
+      "experimental.subagent_depth": t("openCode.behavior.hints.subagentDepth"),
+      "compaction.keep.tokens": t(
         "openCode.behavior.hints.preserveRecentTokens"
       ),
-      "compaction.reserved": t("openCode.behavior.hints.reserved"),
+      "compaction.buffer": t("openCode.behavior.hints.reserved"),
       "tool_output.max_lines": t("openCode.behavior.hints.maxLines"),
       "tool_output.max_bytes": t("openCode.behavior.hints.maxBytes"),
     }),
     [t]
   )
 
-  const shareLabel = useCallback(
-    (mode: OpenCodeShareMode) =>
-      mode === "manual"
-        ? t("openCode.behavior.shareManual")
-        : mode === "auto"
-          ? t("openCode.behavior.shareAuto")
-          : t("openCode.behavior.shareDisabled"),
-    [t]
-  )
-
-  const autoUpdateLabel = useCallback(
-    (mode: OpenCodeAutoUpdate) =>
-      mode === "on"
+  const updateLabel = useCallback(
+    (mode: OpenCodeUpdateMode) =>
+      mode === "auto"
         ? t("openCode.behavior.autoUpdateOn")
         : mode === "notify"
           ? t("openCode.behavior.autoUpdateNotify")
@@ -135,19 +125,22 @@ export function OpenCodeBehaviorSection({
   )
 
   const handleToggle = useCallback(
-    (field: OpenCodeToggleField, checked: boolean, defaultOn: boolean) => {
+    (field: OpenCodeToggleField, checked: boolean) => {
       // Returning to OpenCode's own default UNSETS the key instead of pinning
       // it, so the document keeps following upstream.
       onChange(
         setOpenCodeToggle(
           configText,
           field,
-          checked === defaultOn ? null : checked
+          checked === OPENCODE_TOGGLE_DEFAULTS[field] ? null : checked
         )
       )
     },
     [configText, onChange]
   )
+
+  const toggleChecked = (field: OpenCodeToggleField) =>
+    view.toggles[field] ?? OPENCODE_TOGGLE_DEFAULTS[field]
 
   return (
     <div className="space-y-2.5 rounded-md border bg-background/60 p-3">
@@ -173,6 +166,25 @@ export function OpenCodeBehaviorSection({
         <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-2xs text-amber-500">
           {t("openCode.permissions.unparsableConfig")}
         </p>
+      )}
+
+      {editable && view.ignoredLegacyKeys.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5">
+          <p className="min-w-0 flex-1 text-2xs text-amber-500">
+            {t("openCode.behavior.ignoredLegacyKeys", {
+              keys: view.ignoredLegacyKeys.join(", "),
+            })}
+          </p>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            disabled={locked}
+            onClick={() => onChange(removeIgnoredLegacyKeys(configText))}
+          >
+            {t("openCode.behavior.removeIgnoredLegacyKeys")}
+          </Button>
+        </div>
       )}
 
       {/* ---- Session defaults ---- */}
@@ -202,43 +214,6 @@ export function OpenCodeBehaviorSection({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <div className="text-2xs font-medium">
-              {t("openCode.behavior.share")}
-            </div>
-            <p className="mt-0.5 text-3xs text-muted-foreground">
-              {t("openCode.behavior.shareHint")}
-            </p>
-          </div>
-          <Select
-            value={view.share ?? UNSET}
-            disabled={locked}
-            onValueChange={(value) => {
-              onChange(
-                setOpenCodeShare(
-                  configText,
-                  value === UNSET ? null : (value as OpenCodeShareMode)
-                )
-              )
-            }}
-          >
-            <SelectTrigger className="h-7 w-44 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="end">
-              <SelectItem value={UNSET}>
-                {t("openCode.behavior.unset")}
-              </SelectItem>
-              {OPENCODE_SHARE_MODES.map((mode) => (
-                <SelectItem key={mode} value={mode}>
-                  {shareLabel(mode)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className="text-2xs font-medium">
               {t("openCode.behavior.autoUpdate")}
             </div>
             <p className="mt-0.5 text-3xs text-muted-foreground">
@@ -246,13 +221,13 @@ export function OpenCodeBehaviorSection({
             </p>
           </div>
           <Select
-            value={view.autoupdate ?? UNSET}
+            value={view.update ?? UNSET}
             disabled={locked}
             onValueChange={(value) => {
               onChange(
-                setOpenCodeAutoUpdate(
+                setOpenCodeUpdate(
                   configText,
-                  value === UNSET ? null : (value as OpenCodeAutoUpdate)
+                  value === UNSET ? null : (value as OpenCodeUpdateMode)
                 )
               )
             }}
@@ -264,9 +239,9 @@ export function OpenCodeBehaviorSection({
               <SelectItem value={UNSET}>
                 {t("openCode.behavior.unset")}
               </SelectItem>
-              {OPENCODE_AUTOUPDATE_MODES.map((mode) => (
+              {OPENCODE_UPDATE_MODES.map((mode) => (
                 <SelectItem key={mode} value={mode}>
-                  {autoUpdateLabel(mode)}
+                  {updateLabel(mode)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -280,26 +255,33 @@ export function OpenCodeBehaviorSection({
           icon
           label={t("openCode.behavior.snapshot")}
           hint={t("openCode.behavior.snapshotHint")}
-          // Schema default: snapshots on. Off is what disables undo/revert.
-          checked={view.toggles.snapshot ?? true}
+          // Default on. Off is what disables undo/revert.
+          checked={toggleChecked("snapshots")}
           disabled={locked}
-          onChange={(checked) => handleToggle("snapshot", checked, true)}
+          onChange={(checked) => handleToggle("snapshots", checked)}
         />
         <ToggleRow
           label={t("openCode.behavior.compactionAuto")}
           hint={t("openCode.behavior.compactionAutoHint")}
-          checked={view.toggles["compaction.auto"] ?? true}
+          checked={toggleChecked("compaction.auto")}
           disabled={locked}
-          onChange={(checked) => handleToggle("compaction.auto", checked, true)}
+          onChange={(checked) => handleToggle("compaction.auto", checked)}
         />
         <ToggleRow
-          label={t("openCode.behavior.compactionPrune")}
-          hint={t("openCode.behavior.compactionPruneHint")}
-          checked={view.toggles["compaction.prune"] ?? false}
+          label={t("openCode.behavior.backgroundCompaction")}
+          hint={t("openCode.behavior.backgroundCompactionHint")}
+          checked={toggleChecked("experimental.background_compaction")}
           disabled={locked}
           onChange={(checked) =>
-            handleToggle("compaction.prune", checked, false)
+            handleToggle("experimental.background_compaction", checked)
           }
+        />
+        <ToggleRow
+          label={t("openCode.behavior.todo")}
+          hint={t("openCode.behavior.todoHint")}
+          checked={toggleChecked("experimental.todo")}
+          disabled={locked}
+          onChange={(checked) => handleToggle("experimental.todo", checked)}
         />
       </div>
 

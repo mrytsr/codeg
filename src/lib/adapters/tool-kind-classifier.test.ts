@@ -102,6 +102,13 @@ describe("isAgentLikeToolName", () => {
     expect(isAgentLikeToolName("askuserquestion")).toBe(true)
   })
 
+  it("matches Antigravity's bare ask_question history name only", () => {
+    expect(isAgentLikeToolName("ask_question")).toBe(true)
+    // A host-prefixed one is a third-party MCP tool (DeepWiki's, for one).
+    expect(isAgentLikeToolName("mcp__deepwiki__ask_question")).toBe(false)
+    expect(isAgentLikeToolName("deepwiki/ask_question")).toBe(false)
+  })
+
   it("matches check_user_feedback across host naming conventions", () => {
     expect(isAgentLikeToolName("check_user_feedback")).toBe(true)
     expect(isAgentLikeToolName("mcp__codeg-mcp__check_user_feedback")).toBe(

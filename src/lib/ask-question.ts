@@ -59,13 +59,15 @@ export function splitRecommended(label: string): {
   text: string
   recommended: boolean
 } {
-  const m = label.match(/^(.*?)\s*\(recommended\)\s*$/i)
-  const text = m?.[1].trim()
-  // Only treat "(Recommended)" as a suffix when real text precedes it — a bare
-  // "(Recommended)" label keeps its literal text rather than rendering empty.
-  return text
-    ? { text, recommended: true }
-    : { text: label, recommended: false }
+  const suffixMatch = label.match(/^(.*?)\s*\(recommended\)\s*$/i)
+  if (suffixMatch && suffixMatch[1].trim()) {
+    return { text: suffixMatch[1].trim(), recommended: true }
+  }
+  const prefixMatch = label.match(/^\s*\(recommended\)\s*(.*?)$/i)
+  if (prefixMatch && prefixMatch[1].trim()) {
+    return { text: prefixMatch[1].trim(), recommended: true }
+  }
+  return { text: label, recommended: false }
 }
 
 function asString(value: unknown): string {
@@ -82,6 +84,11 @@ function parseOptions(raw: unknown): AskQuestionOption[] {
   if (!Array.isArray(raw)) return []
   const out: AskQuestionOption[] = []
   for (const item of raw) {
+    if (typeof item === "string") {
+      const label = item.trim()
+      if (label) out.push({ label, description: "" })
+      continue
+    }
     if (!item || typeof item !== "object") continue
     const obj = item as Record<string, unknown>
     const label = asString(obj.label)
@@ -131,7 +138,11 @@ export function parseAskQuestionInput(
     out.push({
       question,
       header: asString(obj.header),
-      multiSelect: obj.multiSelect === true || obj.multi_select === true,
+      multiSelect:
+        obj.multiSelect === true ||
+        obj.multi_select === true ||
+        obj.is_multi_select === true ||
+        obj.isMultiSelect === true,
       options,
       isSecret: obj.isSecret === true || obj.is_secret === true,
       id: typeof obj.id === "string" && obj.id ? obj.id : undefined,

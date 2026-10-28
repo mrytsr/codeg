@@ -1,6 +1,7 @@
 import type { MessageNavEntry } from "@/components/message/conversation-message-nav"
 import type { DelegationCardSource } from "@/hooks/use-delegation-card-model"
 import {
+  isCodeModeDelegationCall,
   isDelegateToAgentToolName,
   parseDelegationMeta,
 } from "@/lib/delegation-card"
@@ -120,7 +121,15 @@ function outlineTurnSubAgents(
   const sources: DelegationCardSource[] = []
   for (const block of turn.blocks) {
     if (block.type !== "tool_use" || !block.tool_use_id) continue
-    if (!isDelegateToAgentToolName(normalizeToolName(block.tool_name))) continue
+    // OpenCode 2.x code mode runs the delegation inside its `execute` tool,
+    // so the call is known by its input, not its name (as in the window).
+    const name = normalizeToolName(block.tool_name)
+    if (
+      !isDelegateToAgentToolName(name) &&
+      !isCodeModeDelegationCall(name, block.input_preview)
+    ) {
+      continue
+    }
     if (parseDelegationMeta(block.meta) == null) continue
     sources.push({
       parentToolUseId: block.tool_use_id,

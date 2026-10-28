@@ -73,6 +73,7 @@ import {
   type CustomTheme,
   type CustomThemeToken,
 } from "@/lib/custom-style"
+import { readableAccent } from "@/lib/readable-accent"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import {
   isShortcutRecorderArmed,
@@ -872,6 +873,16 @@ export function AppearanceProvider({
           ? customTheme.dark
           : customTheme.light
     applyTokenOverrides(document.documentElement, active)
+    // The timeline's accent follows a primary set here, held to a readable
+    // lightness like each preset's (globals.css); without one, the preset's.
+    const accent = active.primary
+      ? readableAccent(active.primary, isDarkMode)
+      : null
+    if (accent) {
+      document.documentElement.style.setProperty("--activity-accent", accent)
+    } else {
+      document.documentElement.style.removeProperty("--activity-accent")
+    }
   }, [customStyleSuppressed, customThemeEnabled, customTheme, isDarkMode])
 
   useEffect(() => {

@@ -450,3 +450,27 @@ describe("chat content width", () => {
     expect(rootVar()).toBe("68.75rem")
   })
 })
+
+describe("the timeline's accent", () => {
+  const accent = () =>
+    document.documentElement.style.getPropertyValue("--activity-accent")
+
+  it("follows a primary set in the custom style, held to a readable lightness", () => {
+    localStorage.setItem(
+      STORAGE_KEY_CUSTOM_THEME,
+      JSON.stringify({ light: { primary: "#ef4444" }, dark: {} })
+    )
+    renderProbe()
+    expect(accent()).toBe("oklch(0.5 0.203 25.331)")
+  })
+
+  it("leaves the preset's when no primary is set", () => {
+    localStorage.setItem(
+      STORAGE_KEY_CUSTOM_THEME,
+      JSON.stringify({ light: { background: "#ffffff" }, dark: {} })
+    )
+    document.documentElement.style.setProperty("--activity-accent", "red")
+    renderProbe()
+    expect(accent()).toBe("")
+  })
+})

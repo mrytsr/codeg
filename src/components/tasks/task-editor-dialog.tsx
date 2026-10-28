@@ -52,9 +52,10 @@ interface TaskEditorDialogProps {
   onOpenChange: (open: boolean) => void
   /** Existing task to edit, or null for a blank create. */
   task: WorkTask | null
-  /** Preselected folder for a create (the board's folder filter). */
+  /** Preselected folder for a create (the board's folder filter, the aux
+   *  panel's project, or the project of the conversation a message is in). */
   defaultFolderId: number | null
-  /** Seed text for a create (the "task from message" hand-off). */
+  /** Seed text for a create from a chat message (`TaskFromMessageHost`). */
   prefillText?: string | null
   onSubmit: (draft: WorkTaskDraft) => Promise<void>
 }

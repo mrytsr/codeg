@@ -139,6 +139,14 @@ pub struct Model {
     /// Same discipline as `config`: replayed/displayed, never queried.
     #[sea_orm(column_type = "Text")]
     pub source_meta: Option<String>,
+    /// JSON `WorkTaskDelivery` — for a task WITHOUT forge provenance only:
+    /// the repository and account its first delivery resolved from the
+    /// project's `origin` (pinned from then on), and the pull request it
+    /// opened there. NULL until such a task is first delivered. A
+    /// forge-sourced task records its pull request in `source_meta` instead,
+    /// which already names its repository and the account that triggered it.
+    #[sea_orm(column_type = "Text")]
+    pub delivery: Option<String>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
     pub started_at: Option<DateTimeUtc>,

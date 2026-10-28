@@ -194,10 +194,12 @@ pub struct AsyncTaskRecord {
     pub name: String,
     /// Already FRIENDLY, not the SDK's raw type: claude maps
     /// `local_bash`→`"shell"`, `local_workflow`→`"workflow"`,
-    /// `local_monitor`/`mcp`→`"monitor"`, and anything else to `"task"`; codex
-    /// publishes `"shell"` for every background terminal. Kept a plain string so
-    /// an unmapped future type renders as itself instead of failing to
-    /// deserialize.
+    /// `local_monitor`/`mcp`→`"monitor"`, and anything else to `"task"`; from
+    /// 0.97.0 it names a turn Claude Code started on its own `"turn"`, and from
+    /// 0.98.0 the task of a `Monitor` call (which the SDK reports as
+    /// `local_bash`) `"monitor"`. codex publishes `"shell"` for every
+    /// background terminal. Kept a plain string so an unmapped future type
+    /// renders as itself instead of failing to deserialize.
     pub task_type: String,
     pub description: String,
     /// Whether this task earns its own transcript card upstream. codeg renders
@@ -207,9 +209,10 @@ pub struct AsyncTaskRecord {
     /// distinguish a task already drawn as an ordinary tool call (a background
     /// `Bash` is one) from a standalone job doesn't need a wire change.
     pub show_in_transcript: bool,
-    /// Whether `_session/async_task/stop` is offered. The adapter announces
-    /// `true` for every task it publishes; it is carried rather than assumed so
-    /// a future adapter can withdraw the affordance without a codeg release.
+    /// Whether `_session/async_task/stop` is offered. Carried rather than
+    /// assumed: claude-agent-acp 0.98.0 announces `false` for a monitor
+    /// (stopping one would only end the agent's wait) and refuses the request,
+    /// while every other task it publishes is `true`.
     pub can_stop: bool,
     /// `running` | `paused` | `completed` | `failed` | `stopped`. Plain string
     /// for the same forward-compatibility reason as `task_type`; treat anything
@@ -1724,7 +1727,6 @@ pub struct AcpAgentInfo {
     pub host_tools_agent_mode: bool,
     pub config_json: Option<String>,
     pub config_file_path: Option<String>,
-    pub opencode_auth_json: Option<String>,
     pub codex_auth_json: Option<String>,
     pub codex_config_toml: Option<String>,
     /// Compact structured codex model-catalog source (the `codeg` custom-model
@@ -1755,6 +1757,10 @@ pub struct AcpAgentInfo {
     /// permission mode is a launch flag, not a config key). Only populated
     /// for `AgentType::Cursor`. Derived from `cursor_cli_config_json`.
     pub cursor_settings: Option<CursorSettings>,
+    /// The `/model` picker ids codeg adds for codeg's Claude sessions when no
+    /// model provider is bound (`acp::claude_model_picker`). Only populated
+    /// for `AgentType::ClaudeCode`.
+    pub claude_model_picker: Option<Vec<String>>,
     pub model_provider_id: Option<i32>,
     pub model_source: String,
     /// API families the shared Model Provider source can offer this agent.
@@ -1960,6 +1966,11 @@ pub struct GrokSettings {
     /// so the composer offers no effort selector for it.
     #[serde(default)]
     pub custom_reasoning_efforts: Vec<String>,
+    /// The endpoint's other models codeg added beside the managed one, in file
+    /// order: the `[model.<id>]` tables naming `model_provider = "codeg"`,
+    /// whose `[model_providers.codeg]` carries the managed endpoint and key.
+    #[serde(default)]
+    pub custom_extra_models: Vec<String>,
     /// `[session].auto_compact_threshold_percent` — auto-compact trigger, 0–100
     /// (Grok's default is 85).
     pub auto_compact_threshold_percent: Option<i64>,
@@ -1994,6 +2005,12 @@ pub struct GrokStructuredConfig {
     /// client that predates the field may undo that. `Some(empty)` removes the
     /// key; a non-empty list writes it.
     pub custom_reasoning_efforts: Option<Vec<String>>,
+    /// The endpoint's other models to offer beside the managed one, each a
+    /// `[model.<id>]` on codeg's `[model_providers.codeg]`. `None` keeps the
+    /// ones codeg added (following the endpoint's URL, key and backend); a list
+    /// makes them exactly those. Ignored without `custom_model_id`.
+    #[serde(default)]
+    pub custom_extra_models: Option<Vec<String>>,
     pub auto_compact_threshold_percent: Option<i64>,
 }
 

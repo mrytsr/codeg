@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::path::Path;
+
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, DatabaseConnection, EntityTrait,
     QueryFilter, Set,
@@ -10,7 +13,7 @@ use crate::models::{AgentType, ConversationSummary, ImportResult};
 use crate::parsers::{build_agent_parser, path_eq_for_matching, AgentEnv, AgentEnvs, AgentParser};
 
 /// Every locally-parsable agent, in the canonical parser order.
-const ALL_PARSER_AGENTS: [AgentType; 19] = [
+const ALL_PARSER_AGENTS: [AgentType; 20] = [
     AgentType::ClaudeCode,
     AgentType::Codex,
     AgentType::OpenCode,
@@ -29,11 +32,14 @@ const ALL_PARSER_AGENTS: [AgentType; 19] = [
     AgentType::Kiro,
     // Codeg-owned ACP history only; no scan of ZCode's native SQLite store.
     AgentType::ZCode,
-    // Codeg-owned ACP history only; TRAE CLI's own rollouts are not read.
+    // Codeg-owned ACP message history, enriched with usage from TRAE's native
+    // token_usage_record rows.
     AgentType::Trae,
     // Codeg-owned ACP history only; Command Code's own session trees are not
     // read.
     AgentType::CommandCode,
+    // Codeg-owned ACP history only; no import of MiniMax Code CLI sessions.
+    AgentType::MiniMaxCode,
 ];
 
 fn build_parser(agent_type: AgentType, env: &AgentEnv) -> Box<dyn AgentParser> {
@@ -152,12 +158,14 @@ pub(crate) enum DeletedPolicy {
 /// re-querying. Strict: the first row error aborts and propagates — this is the
 /// legacy per-folder import's contract, so its public command still surfaces DB
 /// failures rather than silently returning `0/0/0`. The batch importer uses the
-/// resilient [`import_summaries_resilient`] instead.
+/// resilient [`import_summaries_resilient`] instead. `counted_elsewhere` is
+/// [`claude_sessions_counted_elsewhere`] for this import.
 pub(crate) async fn import_summaries(
     conn: &DatabaseConnection,
     folder_id: i32,
     items: &[(AgentType, ConversationSummary)],
     deleted: DeletedPolicy,
+    counted_elsewhere: &HashSet<String>,
 ) -> Result<(ImportResult, Vec<i32>), DbError> {
     let mut imported = 0u32;
     let mut updated = 0u32;
@@ -166,7 +174,16 @@ pub(crate) async fn import_summaries(
     let mut updated_ids: Vec<i32> = Vec::new();
 
     for (agent_type, summary) in items {
-        match import_one(conn, folder_id, agent_type, summary, deleted).await? {
+        match import_one(
+            conn,
+            folder_id,
+            agent_type,
+            summary,
+            deleted,
+            counted_elsewhere,
+        )
+        .await?
+        {
             ImportOutcome::Imported => imported += 1,
             ImportOutcome::Updated(id) => {
                 updated += 1;
@@ -200,6 +217,7 @@ pub(crate) async fn import_summaries_resilient(
     folder_id: i32,
     items: &[(AgentType, ConversationSummary)],
     deleted: DeletedPolicy,
+    counted_elsewhere: &HashSet<String>,
 ) -> (ImportResult, Vec<i32>, u32) {
     let mut imported = 0u32;
     let mut updated = 0u32;
@@ -209,7 +227,16 @@ pub(crate) async fn import_summaries_resilient(
     let mut updated_ids: Vec<i32> = Vec::new();
 
     for (agent_type, summary) in items {
-        match import_one(conn, folder_id, agent_type, summary, deleted).await {
+        match import_one(
+            conn,
+            folder_id,
+            agent_type,
+            summary,
+            deleted,
+            counted_elsewhere,
+        )
+        .await
+        {
             Ok(ImportOutcome::Imported) => imported += 1,
             Ok(ImportOutcome::Updated(id)) => {
                 updated += 1;
@@ -265,7 +292,17 @@ pub async fn import_local_conversations(
         })
         .collect();
 
-    import_summaries(conn, folder_id, &matched, DeletedPolicy::Skip).await
+    let counted_elsewhere =
+        claude_sessions_counted_elsewhere(conn, &crate::paths::codeg_acp_transcripts_root())
+            .await?;
+    import_summaries(
+        conn,
+        folder_id,
+        &matched,
+        DeletedPolicy::Skip,
+        &counted_elsewhere,
+    )
+    .await
 }
 
 /// Outcome of reconciling a single parsed session against the DB.
@@ -284,7 +321,8 @@ enum ImportOutcome {
     Restored,
     /// Already imported and nothing changed — or the row is one the sidebar
     /// never shows (a delegation child, or a soft-deleted row under
-    /// [`DeletedPolicy::Skip`]).
+    /// [`DeletedPolicy::Skip`]), or another agent's conversation already counts
+    /// the session's usage (see [`claude_sessions_counted_in`]).
     Skipped,
 }
 
@@ -294,6 +332,77 @@ fn agent_type_db_str(agent_type: &AgentType) -> String {
         .ok()
         .and_then(|v| v.as_str().map(String::from))
         .unwrap_or_default()
+}
+
+/// The custom agent behind `agent_type` (the column's string form) when it is
+/// the official Claude adapter, whose per-prompt counters codeg records (see
+/// [`crate::acp::reported_usage`]) — told from the agent's current
+/// registration, the definition its next launch records under.
+fn claude_adapter_agent(agent_type: &str) -> Option<AgentType> {
+    use crate::acp::reported_usage::PromptUsageMode;
+    let agent = AgentType::from_wire(agent_type)?;
+    let meta = crate::acp::custom_registry::get(agent.custom_id()?)?;
+    (PromptUsageMode::for_distribution(agent, &meta.distribution)
+        == PromptUsageMode::PerPromptCacheExclusive)
+        .then_some(agent)
+}
+
+/// The Claude Code sessions whose token usage a live conversation in `rows`
+/// counts, by id.
+///
+/// A custom agent on the official Claude adapter runs Claude Code itself. When
+/// it shares Claude Code's config directory, each session it runs is also a
+/// Claude Code session under the same id, and importing that session as a
+/// Claude Code conversation too would count the same work twice. Its
+/// conversation counts the session it holds and every session its transcript
+/// continues (see [`crate::acp_transcript::TranscriptHeader::continues_from`]):
+/// when a session cannot be loaded again — its config directory changed, say
+/// — codeg carries the conversation on in a new one, and the earlier session
+/// stays on disk under its own id.
+///
+/// Only the agent's current registration is consulted, so conversations
+/// recorded under a definition the agent no longer has (removed, or moved to
+/// another adapter) are not recognized. Nor is the work after a plan approval
+/// that clears the context: the adapter carries on in a new Claude Code
+/// session, under an id no conversation or transcript holds.
+pub(crate) fn claude_sessions_counted_in(
+    rows: &[conversation::Model],
+    transcripts_root: &Path,
+) -> HashSet<String> {
+    let mut sessions = HashSet::new();
+    for row in rows.iter().filter(|row| row.deleted_at.is_none()) {
+        let Some(external_id) = row.external_id.as_deref() else {
+            continue;
+        };
+        let Some(agent) = claude_adapter_agent(&row.agent_type) else {
+            continue;
+        };
+        sessions.extend(crate::acp_transcript::continuation_ancestors_in(
+            transcripts_root,
+            crate::acp::registry::registry_id_for(agent),
+            external_id,
+        ));
+        sessions.insert(external_id.to_string());
+    }
+    sessions
+}
+
+/// [`claude_sessions_counted_in`] over every live conversation of a custom
+/// agent.
+pub(crate) async fn claude_sessions_counted_elsewhere(
+    conn: &DatabaseConnection,
+    transcripts_root: &Path,
+) -> Result<HashSet<String>, DbError> {
+    let rows = conversation::Entity::find()
+        .filter(
+            conversation::Column::AgentType
+                .starts_with(crate::models::agent::CUSTOM_AGENT_WIRE_PREFIX),
+        )
+        .filter(conversation::Column::ExternalId.is_not_null())
+        .filter(conversation::Column::DeletedAt.is_null())
+        .all(conn)
+        .await?;
+    Ok(claude_sessions_counted_in(&rows, transcripts_root))
 }
 
 /// Reconcile ONE already-imported conversation against a fresh parse of its
@@ -422,12 +531,15 @@ pub(crate) async fn sync_imported_sessions(
 /// place from the freshly parsed session file (see [`refresh_existing`]). A
 /// soft-deleted row is restored first when `deleted` says so (see
 /// [`DeletedPolicy`]), and only then refreshed like any other existing row.
+/// `counted_elsewhere` holds the Claude Code sessions other conversations
+/// already count ([`claude_sessions_counted_elsewhere`]).
 async fn import_one(
     conn: &DatabaseConnection,
     folder_id: i32,
     agent_type: &AgentType,
     summary: &ConversationSummary,
     deleted: DeletedPolicy,
+    counted_elsewhere: &HashSet<String>,
 ) -> Result<ImportOutcome, DbError> {
     let at_str = agent_type_db_str(agent_type);
 
@@ -436,6 +548,17 @@ async fn import_one(
         .filter(conversation::Column::AgentType.eq(&at_str))
         .one(conn)
         .await?;
+
+    // A session another agent's live conversation already counts is not added
+    // under this agent — neither as a new row nor by bringing back a deleted
+    // one — or the same work would be counted twice. A live row of this agent
+    // that holds the session already is refreshed below as before.
+    if *agent_type == AgentType::ClaudeCode
+        && exists.as_ref().is_none_or(|row| row.deleted_at.is_some())
+        && counted_elsewhere.contains(&summary.id)
+    {
+        return Ok(ImportOutcome::Skipped);
+    }
 
     if let Some(mut existing) = exists {
         // A delegation child is never a sidebar row, so it is left completely
@@ -562,7 +685,15 @@ mod tests {
         agent_type: &AgentType,
         summary: &ConversationSummary,
     ) -> Result<ImportOutcome, DbError> {
-        import_one(conn, folder_id, agent_type, summary, DeletedPolicy::Skip).await
+        import_one(
+            conn,
+            folder_id,
+            agent_type,
+            summary,
+            DeletedPolicy::Skip,
+            &HashSet::new(),
+        )
+        .await
     }
 
     fn summary(id: &str, title: Option<&str>) -> ConversationSummary {
@@ -891,6 +1022,7 @@ mod tests {
             &at,
             &timed_summary("ext-1", Some("AI Summary"), later, 9),
             DeletedPolicy::Restore,
+            &HashSet::new(),
         )
         .await
         .expect("restore");
@@ -938,7 +1070,8 @@ mod tests {
                 folder,
                 &at,
                 &summary("ext-1", Some("kept")),
-                DeletedPolicy::Restore
+                DeletedPolicy::Restore,
+                &HashSet::new()
             )
             .await
             .expect("restore"),
@@ -952,7 +1085,8 @@ mod tests {
                 folder,
                 &at,
                 &summary("ext-1", Some("kept")),
-                DeletedPolicy::Restore
+                DeletedPolicy::Restore,
+                &HashSet::new()
             )
             .await
             .expect("re-run"),
@@ -981,6 +1115,7 @@ mod tests {
             &at,
             &summary("ext-1", Some("t")),
             DeletedPolicy::Restore,
+            &HashSet::new(),
         )
         .await
         .expect("restore");
@@ -1043,7 +1178,8 @@ mod tests {
                 folder,
                 &at,
                 &summary("child-ext", Some("x")),
-                DeletedPolicy::Restore
+                DeletedPolicy::Restore,
+                &HashSet::new()
             )
             .await
             .expect("restore child"),
@@ -1363,6 +1499,198 @@ mod tests {
             row.title.as_deref(),
             Some("child original"),
             "child title untouched"
+        );
+    }
+
+    /// A custom agent on `package`, saved the way the add form saves one.
+    fn custom_def(id: &str, package: &str) -> crate::acp::custom_registry::CustomAgentDef {
+        use crate::acp::custom_registry::{
+            CustomAgentDef, CustomAgentSpec, CustomDistributionKind, NpxSpec,
+        };
+        CustomAgentDef {
+            registry_id: id.into(),
+            name: id.into(),
+            description: String::new(),
+            version: String::new(),
+            distribution_kind: CustomDistributionKind::Npx,
+            spec: CustomAgentSpec {
+                npx: Some(NpxSpec {
+                    package: package.into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            icon_url: None,
+            skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
+            supports_mcp: true,
+            model_env: None,
+        }
+    }
+
+    /// A conversation of `agent` bound to the session `external_id`.
+    async fn bound_row(
+        conn: &DatabaseConnection,
+        folder_id: i32,
+        agent: AgentType,
+        external_id: &str,
+    ) -> i32 {
+        let row = conversation_service::create(conn, folder_id, agent, None, None)
+            .await
+            .expect("create");
+        conversation_service::bind_external_id(conn, row.id, external_id, &[])
+            .await
+            .expect("bind");
+        row.id
+    }
+
+    async fn claude_rows(conn: &DatabaseConnection, ext: &str) -> Vec<conversation::Model> {
+        conversation::Entity::find()
+            .filter(conversation::Column::ExternalId.eq(ext))
+            .filter(conversation::Column::AgentType.eq("claude_code"))
+            .all(conn)
+            .await
+            .expect("query")
+    }
+
+    /// A custom agent on the official Claude adapter runs Claude Code itself,
+    /// so with a shared config directory each of its sessions is also listed
+    /// as a Claude Code session under the same id — one whose usage the custom
+    /// agent's conversation already counts.
+    #[tokio::test]
+    // `hydrate` replaces a process-global map; the lock is held throughout.
+    #[allow(clippy::await_holding_lock)]
+    async fn a_claude_session_a_custom_agent_counts_is_not_imported_again() {
+        use crate::acp::custom_registry::{hydrate, hydrate_test_guard};
+        let _guard = hydrate_test_guard();
+        hydrate(&[
+            custom_def(
+                "import-claude-adapter",
+                "@agentclientprotocol/claude-agent-acp@0.97.0",
+            ),
+            custom_def(
+                "import-other-adapter",
+                "@zed-industries/claude-code-acp@0.16.0",
+            ),
+        ]);
+        let official = AgentType::custom("import-claude-adapter").unwrap();
+        let other = AgentType::custom("import-other-adapter").unwrap();
+        let transcripts = tempfile::tempdir().expect("transcripts root");
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/codeg-import").await;
+        let at = AgentType::ClaudeCode;
+        let import = |ext: &'static str, deleted: DeletedPolicy| {
+            let (conn, root) = (db.conn.clone(), transcripts.path().to_path_buf());
+            async move {
+                let counted = claude_sessions_counted_elsewhere(&conn, &root)
+                    .await
+                    .expect("counted sessions");
+                import_one(
+                    &conn,
+                    folder,
+                    &at,
+                    &summary(ext, Some("native")),
+                    deleted,
+                    &counted,
+                )
+                .await
+                .expect("import")
+            }
+        };
+
+        bound_row(&db.conn, folder, official, "counted").await;
+        assert_eq!(
+            import("counted", DeletedPolicy::Restore).await,
+            ImportOutcome::Skipped
+        );
+        assert!(claude_rows(&db.conn, "counted").await.is_empty());
+        // Only a Claude Code session is that agent's.
+        let counted = claude_sessions_counted_elsewhere(&db.conn, transcripts.path())
+            .await
+            .expect("counted sessions");
+        assert_eq!(
+            import_one(
+                &db.conn,
+                folder,
+                &AgentType::Codex,
+                &summary("counted", None),
+                DeletedPolicy::Skip,
+                &counted,
+            )
+            .await
+            .expect("import"),
+            ImportOutcome::Imported
+        );
+
+        // The adapter could not load `carried-from` again, so the conversation
+        // went on in `carried-on`; its transcript still counts the first one.
+        bound_row(&db.conn, folder, official, "carried-on").await;
+        let header = crate::acp_transcript::TranscriptHeader::new(
+            &official.as_wire(),
+            "carried-on",
+            "/tmp/codeg-import",
+            0,
+        )
+        .continuing("carried-from");
+        crate::acp_transcript::record_header_in(
+            transcripts.path(),
+            crate::acp::registry::registry_id_for(official),
+            &header,
+        )
+        .await
+        .expect("record header");
+        assert_eq!(
+            import("carried-from", DeletedPolicy::Skip).await,
+            ImportOutcome::Skipped
+        );
+
+        // codeg records no usage for this adapter: the native session is the
+        // only place its usage is counted, so it imports as before.
+        bound_row(&db.conn, folder, other, "uncounted").await;
+        assert_eq!(
+            import("uncounted", DeletedPolicy::Skip).await,
+            ImportOutcome::Imported
+        );
+
+        // A deleted conversation counts nothing.
+        let deleted = bound_row(&db.conn, folder, official, "deleted-holder").await;
+        conversation_service::soft_delete(&db.conn, deleted)
+            .await
+            .expect("soft delete");
+        assert_eq!(
+            import("deleted-holder", DeletedPolicy::Skip).await,
+            ImportOutcome::Imported
+        );
+
+        // Nor is a deleted Claude Code copy brought back beside a live holder…
+        bound_row(&db.conn, folder, official, "deleted-copy").await;
+        let copy = bound_row(&db.conn, folder, at, "deleted-copy").await;
+        conversation_service::soft_delete(&db.conn, copy)
+            .await
+            .expect("soft delete");
+        assert_eq!(
+            import("deleted-copy", DeletedPolicy::Restore).await,
+            ImportOutcome::Skipped
+        );
+        assert!(claude_rows(&db.conn, "deleted-copy").await[0]
+            .deleted_at
+            .is_some());
+
+        // …while a live one imported before is refreshed as it always was.
+        bound_row(&db.conn, folder, official, "live-copy").await;
+        let copy = bound_row(&db.conn, folder, at, "live-copy").await;
+        assert_eq!(
+            import("live-copy", DeletedPolicy::Skip).await,
+            ImportOutcome::Updated(copy)
+        );
+
+        // Told from the registration: with the agent removed, it imports.
+        hydrate(&[]);
+        assert_eq!(
+            import("counted", DeletedPolicy::Skip).await,
+            ImportOutcome::Imported
         );
     }
 }

@@ -16,9 +16,14 @@ import { cn } from "@/lib/utils"
 import { unwrapWholeFence } from "@/lib/fenced-text"
 import { PauseIcon, XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { useFoldBack } from "./activity/fold-back"
 import { useGoalControl } from "./goal-control-context"
 
 type GoalToolPart = Extract<AdaptedContentPart, { type: "tool-call" }>
+
+/** The card's root, for the fold at the foot of its steps to find its
+ *  trigger by. */
+const GOAL_CARD_SLOT = "goal-card"
 
 type ParsedGoal = {
   objective: string | null
@@ -215,8 +220,9 @@ function GoalCard({
   endPart: GoalToolPart | null
   items?: AdaptedContentPart[]
   forceRunning?: boolean
-  /** Draws the run's steps — the activity timeline's nested timeline. */
-  renderBody?: () => ReactNode
+  /** Draws the run's steps — the activity timeline's nested timeline —
+   *  handed the fold the row at their foot folds the card with. */
+  renderBody?: (fold: (control: HTMLElement) => void) => ReactNode
 }) {
   const t = useTranslations("Folder.chat.contentParts.goal")
   const inferredRunning =
@@ -242,6 +248,24 @@ function GoalCard({
   // so any of those defaults yields to a deliberate toggle.
   const [userOpen, setUserOpen] = useState<boolean | null>(null)
   const bodyOpen = userOpen ?? (isError || (isRunning && items.length > 0))
+  // Folded from the foot of its steps, the card's header comes back into view
+  // and takes the focus. Found from the control pressed, the card's own
+  // trigger: the fold only ever runs on a press.
+  const foldBack = useFoldBack()
+  const foldFromFoot = (control: HTMLElement) => {
+    const trigger =
+      control
+        .closest(`[data-slot="${GOAL_CARD_SLOT}"]`)
+        ?.querySelector<HTMLElement>(
+          ':scope > [data-slot="collapsible-trigger"]'
+        ) ?? null
+    foldBack({
+      head: trigger,
+      control,
+      toggle: trigger,
+      fold: () => setUserOpen(false),
+    })
+  }
   const goal = useMemo(
     () => parseGoal(startPart, endPart),
     [startPart, endPart]
@@ -277,7 +301,12 @@ function GoalCard({
     (normalizedStatus === "active" || normalizedStatus === "paused")
 
   return (
-    <Collapsible open={bodyOpen} onOpenChange={setUserOpen} className="w-full">
+    <Collapsible
+      open={bodyOpen}
+      onOpenChange={setUserOpen}
+      className="w-full"
+      data-slot={GOAL_CARD_SLOT}
+    >
       <CollapsibleTrigger
         className={cn(
           "group flex min-h-7 w-full max-w-full items-center gap-2 rounded-sm py-0.5 text-start text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -323,7 +352,7 @@ function GoalCard({
               </div>
             )}
 
-            {renderBody?.()}
+            {renderBody?.(foldFromFoot)}
 
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
               {statusLabel && (
@@ -420,7 +449,7 @@ export const GoalRunPart = memo(function GoalRunPart({
   renderBody,
 }: {
   part: AdaptedGoalRunPart
-  renderBody?: () => ReactNode
+  renderBody?: (fold: (control: HTMLElement) => void) => ReactNode
 }) {
   return (
     <GoalCard

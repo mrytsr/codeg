@@ -54,6 +54,10 @@ vi.mock("@/contexts/aux-panel-context", () => ({
 vi.mock("@/contexts/terminal-context", () => ({
   useTerminalContext: () => ({ toggle: vi.fn() }),
 }))
+vi.mock("@/stores/tab-store", () => ({
+  useVisibleConversationTabs: () =>
+    state.activeTabId ? [{ id: state.activeTabId }] : [],
+}))
 vi.mock("@/contexts/tab-context", () => ({
   useTabActions: () => ({
     openNewConversationTab: vi.fn(),

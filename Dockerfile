@@ -6,7 +6,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY src/ ./src/
 COPY public/ ./public/
-COPY next.config.ts tsconfig.json postcss.config.mjs components.json ./
+COPY next.config.ts tsconfig.json tsconfig.build.json postcss.config.mjs components.json ./
 RUN pnpm build
 
 # Stage 2: Build Rust server binary + codeg-mcp companion + codeg-cli

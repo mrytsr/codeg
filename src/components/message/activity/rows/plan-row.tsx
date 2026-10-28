@@ -50,11 +50,11 @@ export const PlanRow = memo(function PlanRow({ step }: { step: PlanStep }) {
       )}
     >
       <span className="flex min-w-0 items-baseline gap-2">
-        <span className="shrink-0 font-medium text-muted-foreground">
+        <span className="shrink-0 font-medium text-activity-secondary">
           {t("row.planUpdated")}
         </span>
         {current ? (
-          <span className="min-w-0 truncate text-muted-foreground" dir="auto">
+          <span className="min-w-0 truncate text-activity-secondary" dir="auto">
             {current.content}
           </span>
         ) : null}

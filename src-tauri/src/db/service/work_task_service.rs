@@ -102,6 +102,10 @@ fn to_info(m: work_task::Model) -> WorkTaskInfo {
             .source_meta
             .as_deref()
             .and_then(|s| serde_json::from_str(s).ok()),
+        delivery: m
+            .delivery
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok()),
         latest_progress: None,
         compacting: false,
         created_at: m.created_at,
@@ -759,6 +763,7 @@ async fn insert_todo_row<C: ConnectionTrait>(
         source_kind: Set(source.map(|s| s.kind.clone())),
         source_key: Set(source.map(|s| s.key.clone())),
         source_meta: Set(source_meta),
+        delivery: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
         started_at: Set(None),
@@ -2226,24 +2231,45 @@ pub async fn begin_delivery(
     Ok(Some(run_seq))
 }
 
+/// Where a settling delivery records the pull request it reached, serialized
+/// by the CALLER (see [`complete_delivered`] for why it cannot be read and
+/// rewritten inside the settle's own transaction).
+#[derive(Debug, Clone, Copy)]
+pub enum DeliveryRecord<'a> {
+    /// A forge-sourced task: its provenance snapshot, `result_pr` filled in.
+    SourceMeta(&'a str),
+    /// A task without forge provenance: its `forge::WorkTaskDelivery`.
+    Delivery(&'a str),
+}
+
+impl DeliveryRecord<'_> {
+    fn column(self) -> (work_task::Column, String) {
+        match self {
+            DeliveryRecord::SourceMeta(json) => (work_task::Column::SourceMeta, json.to_string()),
+            DeliveryRecord::Delivery(json) => (work_task::Column::Delivery, json.to_string()),
+        }
+    }
+}
+
 /// merging → done for a delivery: the pull request carrying this task is open
 /// (or already merged) and anchored to the commit we pushed.
 ///
-/// `source_meta_json` is the row's provenance snapshot with `result_pr` filled
-/// in, serialized by the CALLER. That is not an accident of layering: the
-/// update below has to be the transaction's FIRST statement. A deferred SQLite
-/// transaction that reads before it writes cannot upgrade to a writer under
-/// WAL — it fails with `database is locked` instead of waiting — so any
-/// read-modify-write of `source_meta` happens outside, and the CAS filter is
-/// what makes a stale read harmless.
+/// `record` carries the pull request (see [`DeliveryRecord`]), serialized by
+/// the CALLER. That is not an accident of layering: the update below has to be
+/// the transaction's FIRST statement. A deferred SQLite transaction that reads
+/// before it writes cannot upgrade to a writer under WAL — it fails with
+/// `database is locked` instead of waiting — so any read-modify-write of the
+/// recorded JSON happens outside, and the CAS filter is what makes a stale
+/// read harmless.
 pub async fn complete_delivered(
     conn: &DatabaseConnection,
     id: i32,
     expect_run_seq: i32,
     pr_url: &str,
-    source_meta_json: &str,
+    record: DeliveryRecord<'_>,
 ) -> Result<bool, DbError> {
     let now = Utc::now();
+    let (record_column, record_json) = record.column();
     let txn = conn.begin().await?;
     let res = work_task::Entity::update_many()
         .col_expr(
@@ -2254,10 +2280,7 @@ pub async fn complete_delivered(
             work_task::Column::CompletionKind,
             Expr::value(Some(COMPLETION_DELIVERED_PR.to_string())),
         )
-        .col_expr(
-            work_task::Column::SourceMeta,
-            Expr::value(Some(source_meta_json.to_string())),
-        )
+        .col_expr(record_column, Expr::value(Some(record_json)))
         .col_expr(work_task::Column::MergeState, Expr::value(None::<String>))
         .col_expr(work_task::Column::LastError, Expr::value(None::<String>))
         .col_expr(work_task::Column::FinishedAt, Expr::value(Some(now)))
@@ -2286,6 +2309,66 @@ pub async fn complete_delivered(
         "engine",
         Some(WorkTaskStatus::Merging),
         WorkTaskStatus::Done,
+        Some(serde_json::json!({ "pr_url": pr_url })),
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(true)
+}
+
+/// merging → review for a delivery that SUCCEEDED but was asked not to finish
+/// the task (`WorkTaskMergeState::keep_in_review`): the pull request is open
+/// (or merged) and anchored to the commit we pushed, exactly as for
+/// [`complete_delivered`], and the task goes back to waiting on its user with
+/// that pull request recorded — for another round on the same branch, a
+/// later delivery that does finish it, or any other acceptance.
+///
+/// Same CAS and the same caller-serialized `record` as [`complete_delivered`]
+/// (and for the same reason). No error is written — nothing failed — and the
+/// banner of an earlier attempt is cleared like a fresh dispatch clears it.
+pub async fn delivered_to_review(
+    conn: &DatabaseConnection,
+    id: i32,
+    expect_run_seq: i32,
+    pr_url: &str,
+    record: DeliveryRecord<'_>,
+) -> Result<bool, DbError> {
+    let now = Utc::now();
+    let (record_column, record_json) = record.column();
+    let txn = conn.begin().await?;
+    let res = work_task::Entity::update_many()
+        .col_expr(
+            work_task::Column::Status,
+            Expr::value(status_str(WorkTaskStatus::Review)),
+        )
+        .col_expr(record_column, Expr::value(Some(record_json)))
+        .col_expr(work_task::Column::MergeState, Expr::value(None::<String>))
+        .col_expr(work_task::Column::LastError, Expr::value(None::<String>))
+        .col_expr(work_task::Column::UpdatedAt, Expr::value(now))
+        .filter(work_task::Column::Id.eq(id))
+        .filter(work_task::Column::Status.eq(WorkTaskStatus::Merging))
+        .filter(work_task::Column::RunSeq.eq(expect_run_seq))
+        .filter(work_task::Column::DeletedAt.is_null())
+        .exec(&txn)
+        .await?;
+    if res.rows_affected != 1 {
+        txn.rollback().await?;
+        return Ok(false);
+    }
+    record_event(
+        &txn,
+        id,
+        "delivered_pr",
+        "engine",
+        Some(serde_json::json!({ "pr_url": pr_url, "kept_in_review": true })),
+    )
+    .await?;
+    status_changed_event(
+        &txn,
+        id,
+        "engine",
+        Some(WorkTaskStatus::Merging),
+        WorkTaskStatus::Review,
         Some(serde_json::json!({ "pr_url": pr_url })),
     )
     .await?;
@@ -4021,16 +4104,24 @@ mod tests {
         let meta = r#"{"provider":"github","result_pr":"https://x/pull/9"}"#;
         // A settle bound to the WRONG generation must miss, or a recovery pass
         // racing a live delivery could settle a run that already moved on.
-        assert!(
-            !complete_delivered(&db.conn, id, seq, "https://x/pull/9", meta)
-                .await
-                .unwrap()
-        );
-        assert!(
-            complete_delivered(&db.conn, id, deliver_seq, "https://x/pull/9", meta)
-                .await
-                .unwrap()
-        );
+        assert!(!complete_delivered(
+            &db.conn,
+            id,
+            seq,
+            "https://x/pull/9",
+            DeliveryRecord::SourceMeta(meta)
+        )
+        .await
+        .unwrap());
+        assert!(complete_delivered(
+            &db.conn,
+            id,
+            deliver_seq,
+            "https://x/pull/9",
+            DeliveryRecord::SourceMeta(meta)
+        )
+        .await
+        .unwrap());
 
         let done = get_model(&db.conn, id).await.unwrap();
         assert_eq!(done.status, WorkTaskStatus::Done);
@@ -4043,14 +4134,84 @@ mod tests {
         assert!(done.finished_at.is_some());
         // A second settle (event vs recovery race) is a no-op, and nothing
         // pulls a delivered task back to review.
-        assert!(
-            !complete_delivered(&db.conn, id, deliver_seq, "https://x/pull/9", meta)
-                .await
-                .unwrap()
-        );
+        assert!(!complete_delivered(
+            &db.conn,
+            id,
+            deliver_seq,
+            "https://x/pull/9",
+            DeliveryRecord::SourceMeta(meta)
+        )
+        .await
+        .unwrap());
         assert!(!merge_back_to_review(&db.conn, id, None, None, None)
             .await
             .unwrap());
+    }
+
+    /// A delivery asked NOT to finish the task settles back to review: the
+    /// pull request lands in the record the caller named — the delivery
+    /// column for a task without provenance, nothing else touched — and the
+    /// settle binds to its own generation exactly like the `done` one.
+    #[tokio::test]
+    async fn a_delivery_kept_in_review_records_its_pull_request_and_stays_reviewable() {
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/wt-deliver-keep").await;
+        let (id, seq) = reviewed(&db, folder_id, "deliver, keep reviewing").await;
+        let state = WorkTaskMergeState {
+            op: WorkTaskMergeOp::DeliverPr,
+            remote_branch: Some("task/1".into()),
+            expected_head: Some("abc123".into()),
+            keep_in_review: true,
+            ..Default::default()
+        };
+        let deliver_seq = begin_delivery(&db.conn, id, &state, seq)
+            .await
+            .unwrap()
+            .expect("CAS");
+
+        let delivery = r#"{"provider":"github","pr_url":"https://x/pull/9","pr_number":9}"#;
+        assert!(
+            !delivered_to_review(
+                &db.conn,
+                id,
+                seq,
+                "https://x/pull/9",
+                DeliveryRecord::Delivery(delivery)
+            )
+            .await
+            .unwrap(),
+            "a settle bound to the wrong generation misses"
+        );
+        assert!(delivered_to_review(
+            &db.conn,
+            id,
+            deliver_seq,
+            "https://x/pull/9",
+            DeliveryRecord::Delivery(delivery)
+        )
+        .await
+        .unwrap());
+
+        let row = get_model(&db.conn, id).await.unwrap();
+        assert_eq!(row.status, WorkTaskStatus::Review);
+        assert_eq!(row.delivery.as_deref(), Some(delivery));
+        assert!(
+            row.source_meta.is_none(),
+            "a local task grows no provenance"
+        );
+        assert!(row.completion_kind.is_none(), "it did not finish");
+        assert!(row.finished_at.is_none());
+        assert!(row.merge_state.is_none(), "the intent is spent");
+        assert!(row.last_error.is_none(), "nothing failed");
+        assert_eq!(
+            row.run_seq, deliver_seq,
+            "the next acceptance binds to this generation"
+        );
+        // Reviewable as ever: the next delivery starts from here.
+        assert!(begin_delivery(&db.conn, id, &state, deliver_seq)
+            .await
+            .unwrap()
+            .is_some());
     }
 
     /// Run a fresh task all the way to `review` — the state every acceptance

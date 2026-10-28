@@ -124,6 +124,30 @@ const itemsOf = (groups: SuggestionGroup[], kind: ReferenceKind) =>
 // --- pure builder -----------------------------------------------------------
 
 describe("buildReferenceGroups", () => {
+  it("lists and searches each enabled custom account as a distinct mention target", () => {
+    const agents = [2, 3, 4, 5].map((slot) =>
+      makeAgent(`custom:claude-code-${slot}`, { name: `Claude Code ${slot}` })
+    )
+    const sources = emptySources({
+      agents: [
+        ...agents,
+        makeAgent("custom:codex-2", { name: "Codex 2", enabled: false }),
+      ],
+    })
+    const options = itemsOf(buildReferenceGroups("", sources), "agent")
+    expect(options.map((item) => item.reference.id)).toEqual(
+      agents.map((agent) => agent.agent_type)
+    )
+    expect(options.map((item) => item.reference.label)).toEqual(
+      agents.map((agent) => agent.name)
+    )
+    expect(
+      itemsOf(buildReferenceGroups("Claude Code 3", sources), "agent").map(
+        (item) => item.reference.id
+      )
+    ).toEqual(["custom:claude-code-3"])
+  })
+
   it("returns the five groups in a fixed order (no skill group)", () => {
     const groups = buildReferenceGroups("", emptySources())
     expect(groups.map((g) => g.kind)).toEqual([

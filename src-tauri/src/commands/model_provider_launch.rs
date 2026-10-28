@@ -448,6 +448,7 @@ fn write_codex_workspace(
             customs: vec![custom],
             excluded_officials: Vec::new(),
             default: None,
+            catalog: None,
         };
         let catalog = expand_customs_only(&cfg, &snapshot);
         let body = serde_json::to_string_pretty(&catalog).map_err(|e| {

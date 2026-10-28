@@ -181,7 +181,7 @@ export const DelegationRow = memo(function DelegationRow({
           />
           {model.taskId ? (
             <span
-              className="shrink-0 font-mono text-[0.8125rem] text-muted-foreground"
+              className="shrink-0 font-mono text-[0.8125rem] text-activity-secondary"
               title={model.taskId}
               dir="ltr"
             >
@@ -191,7 +191,7 @@ export const DelegationRow = memo(function DelegationRow({
           {progress && progress.steps > 0 ? (
             // Pulled in by the space after its dot, so the dot sits centred
             // between the id and the count.
-            <span className="-ms-1 min-w-0 truncate text-muted-foreground">
+            <span className="-ms-1 min-w-0 truncate text-activity-secondary">
               {`· ${t("header.steps", { count: progress.steps })}`}
             </span>
           ) : null}
@@ -199,7 +199,7 @@ export const DelegationRow = memo(function DelegationRow({
             <span
               ref={taskRef}
               dir="auto"
-              className="min-w-0 flex-1 truncate text-muted-foreground"
+              className="min-w-0 flex-1 truncate text-activity-secondary"
             >
               {taskLine}
             </span>

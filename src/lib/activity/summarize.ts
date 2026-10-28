@@ -37,6 +37,16 @@ function retrySignature(
       const command = tool.command?.display.replace(/\s+/g, " ").trim()
       return command ? `command:${command}` : null
     }
+    // The same watch started again, or the same host asked for again; never
+    // a command of the same text, which is another thing.
+    case "monitor": {
+      const watched = tool.command?.display.replace(/\s+/g, " ").trim()
+      return watched ? `monitor:${watched}` : null
+    }
+    case "network":
+      return tool.target
+        ? `network:${tool.target.full ?? tool.target.text}`
+        : null
     case "edit": {
       const paths = (tool.files ?? []).map((f) => f.path).sort()
       return paths.length > 0 ? `edit:${paths.join("\n")}` : null

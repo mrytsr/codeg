@@ -483,6 +483,12 @@ const LAUNCH_RE =
   /Command (?:running in background with ID:|was manually backgrounded by user with ID:|was moved to the background \(ID:|did not complete within its \d+s timeout and was moved to the background \(ID:)\s*([A-Za-z0-9_-]+)/i
 /** Grok's `run_terminal_command(background: true)` acknowledgement. */
 const GROK_LAUNCH_RE = /Background task\s+([A-Za-z0-9_-]+)\s+started/i
+/** OpenCode 2's shell acknowledgement for a `background: true` command, or a
+ *  foreground one moved there: `Command moved to the background (shell ID:
+ *  sh_…).` (packages/core/src/tool/plugin/shell.ts `backgroundResult`,
+ *  2.2.0). */
+const OPENCODE_LAUNCH_RE =
+  /Command moved to the background \(shell ID:\s*([A-Za-z0-9_-]+)\)/i
 
 /** Recognize a background launch result and pull the task id. Lets the command
  *  card flag itself as a background launch. */
@@ -490,7 +496,10 @@ export function parseBackgroundLaunch(
   text: string | null | undefined
 ): { taskId: string } | null {
   if (!text) return null
-  const match = text.match(LAUNCH_RE) ?? text.match(GROK_LAUNCH_RE)
+  const match =
+    text.match(LAUNCH_RE) ??
+    text.match(GROK_LAUNCH_RE) ??
+    text.match(OPENCODE_LAUNCH_RE)
   return match ? { taskId: match[1] } : null
 }
 

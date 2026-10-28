@@ -19,6 +19,7 @@ import {
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { ProviderModelsRefreshButton } from "@/components/settings/provider-models"
 import {
   Combobox,
   ComboboxContent,
@@ -842,21 +843,11 @@ export function CursorConfigPanel({
             <span className="text-2xs font-medium">
               {t("cursor.modelTitle")}
             </span>
-            <Button
-              className="h-6 gap-1 px-2 text-2xs"
-              disabled={modelsLoading}
-              onClick={() => void loadModels()}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              {modelsLoading ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3 w-3" />
-              )}
-              {t("cursor.loadModels")}
-            </Button>
+            <ProviderModelsRefreshButton
+              fetching={modelsLoading}
+              onRefresh={() => void loadModels()}
+              label={t("cursor.loadModels")}
+            />
           </div>
           <Combobox
             key={currentBase || UNSET}

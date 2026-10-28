@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 
-import { changedLineRangeFromUnifiedDiff, describeEditFiles } from "./edit"
+import {
+  changedLineRangeFromUnifiedDiff,
+  describeEditFiles,
+  editDiffText,
+} from "./edit"
 
 describe("changedLineRangeFromUnifiedDiff", () => {
   it("spans only the changed lines, not the context around them", () => {
@@ -203,5 +207,37 @@ describe("describeEditFiles", () => {
 
   it("returns nothing for an empty payload", () => {
     expect(describeEditFiles("edit", null, null)).toEqual([])
+  })
+})
+
+describe("editDiffText", () => {
+  // OpenCode 2 names the file `path` on edit and write
+  // (packages/core/src/tool/plugin/{edit,write}.ts, 2.2.0 capture).
+  it("heads an OpenCode 2 write's diff with its path", () => {
+    const diff = editDiffText(
+      "write",
+      JSON.stringify({ path: "new.txt", content: "alpha\nbeta\n" }),
+      "Created file successfully: new.txt"
+    )
+    expect(diff?.text.split("\n").slice(0, 2)).toEqual([
+      "--- a/new.txt",
+      "+++ b/new.txt",
+    ])
+  })
+
+  it("heads an OpenCode 2 edit's diff with its path", () => {
+    const diff = editDiffText(
+      "edit",
+      JSON.stringify({
+        path: "new.txt",
+        oldString: "beta",
+        newString: "gamma",
+      }),
+      "Edited new.txt (1 replacement)"
+    )
+    expect(diff?.text.split("\n").slice(0, 2)).toEqual([
+      "--- a/new.txt",
+      "+++ b/new.txt",
+    ])
   })
 })

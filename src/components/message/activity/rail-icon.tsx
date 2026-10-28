@@ -1,6 +1,7 @@
 "use client"
 
 import type { ComponentType, ReactNode, SVGProps } from "react"
+import { CalendarClockIcon, FilePenLineIcon, ListTodoIcon } from "lucide-react"
 
 import type { StepStatus } from "@/lib/activity/types"
 import { cn } from "@/lib/utils"
@@ -8,12 +9,39 @@ import { cn } from "@/lib/utils"
 export type ActivityIcon = ComponentType<SVGProps<SVGSVGElement>>
 
 /**
+ * A glyph is drawn over the whole ring, its 24-unit drawing scaled to the
+ * middle by the viewBox: 12px of a 20px ring, 10px of a 16px one. Drawn in a
+ * box of its own, the glyph and the ring each snapped to the device pixels
+ * on their own — at 90% or 110% zoom a glyph sat half a pixel off its ring.
+ */
+const GLYPH_PAD = { md: 8, sm: 7.2 } as const
+
+/**
+ * Glyphs whose drawing is off the middle of its 24-unit box, by how far (the
+ * paths' bounding box): the viewBox moves with it, so the drawing — not the
+ * box — sits in the middle of the ring.
+ */
+const GLYPH_OFFSET = new Map<ActivityIcon, readonly [number, number]>([
+  [FilePenLineIcon, [1, 0]],
+  [CalendarClockIcon, [0.5, 0]],
+  [ListTodoIcon, [0, -0.5]],
+])
+
+function glyphViewBox(icon: ActivityIcon, size: "md" | "sm"): string {
+  const pad = GLYPH_PAD[size]
+  const [dx, dy] = GLYPH_OFFSET.get(icon) ?? [0, 0]
+  const side = 24 + pad * 2
+  return `${dx - pad} ${dy - pad} ${side} ${side}`
+}
+
+/**
  * Ring colour by status, quiet by default: a finished step fades back to a
  * faint grey divider (`--activity-ring-done`), and only a failure (red) or
  * something waiting on the user (amber) takes a colour. A running step is
- * told apart by MOTION — a solid arc turning on a light track — never by the
- * primary colour, which on the red and rose presets is the failure hue. A
- * pending step keeps a dashed ring that turns slowly.
+ * told apart by MOTION — an arc in the theme's colour turning on a light
+ * track; on the red and rose presets that colour is the failure hue, and
+ * only the turning arc against a whole red ring tells them apart. A pending
+ * step keeps a dashed ring that turns slowly.
  */
 const RING_CLASS: Record<StepStatus, string> = {
   succeeded: "border-activity-ring-done",
@@ -47,20 +75,25 @@ export function RailIcon({
   label,
   size = "md",
   className,
+  iconClassName,
 }: {
   icon?: ActivityIcon
   /** Drawn in the ring instead of `icon` — an agent's own logo. */
   glyph?: ReactNode
   status: StepStatus
-  /** What the ring says to a screen reader, e.g. "command failed, exit 1". */
-  label: string
+  /** What the ring says to a screen reader, e.g. "command failed, exit 1".
+   *  Without one the ring is decoration — the words beside it say it all. */
+  label?: string
   size?: "md" | "sm"
   className?: string
+  /** On `icon`, after its status colour (a hover that inks it in). */
+  iconClassName?: string
 }) {
   return (
     <span
-      role="img"
+      role={label === undefined ? undefined : "img"}
       aria-label={label}
+      aria-hidden={label === undefined ? true : undefined}
       className={cn(
         "relative inline-flex shrink-0 items-center justify-center",
         size === "md" ? "size-5" : "size-4",
@@ -97,9 +130,11 @@ export function RailIcon({
         (Icon ? (
           <Icon
             aria-hidden="true"
+            viewBox={glyphViewBox(Icon, size)}
             className={cn(
-              size === "md" ? "size-3" : "size-2.5",
-              ICON_CLASS[status]
+              "absolute inset-0 size-full",
+              ICON_CLASS[status],
+              iconClassName
             )}
           />
         ) : null)}
@@ -108,30 +143,31 @@ export function RailIcon({
 }
 
 /**
- * The turning mark a live reply ends on while its agent is at work: at the
- * foot of the rail, which runs down to it, or under the reply when the rail is
- * not its last block: a ring like a step's with a quarter of it turning dark.
- * Placed for a 1.5rem slot, its centre on the rail. Like a running ring it
- * keeps turning with chat animations off and stops under reduced motion; the
- * header says "Working" in words either way. Two plain elements, the turning
- * one childless: a turning element is restyled every frame, its children with
- * it, and an SVG's turn also lays the page out every frame — for as long as
- * the reply streams.
+ * The turning mark of an agent at work: a ring like a step's with a quarter of
+ * it turning in the theme's colour — at the foot of a live list's rail, or
+ * under a reply whose list is not in view. Sized and placed by `className`.
+ * Like a running ring it keeps turning with chat animations off and stops
+ * under reduced motion; the header says "Working" in words either way. Two
+ * plain elements, the turning one childless: a turning element is restyled
+ * every frame, its children with it, and an SVG's turn also lays the page
+ * out every frame — for as long as the reply streams.
  */
-export function WorkingSpinner() {
+export function TurningRing({ className }: { className?: string }) {
   return (
-    <span aria-hidden="true" className="absolute start-0.5 top-1 size-4">
+    <span aria-hidden="true" className={cn("relative block", className)}>
       <span className="absolute inset-0 rounded-full border-[0.5px] border-activity-ring" />
       <span className="absolute inset-0 animate-spin rounded-full border-[1.25px] border-transparent border-t-activity-ring-live motion-reduce:animate-none" />
     </span>
   )
 }
 
-/** The turning mark on its own, under a live reply (see `WorkingSpinner`). */
+/** The turning mark on its own, under a live reply whose steps are folded
+ *  away, not written yet, or not a list it can fold (see `TurningRing`):
+ *  placed for a 1.5rem slot, its centre on the rail's line. */
 export function WorkingMark() {
   return (
     <div aria-hidden="true" className="relative h-6" data-marker="working">
-      <WorkingSpinner />
+      <TurningRing className="absolute start-0.5 top-1 size-4" />
     </div>
   )
 }

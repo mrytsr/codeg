@@ -178,6 +178,12 @@ jobs:
             exit 1
           fi
 
+      - name: Superpowers standalone skill helper layouts
+        # executing-plans ships local copies of its sibling helpers so the
+        # skill works when Codeg has to copy only one skill on Windows.
+        if: matrix.os == 'ubuntu-22.04' && matrix.mode == 'desktop'
+        run: bash scripts/test-superpowers-skill-layouts.sh
+
   install-sh:
     # install.sh stops what runs the files it replaces, and nothing else: on
     # Linux `cp` onto a running program fails, but the desktop app, other

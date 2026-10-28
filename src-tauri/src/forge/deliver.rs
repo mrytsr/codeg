@@ -29,7 +29,8 @@ use serde::Deserialize;
 
 use super::auth::ResolvedAuth;
 use super::{
-    gitea, github, gitlab, urlencode_query, web_origin, ForgeError, ForgeItemKind, ForgeProvider,
+    gitea, github, gitlab, urlencode_query, web_origin, DeliveryTarget, ForgeError, ForgeItemKind,
+    ForgeProvider,
 };
 use crate::app_error::AppCommandError;
 
@@ -236,18 +237,20 @@ pub struct DeliveryCtx<'a> {
 /// against a real HTTP server (see this module's tests).
 #[async_trait]
 pub trait ForgeDeliveryApi: Send + Sync {
-    /// Publish `work_branch` as `remote_branch` on `repo` — the repository the
-    /// push lands in: the source repository for an issue task's own branch,
-    /// the recorded HEAD repository for a pull-request push-back (the same
+    /// Publish `commit` as `remote_branch` on `repo` — the repository the
+    /// push lands in: the source repository for a task's own branch, the
+    /// recorded HEAD repository for a pull-request push-back (the same
     /// repository except when the pull request comes from a fork).
-    /// Fast-forward only — a rejected push means that branch has another owner
-    /// and the task must go back to a human.
+    /// `commit` is the work-branch tip the delivery snapshotted before its
+    /// CAS — never whatever the branch points at by the time this runs (see
+    /// [`push_refspec`]). Fast-forward only — a rejected push means that
+    /// branch has another owner and the task must go back to a human.
     async fn push_branch(
         &self,
         ctx: &DeliveryCtx<'_>,
         worktree_path: &str,
         repo: &str,
-        work_branch: &str,
+        commit: &str,
         remote_branch: &str,
     ) -> Result<(), String>;
 
@@ -267,8 +270,26 @@ pub trait ForgeDeliveryApi: Send + Sync {
 
     /// One pull request by number — how a task that IS a pull request checks
     /// what it is delivering into. Its number is part of the task's source
-    /// key, so this is a lookup, not a search.
+    /// key, so this is a lookup, not a search. The same lookup serves a task
+    /// that stayed in review after an earlier delivery: the pull request that
+    /// one opened is recorded on its row by number.
     async fn get_pull(&self, ctx: &DeliveryCtx<'_>, number: i64) -> Result<ForgePr, String>;
+
+    /// Where a task WITHOUT forge provenance delivers: the repository the
+    /// project checkout at `project_path` names as its `origin` — when that is
+    /// a forge codeg speaks — and the account that speaks for its host (the
+    /// host's default, the one the repository panel reads with). Asked once,
+    /// at such a task's first delivery; the engine pins the answer on the row
+    /// (see [`DeliveryTarget`]).
+    ///
+    /// On the trait for the same reason as everything else here: the answer
+    /// comes from the OS keyring and, for a host nothing declares, from a
+    /// network probe — neither of which a unit test may touch.
+    async fn local_target(
+        &self,
+        conn: &DatabaseConnection,
+        project_path: &str,
+    ) -> Result<DeliveryTarget, String>;
 
     /// Fetch `remote_ref` from the source repository into `local_ref` inside
     /// `repo_path`, and return the OID it landed on.
@@ -329,13 +350,13 @@ impl ForgeDeliveryApi for ForgeDelivery {
         ctx: &DeliveryCtx<'_>,
         worktree_path: &str,
         repo: &str,
-        work_branch: &str,
+        commit: &str,
         remote_branch: &str,
     ) -> Result<(), String> {
         // Git is git: the same explicit-URL push with the same pinned
         // credentials works against both forges.
         let auth = resolve(ctx).await?;
-        push_work_branch(ctx, &auth, worktree_path, repo, work_branch, remote_branch).await
+        push_work_branch(ctx, &auth, worktree_path, repo, commit, remote_branch).await
     }
 
     async fn find_pulls(
@@ -376,6 +397,45 @@ impl ForgeDeliveryApi for ForgeDelivery {
             ForgeProvider::Gitea => gitea::get_pull(&auth, ctx.owner_repo, number).await,
         }
         .map_err(|e| e.to_string())
+    }
+
+    async fn local_target(
+        &self,
+        conn: &DatabaseConnection,
+        project_path: &str,
+    ) -> Result<DeliveryTarget, String> {
+        // The repository panel's own reading of the folder — the same remote,
+        // the same mount-path stripping, the same `recognized` rule — so the
+        // board offers a pull request exactly where the panel can read one.
+        let remote = crate::commands::forge::forge_remote_at(conn, project_path)
+            .await
+            .map_err(|e| e.message)?
+            .ok_or_else(|| {
+                "this project has no `origin` remote on GitHub, GitLab or Gitea to deliver to"
+                    .to_string()
+            })?;
+        if !remote.supported {
+            return Err(ForgeError::UnsupportedHost {
+                host: remote.server_host,
+            }
+            .to_string());
+        }
+        let auth = super::resolve_forge_auth(conn, remote.provider, &remote.server_host, None)
+            .await
+            .map_err(|e| match e {
+                ForgeError::NoAccount { provider, host } => format!(
+                    "no {} account for {host} — add one under Settings → Version Control, then \
+                     deliver",
+                    provider.display_name()
+                ),
+                other => other.to_string(),
+            })?;
+        Ok(DeliveryTarget {
+            provider: remote.provider,
+            server_host: remote.server_host,
+            account_id: auth.account_id,
+            owner_repo: remote.owner_repo,
+        })
     }
 
     async fn fetch_ref(
@@ -606,19 +666,15 @@ async fn push_work_branch(
     auth: &ResolvedAuth,
     worktree_path: &str,
     repo: &str,
-    work_branch: &str,
+    commit: &str,
     remote_branch: &str,
 ) -> Result<(), String> {
     // Everything here is interpolated into a URL or a refspec. Validate
     // BEFORE building either.
-    let repo = super::normalize_repo(repo).ok_or_else(|| format!("bad repository path: {repo}"))?;
-    ensure_pushable_branch(work_branch)?;
-    ensure_pushable_branch(remote_branch)?;
+    let repo = super::normalize_repo(repo)
+        .ok_or_else(|| format!("bad repository path: {repo}"))?;
+    let refspec = push_refspec(commit, remote_branch)?;
     let url = format!("{}/{}.git", web_origin(auth), repo);
-    // Fully qualified on both sides: a short name goes through git's revision
-    // resolution, where a same-named tag makes it ambiguous (the project's
-    // existing push path documents the same trap).
-    let refspec = format!("refs/heads/{work_branch}:refs/heads/{remote_branch}");
 
     let mut cmd = crate::process::tokio_command("git");
     cmd.args(["push", &url, &refspec])
@@ -744,6 +800,27 @@ fn ensure_pushable_branch(branch: &str) -> Result<(), String> {
     crate::commands::folders::ensure_pushable_branch_name(branch).map_err(|e| e.to_string())
 }
 
+/// The refspec a delivery pushes with: the snapshotted COMMIT, never a branch
+/// name. A branch is resolved when git runs, so anything that moves it between
+/// the delivery's snapshot and the push — a commit landing in the worktree, a
+/// reset — would publish a commit the delivery never decided on, and the
+/// settle would then record it as this task's. Naming the commit publishes
+/// exactly the one the delivery checked, and leaves whatever moved local
+/// (the cleanup that follows keeps such a worktree for it).
+///
+/// The destination is fully qualified: git cannot infer one for a raw commit,
+/// and a short name goes through git's revision resolution, where a
+/// same-named tag makes it ambiguous (the project's existing push path
+/// documents the same trap).
+fn push_refspec(commit: &str, remote_branch: &str) -> Result<String, String> {
+    let is_oid = matches!(commit.len(), 40 | 64) && commit.chars().all(|c| c.is_ascii_hexdigit());
+    if !is_oid {
+        return Err(format!("not a commit id: '{commit}'"));
+    }
+    ensure_pushable_branch(remote_branch)?;
+    Ok(format!("{commit}:refs/heads/{remote_branch}"))
+}
+
 /// How a codeg task id is written into text that lands on a forge.
 ///
 /// The number is codeg-local: it names a row in this workspace's task list,
@@ -772,12 +849,27 @@ pub fn pull_request_body(issue_url: &str, issue_number: i64, task_id: i32) -> St
     let task = task_ref(task_id);
     format!(
         "Closes #{issue_number}\n\n\
-         Prepared by [codeg](https://github.com/xggz/codeg) work task {task} \
+         Prepared by [codeg]({CODEG_HOME}) work task {task} \
          from {issue_url}.\n\n\
          Review the diff before merging — the task ran against issue text \
          written by an external author."
     )
 }
+
+/// Body of the pull request codeg opens for a task WITHOUT forge provenance.
+/// There is no issue to close and no external author whose text the task ran
+/// against, so it says only where the change came from. Built from the task id
+/// alone, like every text codeg posts on its own: nothing an agent wrote
+/// reaches a forge unless its user puts it there.
+pub fn local_pull_request_body(task_id: i32) -> String {
+    format!(
+        "Prepared by [codeg]({CODEG_HOME}) work task {}.",
+        task_ref(task_id)
+    )
+}
+
+/// Where the "Prepared by codeg" line in a pull request body points.
+const CODEG_HOME: &str = "https://github.com/spacering-net/codeg";
 
 /// How a task finished, in the three shapes worth telling its thread about.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1138,6 +1230,91 @@ mod tests {
         assert!(ensure_pushable_branch("task/12").is_ok());
     }
 
+    /// The source side of a delivery's refspec is a commit id and nothing
+    /// else — a branch name, a revision expression or an option would let git
+    /// pick what gets published when it runs.
+    #[test]
+    fn a_delivery_refspec_names_the_commit_it_publishes() {
+        let sha1 = "0123456789abcdef0123456789abcdef01234567";
+        assert_eq!(
+            push_refspec(sha1, "task/12").unwrap(),
+            format!("{sha1}:refs/heads/task/12")
+        );
+        let sha256 = "a".repeat(64);
+        assert!(
+            push_refspec(&sha256, "task/12").is_ok(),
+            "SHA-256 repositories too"
+        );
+        for bad in [
+            "task/12",
+            "refs/heads/task/12",
+            "HEAD",
+            "--force",
+            "0123abc",
+            "",
+        ] {
+            assert!(
+                push_refspec(bad, "task/12").is_err(),
+                "{bad} must be rejected"
+            );
+        }
+        assert!(push_refspec(&sha1[..39], "task/12").is_err());
+        assert!(
+            push_refspec(sha1, "a:b").is_err(),
+            "the destination is still checked"
+        );
+    }
+
+    /// What that refspec does to a real repository: the remote branch lands on
+    /// the commit the delivery snapshotted — created when it did not exist —
+    /// even though the local branch moved on after the snapshot. Run against a
+    /// local bare repository, so it is git's own answer and not a model of it.
+    #[test]
+    fn pushing_the_snapshot_publishes_it_even_after_the_branch_moved() {
+        use std::process::Command;
+        let git = |dir: &std::path::Path, args: &[&str]| -> String {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .output()
+                .expect("spawn git");
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let home = tempfile::tempdir().expect("tempdir");
+        let remote = home.path().join("remote.git");
+        let local = home.path().join("local");
+        std::fs::create_dir_all(&remote).expect("mkdir");
+        std::fs::create_dir_all(&local).expect("mkdir");
+        git(&remote, &["init", "-q", "--bare"]);
+        git(&local, &["init", "-q", "-b", "task/7"]);
+        std::fs::write(local.join("a.txt"), "reviewed\n").expect("write");
+        git(&local, &["add", "-A"]);
+        git(&local, &["commit", "-qm", "the reviewed work"]);
+        let snapshot = git(&local, &["rev-parse", "HEAD"]);
+        // The branch moves after the delivery took its snapshot.
+        std::fs::write(local.join("a.txt"), "never reviewed\n").expect("write");
+        git(&local, &["commit", "-qam", "landed meanwhile"]);
+
+        let refspec = push_refspec(&snapshot, "task/7").expect("refspec");
+        git(&local, &["push", "-q", remote.to_str().unwrap(), &refspec]);
+        assert_eq!(
+            git(&remote, &["rev-parse", "refs/heads/task/7"]),
+            snapshot,
+            "the remote branch is the snapshot, not the moved local tip"
+        );
+    }
+
     fn auth_for(api_base: String) -> ResolvedAuth {
         ResolvedAuth {
             provider: ForgeProvider::GitHub,
@@ -1321,6 +1498,16 @@ mod tests {
         // autolink it to its own issue 12.
         assert!(body.contains("work task `12`"), "{body}");
         assert!(!body.contains("#12"), "autolinkable task id: {body}");
+    }
+
+    /// A task with no issue behind it closes nothing and names no external
+    /// author — and its id is written the same unlinkable way.
+    #[test]
+    fn local_body_names_the_task_and_references_nothing() {
+        let body = local_pull_request_body(12);
+        assert!(body.contains("work task `12`"), "{body}");
+        assert!(!body.contains('#'), "no reference of any kind: {body}");
+        assert!(!body.contains("Closes"), "{body}");
     }
 
     /// The trigger gate answers one question: when the agent finishes, is

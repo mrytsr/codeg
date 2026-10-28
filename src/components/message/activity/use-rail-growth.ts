@@ -6,8 +6,8 @@ import { useLayoutEffect, type RefObject } from "react"
  *  dot's incoming one, grow in from the top (globals.css). */
 const ENTER = "data-rail-enter"
 /** On the row that was last when rows joined after it: its segment, which
- *  stopped at its own line or body — or, `reached`, at the end mark of a
- *  group that was done until they joined — runs on to them. */
+ *  stopped at its own line or body, runs on to them. (A list that ends on a
+ *  capsule has its rows join above it: its last row already runs on to it.) */
 const EXTEND = "data-rail-extend"
 /** With `data-rail-extend`: a body ran beside that row's line when the rows
  *  joined, so only the part past it grows. Taken then, so a panel that closes
@@ -20,12 +20,8 @@ const STAGGER_MS = 100
 /** More rows than this at once are a reveal, not steps joining: drawn as
  *  they stand. */
 const MAX_JOIN = 6
-/** What the marks start on a row of the list (the turning mark fades in). */
-const GROWTH = new Set([
-  "activity-rail-grow",
-  "activity-rail-extend",
-  "tool-content-fade",
-])
+/** What the marks start on a row of the list. */
+const GROWTH = new Set(["activity-rail-grow", "activity-rail-extend"])
 
 function unmark(row: Element) {
   row.removeAttribute(ENTER)
@@ -70,12 +66,7 @@ export function useRailGrowth(
     const observer = new MutationObserver((records) => {
       const joined: HTMLElement[] = []
       const extended: HTMLElement[] = []
-      let wasReached = false
       for (const record of records) {
-        if (record.type === "attributes") {
-          wasReached ||= record.oldValue === "reached"
-          continue
-        }
         const added = [...record.addedNodes].filter(
           (node): node is HTMLElement =>
             node instanceof HTMLElement && node.parentElement === list
@@ -90,7 +81,7 @@ export function useRailGrowth(
       }
       if (joined.length === 0 || joined.length > MAX_JOIN) return
       for (const row of extended) {
-        row.setAttribute(EXTEND, wasReached ? "reached" : "")
+        row.setAttribute(EXTEND, "")
         if (row.hasAttribute("data-body")) row.setAttribute(BODY, "")
       }
       for (const row of joined) row.setAttribute(ENTER, "")
@@ -106,14 +97,7 @@ export function useRailGrowth(
         if (index > 0) delayGrowth(row, index * STAGGER_MS)
       })
     })
-    // A group's list says whether it was done (`data-end`) before the commit
-    // that added its next member turned it live again.
-    observer.observe(list, {
-      childList: true,
-      attributes: true,
-      attributeFilter: ["data-end"],
-      attributeOldValue: true,
-    })
+    observer.observe(list, { childList: true })
     // Rows deeper down (a group's members, a live tail) have their own.
     const grown = (event: AnimationEvent) => {
       const row = event.target

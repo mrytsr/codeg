@@ -1,6 +1,6 @@
 [package]
 name = "codeg"
-version = "0.40.0"
+version = "0.41.1"
 description = "Agent Code Generation App"
 authors = ["feitao"]
 edition = "2021"
@@ -180,14 +180,15 @@ ignore = "0.4"
 # The official ACP runtime (the `sacp` crate was upstreamed into it and renamed).
 # Stable protocol v1 only: `unstable_protocol_v2` is deliberately left off, so
 # `initialize` goes out as codeg writes it, at protocol version 1, and the
-# runtime refuses an answer that names any other version. The one unstable
-# feature is the surface codeg consumes beyond the stable schema:
-# `session/fork` (the Session Notices and Session Compaction RFDs are stable
-# since schema 1.11). (`unstable_end_turn_token_usage` stays off: codeg's token
-# accounting reads the agents' own transcripts, not the prompt response's
-# `usage`.) No default features: codeg runs an agent through its own transport
-# (`acp/agent_process.rs`), not the crate's `process`/`stdio` ones.
-agent-client-protocol = { version = "3.4.0", features = ["unstable_session_fork"] }
+# runtime refuses an answer that names any other version. The two unstable
+# features are the surface codeg consumes beyond the stable schema:
+# `session/fork`, and the prompt response's `usage`, which is read only for
+# adapters whose counter contract is known (`acp/reported_usage.rs`); agents
+# with native usage stores keep their own parsers. (The Session Notices and
+# Session Compaction RFDs are stable since schema 1.11.) No default features:
+# codeg runs an agent through its own transport (`acp/agent_process.rs`), not
+# the crate's `process`/`stdio` ones.
+agent-client-protocol = { version = "3.4.0", features = ["unstable_session_fork", "unstable_end_turn_token_usage"] }
 tokio = { version = "1", features = ["process", "io-util", "sync", "macros", "rt", "net", "rt-multi-thread"] }
 uuid = { version = "1", features = ["v4"] }
 # Version-5 UUIDs (browser profile data-store identifiers) by hand: uuid's
@@ -275,6 +276,7 @@ semver = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt", "registry", "std"] }
 tracing-appender = "0.2"
+jsonc-parser = { version = "0.34.0", features = ["cst", "serde"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-window-state = { version = "2", optional = true }
@@ -358,4 +360,3 @@ temp-env = { version = "0.3", features = ["async_closure"] }
 tokio = { version = "1", features = ["test-util", "macros", "rt", "sync", "time"] }
 insta = { version = "1", features = ["json", "redactions"] }
 axum-test = { version = "17", features = ["ws"] }
-

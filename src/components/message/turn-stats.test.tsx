@@ -2,14 +2,12 @@ import { type ReactNode } from "react"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-// The create-task action pulls workbench-route + tab-store contexts that this
-// unit test doesn't mount; stub it to a no-op handler.
-vi.mock("./use-create-task-from-message", () => ({
-  useCreateTaskFromMessage: () => () => {},
-}))
-
+import {
+  currentTaskFromMessage,
+  resetTaskFromMessageForTests,
+} from "@/lib/task-from-message"
 import { TurnStats } from "./turn-stats"
 import { MessageScrollProvider } from "./message-scroll-context"
 import { ModelLabelProvider } from "./model-label-context"
@@ -20,7 +18,9 @@ import { ChatAnimationsContext } from "@/components/appearance-provider"
 function renderStats(ui: ReactNode, modelLabel?: ModelLabelResolver) {
   const tree = (
     <NextIntlClientProvider locale="en" messages={enMessages}>
-      <MessageScrollProvider value={{ scrollToIndex: vi.fn() }}>
+      <MessageScrollProvider
+        value={{ scrollToIndex: vi.fn(), revealFromAbove: vi.fn() }}
+      >
         {ui}
       </MessageScrollProvider>
     </NextIntlClientProvider>
@@ -70,7 +70,9 @@ describe("TurnStats jump-to-previous-user scrolling", () => {
     const scrollToIndex = vi.fn()
     const stats = (
       <NextIntlClientProvider locale="en" messages={enMessages}>
-        <MessageScrollProvider value={{ scrollToIndex }}>
+        <MessageScrollProvider
+          value={{ scrollToIndex, revealFromAbove: vi.fn() }}
+        >
           <TurnStats
             copyText="hello"
             duration_ms={42_000}
@@ -107,6 +109,22 @@ describe("TurnStats jump-to-previous-user scrolling", () => {
     expect(scrollToIndex).toHaveBeenCalledWith(3, {
       align: "start",
       smooth: false,
+    })
+  })
+})
+
+describe("TurnStats create-task action", () => {
+  afterEach(() => resetTaskFromMessageForTests())
+
+  // The editor opens over the conversation (`TaskFromMessageHost`); the reply
+  // only says what to seed it with.
+  it("opens the task editor on the reply's text", async () => {
+    renderStats(<TurnStats copyText={"Fix the login timeout\n"} />)
+    await userEvent.click(
+      screen.getByLabelText(enMessages.Tasks.createFromMessage)
+    )
+    expect(currentTaskFromMessage()).toMatchObject({
+      text: "Fix the login timeout",
     })
   })
 })

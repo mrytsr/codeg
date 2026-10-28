@@ -709,8 +709,13 @@ export function editDiffText(
   }
 
   if (name === "write" || name === "notebookedit") {
+    // OpenCode 2's write takes the file as `path`
+    // (packages/core/src/tool/plugin/write.ts, 2.2.0).
     const path =
-      (parsed && (str(parsed, "file_path") ?? str(parsed, "notebook_path"))) ??
+      (parsed &&
+        (str(parsed, "file_path") ??
+          str(parsed, "notebook_path") ??
+          str(parsed, "path"))) ??
       undefined
     const content =
       parsed && (str(parsed, "content") ?? str(parsed, "new_source"))
@@ -757,7 +762,7 @@ export function editDiffText(
     const diff = generateUnifiedDiff(
       str(parsed, "old_string") ?? "",
       str(parsed, "new_string") ?? "",
-      str(parsed, "file_path") ?? undefined
+      str(parsed, "file_path") ?? str(parsed, "path") ?? undefined
     )
     if (!diff) return null
     const startLine = num(parsed, "_start_line")

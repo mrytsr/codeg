@@ -32,6 +32,111 @@ describe("splitRecommended", () => {
       recommended: false,
     })
   })
+
+  // Google Antigravity's ask_question tells the model to PREFIX a recommended
+  // option with "(Recommended)".
+  it("strips a leading (Recommended) prefix, case-insensitively", () => {
+    expect(splitRecommended("(Recommended) Backend API")).toEqual({
+      text: "Backend API",
+      recommended: true,
+    })
+    expect(splitRecommended("  (recommended)核心业务功能")).toEqual({
+      text: "核心业务功能",
+      recommended: true,
+    })
+  })
+})
+
+describe("Google Antigravity ask_question", () => {
+  // `arguments_json` and the history parser's envelope for the same call,
+  // recorded from antigravity-acp 1.4.1 (options are plain strings, the kind
+  // is snake_case `is_multi_select`, there is no header).
+  const input = JSON.stringify({
+    questions: [
+      {
+        is_multi_select: false,
+        options: [
+          "(Recommended) Backend API",
+          "Frontend UI",
+          "Database schema",
+        ],
+        question: "Which area first?",
+      },
+      {
+        is_multi_select: true,
+        options: ["Alpha", "Beta", "Gamma"],
+        question: "Pick tags",
+      },
+    ],
+    toolAction: "Asking user",
+    toolSummary: "Priorities",
+  })
+
+  it("reads string options and is_multi_select", () => {
+    expect(parseAskQuestionInput(input)).toEqual([
+      {
+        question: "Which area first?",
+        header: "",
+        multiSelect: false,
+        options: [
+          { label: "(Recommended) Backend API", description: "" },
+          { label: "Frontend UI", description: "" },
+          { label: "Database schema", description: "" },
+        ],
+        isSecret: false,
+        id: undefined,
+      },
+      {
+        question: "Pick tags",
+        header: "",
+        multiSelect: true,
+        options: [
+          { label: "Alpha", description: "" },
+          { label: "Beta", description: "" },
+          { label: "Gamma", description: "" },
+        ],
+        isSecret: false,
+        id: undefined,
+      },
+    ])
+  })
+
+  it("matches the parser's answers back to the offered options", () => {
+    const questions = parseAskQuestionInput(input)
+    const outcome = parseAskQuestionOutcome(
+      JSON.stringify({
+        answers: [
+          {
+            header: "",
+            question: "Which area first?",
+            multi_select: false,
+            selected: ["(Recommended) Backend API"],
+          },
+          {
+            header: "",
+            question: "Pick tags",
+            multi_select: true,
+            selected: ["Gamma"],
+          },
+        ],
+        declined: false,
+      }),
+      questions
+    )
+    expect(outcome?.declined).toBe(false)
+    expect(
+      matchSelections(
+        outcome?.answers[0].selected ?? [],
+        questions[0].options.map((o) => o.label)
+      )
+    ).toEqual({ selected: ["(Recommended) Backend API"], other: [] })
+    expect(
+      matchSelections(
+        outcome?.answers[1].selected ?? [],
+        questions[1].options.map((o) => o.label)
+      )
+    ).toEqual({ selected: ["Gamma"], other: [] })
+  })
 })
 
 describe("parseAskQuestionInput", () => {

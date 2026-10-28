@@ -270,6 +270,8 @@ pub struct SessionState {
     /// them as copied history and drop them.
     pub external_id_changed_at: Option<std::time::SystemTime>,
     pub agent_type: AgentType,
+    /// Counter semantics of the adapter definition used for this launch.
+    pub(crate) prompt_usage_mode: crate::acp::reported_usage::PromptUsageMode,
     pub working_dir: Option<PathBuf>,
     pub owner_window_label: String,
     pub folder_id: Option<i32>,
@@ -288,6 +290,12 @@ pub struct SessionState {
     /// the elicitation handler before it replies, taken by the update that
     /// settles the call; per-turn, like `active_tool_calls`.
     pub qoder_ask_replies: BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
+    /// The tool calls codeg matched a permission card to itself, because the
+    /// agent's request named its own id instead of the call's (MiniMax Code,
+    /// see `connection::minimax_gated_tool_call_id`). An agent asks about a
+    /// call once, so a later request with the same input is about a newer call,
+    /// whatever became of the earlier card. Per-turn, like `active_tool_calls`.
+    pub permission_matched_calls: BTreeSet<String>,
     pub pending_permission: Option<PendingPermissionState>,
 
     /// The agent's in-flight `ask_user_question` (one set of multiple-choice
@@ -485,6 +493,10 @@ pub struct SessionState {
     /// at creation by [`owner_composes_prompts`]. Backend-internal — not
     /// serialized, not carried on `to_snapshot()`.
     pub wants_prompt_suggestions: bool,
+    /// The `--settings` a Claude launch hands every session request of its
+    /// connection (`connection::ClaudeSessionOptions::settings`): the
+    /// `/model` picker rows codeg adds. Fixed at spawn; backend-internal.
+    pub claude_settings: Option<serde_json::Value>,
     /// Claude Code's Remote Control while it is on (`AcpEvent::RemoteControl`):
     /// the session can be continued from claude.ai/code or a phone. It lives
     /// in the agent CLI, so the idle sweeps leave the connection alone while
@@ -567,6 +579,16 @@ pub struct SessionState {
     /// Fixed for the connection's lifetime. Decides how the run's prompt says
     /// to hand the result in. Backend-only.
     pub result_tool_available: bool,
+
+    /// Antigravity question ids (`interaction_<hex>`) whose answered card
+    /// `try_bridge_antigravity_ask` has recorded. Antigravity closes each such
+    /// id with a `tool_call_update` of its own ("Response received" /
+    /// "Interaction cancelled") that would replace the card's answer, so the
+    /// live loop drops that frame for an id in this set, removing the id as it
+    /// does. A question left on the approval card, or abandoned before an
+    /// answer, is never recorded, so its placeholder row still settles.
+    /// Backend-only.
+    pub antigravity_answered_interactions: BTreeSet<String>,
 
     /// Whether live-feedback notes for THIS session go over the native ACP
     /// `_session/steering` push channel instead of the `check_user_feedback`
@@ -836,6 +858,15 @@ impl SessionState {
         }
     }
 
+    /// What this connection's Claude session requests all name in
+    /// `_meta.claudeCode`.
+    pub(crate) fn claude_session_options(&self) -> crate::acp::connection::ClaudeSessionOptions {
+        crate::acp::connection::ClaudeSessionOptions {
+            prompt_suggestions: self.wants_prompt_suggestions,
+            settings: self.claude_settings.clone(),
+        }
+    }
+
     pub fn new(
         connection_id: String,
         agent_type: AgentType,
@@ -850,6 +881,7 @@ impl SessionState {
             external_id: None,
             external_id_changed_at: None,
             agent_type,
+            prompt_usage_mode: crate::acp::reported_usage::PromptUsageMode::default(),
             working_dir,
             owner_window_label,
             folder_id,
@@ -857,6 +889,7 @@ impl SessionState {
             live_message: None,
             active_tool_calls: BTreeMap::new(),
             qoder_ask_replies: BTreeMap::new(),
+            permission_matched_calls: BTreeSet::new(),
             pending_permission: None,
             pending_question: None,
             pending_plan_approval: None,
@@ -883,6 +916,7 @@ impl SessionState {
             usage: None,
             prompt_suggestion: None,
             wants_prompt_suggestions,
+            claude_settings: None,
             remote_control: None,
             selectors_ready: false,
             last_error: None,
@@ -895,6 +929,7 @@ impl SessionState {
             delegation_enabled: false,
             feedback_tool_available: false,
             result_tool_available: false,
+            antigravity_answered_interactions: BTreeSet::new(),
             native_steering_available: false,
             codex_user_input_shape: None,
             neutral_goal_channel: false,
@@ -1378,6 +1413,7 @@ impl SessionState {
                 self.live_message = None;
                 self.active_tool_calls.clear();
                 self.qoder_ask_replies.clear();
+                self.permission_matched_calls.clear();
                 // The turn's user prompt is no longer "in flight" — the
                 // assistant reply is done and the transcript is the source of
                 // truth. Clear it so a post-turn snapshot doesn't carry a stale
@@ -1803,6 +1839,7 @@ impl SessionState {
         self.live_message = None;
         self.active_tool_calls.clear();
         self.qoder_ask_replies.clear();
+        self.permission_matched_calls.clear();
         true
     }
 

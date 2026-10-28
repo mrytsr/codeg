@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
-import type { WorkTask } from "@/lib/types"
+import type { ForgeRemote, WorkTask } from "@/lib/types"
 import {
   canDefer,
   canDeliverToPr,
   canRemoveWorktree,
-  deliveredPrUrl,
+  deliversIntoOpenPr,
   hasNothingToMerge,
   isAnotherTaskMerging,
   isDeferred,
@@ -12,6 +12,7 @@ import {
   isWorktreeGone,
   mergeQueueRanks,
   mustDeliverToPr,
+  taskPullRequestUrl,
   usesMergeRequests,
   worktreeWasRemoved,
 } from "./task-acceptance"
@@ -247,6 +248,28 @@ describe("canRemoveWorktree", () => {
   })
 })
 
+/** The folder's `origin` as the backend reads it. */
+function remote(overrides?: Partial<ForgeRemote>): ForgeRemote {
+  return {
+    server_host: "github.com",
+    owner_repo: "acme/app",
+    remote_url: "https://github.com/acme/app.git",
+    provider: "github",
+    supported: true,
+    ...overrides,
+  }
+}
+
+/** What an ordinary task records once a delivery reached a pull request. */
+const delivered = {
+  provider: "gitlab",
+  server_host: "gitlab.com",
+  account_id: "acct",
+  owner_repo: "acme/app",
+  pr_url: "https://gitlab.com/acme/app/-/merge_requests/5",
+  pr_number: 5,
+} as const
+
 describe("canDeliverToPr", () => {
   const issue = { source_kind: "forge_issue", files_changed: 3 } as const
 
@@ -256,11 +279,31 @@ describe("canDeliverToPr", () => {
     expect(canDeliverToPr(task({ ...issue, source_kind: "forge_pr" }))).toBe(
       true
     )
-    // A local task has no repository to push to.
-    expect(canDeliverToPr(task({ files_changed: 3 }))).toBe(false)
     // Only from review: nothing to push before, nothing left after.
     expect(canDeliverToPr(task({ ...issue, status: "running" }))).toBe(false)
     expect(canDeliverToPr(task({ ...issue, status: "done" }))).toBe(false)
+  })
+
+  it("offers it for an ordinary task exactly where its project lives on a forge", () => {
+    const local = task({ files_changed: 3 })
+    // GitHub, GitLab and Gitea / Forgejo alike — the backend's `supported`.
+    for (const provider of ["github", "gitlab", "gitea"] as const) {
+      expect(canDeliverToPr(local, remote({ provider }))).toBe(true)
+    }
+    // A remote codeg cannot read (Bitbucket, Gitee …) offers nothing to push
+    // to, and neither does a folder whose remote is unknown or missing.
+    expect(canDeliverToPr(local, remote({ supported: false }))).toBe(false)
+    expect(canDeliverToPr(local, null)).toBe(false)
+    expect(canDeliverToPr(local)).toBe(false)
+    // Once delivered, its record says where it goes, whatever the folder says.
+    expect(
+      canDeliverToPr(task({ files_changed: 3, delivery: delivered }))
+    ).toBe(true)
+    // The rest of the gate is the forge task's.
+    expect(canDeliverToPr(task({ files_changed: 0 }), remote())).toBe(false)
+    expect(
+      canDeliverToPr(task({ files_changed: 3, status: "done" }), remote())
+    ).toBe(false)
   })
 
   it("withholds it when there is nothing to put in a pull request", () => {
@@ -272,6 +315,44 @@ describe("canDeliverToPr", () => {
     )
     // Unknown stats are NOT "empty" — same fallback the merge button takes.
     expect(canDeliverToPr(task({ ...issue, files_changed: null }))).toBe(true)
+  })
+})
+
+describe("canDeliverToPr into a recorded pull request", () => {
+  it("still finishes on it when the round left nothing new", () => {
+    // Its pull request carries the work — even once the local base took the
+    // same commits in and the counters read zero.
+    expect(
+      canDeliverToPr(task({ files_changed: 0, delivery: delivered }))
+    ).toBe(true)
+    const opened = {
+      result_pr: "https://github.com/acme/app/pull/4",
+      result_pr_number: 4,
+    } as WorkTask["source_meta"]
+    expect(
+      canDeliverToPr(
+        task({
+          source_kind: "forge_issue",
+          source_meta: opened,
+          files_changed: 0,
+        })
+      )
+    ).toBe(true)
+    // …but not without the branch to check against.
+    expect(
+      canDeliverToPr(
+        task({
+          files_changed: 0,
+          delivery: delivered,
+          worktree_folder_id: null,
+        })
+      )
+    ).toBe(false)
+    expect(
+      canDeliverToPr(
+        task({ files_changed: 3, delivery: delivered, worktree_missing: true })
+      )
+    ).toBe(false)
   })
 })
 
@@ -301,14 +382,68 @@ describe("usesMergeRequests", () => {
     expect(usesMergeRequests(task())).toBe(false)
     expect(usesMergeRequests(null)).toBe(false)
   })
+
+  it("words an ordinary task after where it delivered, else its project's forge", () => {
+    expect(usesMergeRequests(task({ delivery: delivered }))).toBe(true)
+    expect(usesMergeRequests(task(), "gitlab")).toBe(true)
+    expect(usesMergeRequests(task(), "gitea")).toBe(false)
+    // The task's own record outranks what the folder says now.
+    expect(usesMergeRequests(task({ delivery: delivered }), "github")).toBe(
+      true
+    )
+    const github = { provider: "github" } as WorkTask["source_meta"]
+    expect(
+      usesMergeRequests(
+        task({ source_kind: "forge_issue", source_meta: github }),
+        "gitlab"
+      )
+    ).toBe(false)
+  })
 })
 
-describe("deliveredPrUrl", () => {
-  it("links only a task that actually finished by delivering", () => {
-    const url = "https://github.com/acme/app/pull/42"
-    const meta = { result_pr: url } as WorkTask["source_meta"]
+describe("deliversIntoOpenPr", () => {
+  it("is a reviewed task whose earlier delivery opened a pull request", () => {
+    const opened = {
+      result_pr: "https://github.com/acme/app/pull/4",
+      result_pr_number: 4,
+    } as WorkTask["source_meta"]
     expect(
-      deliveredPrUrl(
+      deliversIntoOpenPr(
+        task({ source_kind: "forge_issue", source_meta: opened })
+      )
+    ).toBe(true)
+    expect(deliversIntoOpenPr(task({ delivery: delivered }))).toBe(true)
+    // Not yet delivered: it opens one.
+    expect(deliversIntoOpenPr(task({ source_kind: "forge_issue" }))).toBe(false)
+    expect(deliversIntoOpenPr(task())).toBe(false)
+    // A link without its number is a row delivered before the number was
+    // kept — the backend opens or adopts by branch for it, as it always did.
+    const linkOnly = {
+      result_pr: "https://github.com/acme/app/pull/4",
+    } as WorkTask["source_meta"]
+    expect(
+      deliversIntoOpenPr(
+        task({ source_kind: "forge_issue", source_meta: linkOnly })
+      )
+    ).toBe(false)
+    // A pull-request task pushes back into its own — a different shape.
+    expect(
+      deliversIntoOpenPr(task({ source_kind: "forge_pr", source_meta: opened }))
+    ).toBe(false)
+    // Only while in review.
+    expect(
+      deliversIntoOpenPr(task({ delivery: delivered, status: "done" }))
+    ).toBe(false)
+  })
+})
+
+describe("taskPullRequestUrl", () => {
+  const url = "https://github.com/acme/app/pull/42"
+  const meta = { result_pr: url } as WorkTask["source_meta"]
+
+  it("links the pull request a task finished in", () => {
+    expect(
+      taskPullRequestUrl(
         task({
           status: "done",
           completion_kind: "delivered_pr",
@@ -316,15 +451,29 @@ describe("deliveredPrUrl", () => {
         })
       )
     ).toBe(url)
-    // A merged task's source snapshot has no pull request to show.
+    // A merged task that never delivered has no pull request to show.
     expect(
-      deliveredPrUrl(task({ status: "done", completion_kind: "merged" }))
+      taskPullRequestUrl(task({ status: "done", completion_kind: "merged" }))
     ).toBeNull()
     // Rows that finished before the column existed stay silent rather than
     // guessing from a stale snapshot.
     expect(
-      deliveredPrUrl(task({ status: "done", source_meta: meta }))
+      taskPullRequestUrl(task({ status: "done", source_meta: meta }))
     ).toBeNull()
+  })
+
+  it("links the pull request a task kept in review delivered into", () => {
+    expect(taskPullRequestUrl(task({ source_meta: meta }))).toBe(url)
+    // An ordinary task's record lives beside, not in, a source snapshot.
+    expect(taskPullRequestUrl(task({ delivery: delivered }))).toBe(
+      delivered.pr_url
+    )
+    // …and stays linked once it finishes another way: it opened that one.
+    expect(
+      taskPullRequestUrl(
+        task({ status: "done", completion_kind: "merged", delivery: delivered })
+      )
+    ).toBe(delivered.pr_url)
   })
 })
 

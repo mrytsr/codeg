@@ -38,6 +38,10 @@ const VIEWPORT_TOP_PROBE_PX = 4
 /** Slack (px) under which the viewport counts as scrolled to the end. */
 const VIEWPORT_END_SLACK_PX = 2
 
+/** Room (rem, so it follows the app zoom) left above a part of a row that
+ *  `revealFromAbove` brings into view, so it does not land on the edge. */
+const REVEAL_ROOM_REM = 1
+
 /**
  * The rows `keepMounted` holds near the end of the list: from the first one
  * within the buffer above the viewport to the last — or none, while the end is
@@ -243,9 +247,31 @@ function VirtualizedMessageThreadImpl<T>({
     },
     [stopScroll]
   )
+  // Up to a part of a row that is above the view — the header of a reply
+  // folding from the foot of its steps — with a little room above it. Like
+  // the jump above, it leaves the bottom and lets go of the lock first.
+  const revealFromAbove = useCallback<
+    MessageScrollContextValue["revealFromAbove"]
+  >(
+    (element) => {
+      const port = scrollRef.current
+      if (!port) return
+      const top =
+        element.getBoundingClientRect().top - port.getBoundingClientRect().top
+      // In view already, however close to the edge: left where it is.
+      if (top >= 0) return
+      const rem =
+        Number.parseFloat(
+          getComputedStyle(port.ownerDocument.documentElement).fontSize
+        ) || 16
+      stopScroll()
+      port.scrollTop += top - REVEAL_ROOM_REM * rem
+    },
+    [scrollRef, stopScroll]
+  )
   const scrollContextValue = useMemo<MessageScrollContextValue>(
-    () => ({ scrollToIndex }),
-    [scrollToIndex]
+    () => ({ scrollToIndex, revealFromAbove }),
+    [scrollToIndex, revealFromAbove]
   )
 
   // Mirror the (stable) scroll handle into the caller-owned ref so a sibling

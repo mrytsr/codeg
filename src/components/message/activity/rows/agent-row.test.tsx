@@ -328,7 +328,7 @@ describe("sub-agent row: the prompt it was handed", () => {
     const line = within(header()).getByText(
       "Find every consumer of source_bindings. Report which ones assume inactive bindings are present."
     )
-    expect(line).toHaveClass("truncate", "text-muted-foreground")
+    expect(line).toHaveClass("truncate", "text-activity-secondary")
     expect(line).toHaveAttribute("dir", "auto")
     // It takes only the room the title leaves, and nothing runs past the
     // line's end.
@@ -667,6 +667,55 @@ describe("sub-agent row: its own steps", () => {
       child.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
   })
+
+  it("ends its steps on the turning ring while it runs, then a row that folds it", () => {
+    const steps: NonNullable<ToolCallPart["agentTranscript"]> = [
+      { type: "text", text: "scanning the tree" },
+    ]
+    const view = renderRow(withTranscript(steps))
+    open()
+    const foot = () =>
+      row().querySelector(".activity-detail .activity-timeline")!
+        .lastElementChild as HTMLElement
+    // Still running: its steps end on the turning ring.
+    expect(foot()).toHaveAttribute("data-marker", "working")
+    expect(foot().querySelector(".animate-spin")).toBeTruthy()
+
+    // Done: on the row that folds it — no step it counts, so by its kind.
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <StaticConnectionStoreProvider store={STORE}>
+          <StaticDelegationProvider value={DELEGATION}>
+            <ContentPartsRenderer
+              parts={[
+                agent(
+                  JSON.stringify({
+                    subagent_type: "Explore",
+                    description: "scan",
+                  }),
+                  "output-available",
+                  { agentTranscript: steps, output: "three matches" }
+                ),
+              ]}
+              role="assistant"
+            />
+          </StaticDelegationProvider>
+        </StaticConnectionStoreProvider>
+      </NextIntlClientProvider>
+    )
+    expect(foot()).toHaveAttribute("data-marker", "foot")
+    const fold = within(foot()).getByRole("button", {
+      name: "Collapse Sub-agent",
+    })
+    expect(fold.querySelector("svg.lucide-chevron-up")).toBeTruthy()
+
+    // Folded from it, the row's header takes the focus the foot had.
+    fold.focus()
+    fireEvent.click(fold)
+    expect(header()).toHaveAttribute("aria-expanded", "false")
+    expect(row().querySelector(".activity-detail")).toBeNull()
+    expect(document.activeElement).toBe(header())
+  })
 })
 
 describe("sub-agent row: errors", () => {
@@ -934,5 +983,38 @@ describe("sub-agent row: background lifecycle", () => {
     expect(within(header()).getByText("launched")).toBeInTheDocument()
     open()
     expect(screen.getByText("Result not returned yet")).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain(BACKGROUND_TASK_MARKER)
+  })
+
+  // OpenCode settles a background sub-agent from its end, which carries no
+  // reply when the sub-agent wrote none.
+  it("shows no result, never the marker, for a settle that carries none", () => {
+    renderRow(
+      launch({
+        task_id: "ses_child",
+        status: "completed",
+        summary: null,
+        result: null,
+      })
+    )
+    expect(row()).toHaveAttribute("data-status", "succeeded")
+    open()
+    expect(document.body.textContent).not.toContain(BACKGROUND_TASK_MARKER)
+  })
+
+  it("says how a failed settle ended, without a result", () => {
+    renderRow(
+      launch({
+        task_id: "ses_child",
+        status: "failed",
+        summary: "Rate limited",
+        result: null,
+      })
+    )
+    expect(row()).toHaveAttribute("data-status", "failed")
+    expect(within(header()).getByText("failed")).toBeInTheDocument()
+    open()
+    expect(screen.getByText("Rate limited")).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain(BACKGROUND_TASK_MARKER)
   })
 })

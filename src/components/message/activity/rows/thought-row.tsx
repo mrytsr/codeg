@@ -68,13 +68,13 @@ export const ThoughtRow = memo(function ThoughtRow({
         <span
           className={cn(
             "shrink-0 font-medium",
-            step.streaming ? "activity-shimmer" : "text-muted-foreground"
+            step.streaming ? "activity-shimmer" : "text-activity-secondary"
           )}
         >
           {step.streaming ? t("row.thinking") : t("row.thought")}
         </span>
         {step.title ? (
-          <span className="min-w-0 truncate text-muted-foreground" dir="auto">
+          <span className="min-w-0 truncate text-activity-secondary" dir="auto">
             {step.title}
           </span>
         ) : null}

@@ -152,3 +152,102 @@ describe("COMPLETE_TURN promotion — agent transcript", () => {
     expect(result.agent_stats?.tool_calls).toHaveLength(1)
   })
 })
+
+describe("buildStreamingTurnsFromLiveMessage — OpenCode 2 sub-agent", () => {
+  // OpenCode 2 marks a sub-agent's calls only with the child session; the
+  // backend stamps the launching call's id as `_meta["codeg.parentToolCallId"]`
+  // and routes the child's prose with `parentToolUseId` (2.2.0 capture).
+  function openCodeLiveMessage(): LiveMessage {
+    return {
+      id: "lm-opencode-1",
+      role: "assistant",
+      startedAt: 0,
+      content: [
+        {
+          type: "tool_call",
+          info: {
+            ...toolCallInfo({
+              tool_call_id: "call_main_9_11",
+              title: "agent",
+              status: "completed",
+              meta: { opencode: { toolName: "subagent" } },
+            }),
+            raw_input: JSON.stringify({
+              agent: "general",
+              description: "Probe child task",
+              prompt: "Read hello.txt and report.",
+              subagent_type: "general",
+            }),
+          },
+        },
+        {
+          type: "thinking",
+          text: "Child thinking.",
+          parentToolUseId: "call_main_9_11",
+        },
+        {
+          type: "tool_call",
+          info: {
+            ...toolCallInfo({
+              tool_call_id: "ses_e8267be71ffeC80gJzN200uuKr:call_sub_0_12",
+              title: "read",
+              status: "completed",
+              meta: {
+                "opencode/child-session": {
+                  id: "ses_e8267be71ffeC80gJzN200uuKr",
+                  title: "Probe child task",
+                },
+                opencode: { toolName: "read" },
+                "codeg.parentToolCallId": "call_main_9_11",
+              },
+            }),
+            raw_input: JSON.stringify({ path: "hello.txt" }),
+          },
+        },
+        {
+          type: "text",
+          text: "Child report: hello.txt read.",
+          parentToolUseId: "call_main_9_11",
+        },
+      ],
+    }
+  }
+
+  it("nests the child's call and prose in the launch's Agent card", () => {
+    const { turns } = buildStreamingTurnsFromLiveMessage(
+      9,
+      openCodeLiveMessage()
+    )
+    const blocks = turns.flatMap((t) => t.blocks)
+    const result = blocks.find(
+      (b) => b.type === "tool_result" && b.tool_use_id === "call_main_9_11"
+    )
+    if (result?.type !== "tool_result") {
+      throw new Error("expected the launch's tool_result block")
+    }
+    expect(result.agent_stats?.tool_calls).toEqual([
+      {
+        tool_name: "read",
+        input_preview: JSON.stringify({ path: "hello.txt" }),
+        output_preview: null,
+        is_error: false,
+      },
+    ])
+    expect(result.agent_transcript).toEqual([
+      { type: "thinking", text: "Child thinking." },
+      { type: "tool_call", childIndex: 0 },
+      { type: "text", text: "Child report: hello.txt read." },
+    ])
+    // Neither the child's call nor its prose is a top-level block.
+    expect(
+      blocks.some(
+        (b) =>
+          b.type === "tool_use" &&
+          b.tool_use_id === "ses_e8267be71ffeC80gJzN200uuKr:call_sub_0_12"
+      )
+    ).toBe(false)
+    expect(blocks.some((b) => b.type === "text" || b.type === "thinking")).toBe(
+      false
+    )
+  })
+})

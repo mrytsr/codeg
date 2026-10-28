@@ -123,6 +123,7 @@ const APP_OPTIONS: { value: McpAppType; label: string }[] = [
   { value: "hermes", label: "Hermes Agent" },
   { value: "code_buddy", label: "CodeBuddy" },
   { value: "kimi_code", label: "Kimi Code" },
+  { value: "minimax_code", label: "MiniMax Code" },
   { value: "grok", label: "Grok" },
   { value: "cursor", label: "Cursor" },
   { value: "deepseek", label: "DeepSeek Harness" },
@@ -317,6 +318,7 @@ function appsToDraft(apps: McpAppType[]): Record<McpAppType, boolean> {
     hermes: appSet.has("hermes"),
     code_buddy: appSet.has("code_buddy"),
     kimi_code: appSet.has("kimi_code"),
+    minimax_code: appSet.has("minimax_code"),
     grok: appSet.has("grok"),
     cursor: appSet.has("cursor"),
     deepseek: appSet.has("deepseek"),
@@ -356,6 +358,30 @@ function detectEnvOnRemote(text: string): boolean {
   const env = parsed.env
   if (!isObject(env)) return false
   return Object.keys(env).length > 0
+}
+
+/**
+ * Whether the spec text is an SSE server — `type: "sse"`, or OpenCode's own
+ * `type: "remote"` with `transport: "sse"`, which is how the backend reads it.
+ * OpenCode 2 has no SSE client, so such a server never reaches OpenCode.
+ */
+export function detectSseSpec(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return false
+  }
+  if (!isObject(parsed)) return false
+  const canonical = normalizeMcpType(
+    typeof parsed.type === "string" ? parsed.type : ""
+  )
+  return (
+    canonical === "sse" ||
+    (canonical === "remote" && parsed.transport === "sse")
+  )
 }
 
 function parseJsonObject(
@@ -467,6 +493,27 @@ export function McpSettings() {
     () => detectEnvOnRemote(localSpecText),
     [localSpecText]
   )
+  // OpenCode 2 cannot run SSE servers, and the backend leaves OpenCode out of
+  // such a save (or refuses it when OpenCode is the only agent picked), so say
+  // so where the choice is made.
+  const draftOpencodeSse = useMemo(
+    () => draftAppsDraft.open_code && detectSseSpec(draftSpecText),
+    [draftAppsDraft.open_code, draftSpecText]
+  )
+  const localOpencodeSse = useMemo(
+    () => localAppsDraft.open_code && detectSseSpec(localSpecText),
+    [localAppsDraft.open_code, localSpecText]
+  )
+  const installOpencodeSse = useMemo(() => {
+    if (!installAppsDraft.open_code) return false
+    if (marketSpecDirty) return detectSseSpec(marketSpecText)
+    return normalizeMcpType(selectedInstallOption?.protocol ?? "") === "sse"
+  }, [
+    installAppsDraft.open_code,
+    marketSpecDirty,
+    marketSpecText,
+    selectedInstallOption,
+  ])
 
   // A scan that could not read every agent is fine to LIST from but not to
   // reassign from: the app checkboxes it seeds drive removals, so an agent
@@ -1090,6 +1137,11 @@ export function McpSettings() {
                   <span>{app.label}</span>
                 </label>
               ))}
+              {installOpencodeSse ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                  {t("errors.opencodeSseUnsupported")}
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -1532,6 +1584,12 @@ export function McpSettings() {
                 </div>
               ) : null}
 
+              {draftOpencodeSse ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                  {t("errors.opencodeSseUnsupported")}
+                </div>
+              ) : null}
+
               {/* Creating writes through the same command, which refuses while
                   any agent's config is unreadable — an id that already exists
                   in the unread one would be assigned away from it. */}
@@ -1647,6 +1705,12 @@ export function McpSettings() {
               {localEnvOnRemote ? (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
                   {t("local.envOnRemoteWarning")}
+                </div>
+              ) : null}
+
+              {localOpencodeSse ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                  {t("errors.opencodeSseUnsupported")}
                 </div>
               ) : null}
 

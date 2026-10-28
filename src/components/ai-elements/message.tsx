@@ -29,7 +29,9 @@ import {
   defaultRemarkPlugins,
 } from "streamdown"
 import { markdownLinkComponents } from "./markdown-link"
-import { messageBlockComponents } from "./json-render-pre"
+import { messageBlockComponents, useAssistantReply } from "./json-render-pre"
+import { useChatHtmlEnabled } from "@/lib/chat-html-prefs"
+import { createChatHtmlProcessor } from "@/lib/chat-html-markdown"
 import { scrollportComponents } from "./markdown-scrollport"
 import { maskLiteralSpans } from "./markdown-mask"
 import { rehypePluginsAllowingCodeg } from "./rehype-allow-codeg"
@@ -549,12 +551,17 @@ function MessageResponseImpl({
   remend,
   ...props
 }: MessageResponseProps) {
+  const inReply = useAssistantReply()
+  const htmlEnabled = useChatHtmlEnabled() && inReply
+  const processHtml = useMemo(() => createChatHtmlProcessor(), [])
   const normalized = useMemo(
     () =>
       typeof children === "string"
-        ? normalizeMathDelimiters(children)
+        ? htmlEnabled
+          ? processHtml(children, mode === "streaming", normalizeMathDelimiters)
+          : normalizeMathDelimiters(children)
         : children,
-    [children]
+    [children, htmlEnabled, mode, processHtml]
   )
   const plugins = useStreamdownPlugins(
     typeof normalized === "string" ? normalized : undefined

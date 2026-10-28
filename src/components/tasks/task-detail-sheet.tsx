@@ -72,15 +72,17 @@ import { AgentIcon } from "@/components/agent-icon"
 import { getAgentLabel } from "@/lib/custom-agents"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+import { useFolderForgeRemote } from "@/lib/forge-provider-cache"
 import {
   canDefer,
   canDeliverToPr,
   canRemoveWorktree,
-  deliveredPrUrl,
+  deliversIntoOpenPr,
   hasNothingToMerge,
   isDeferred,
   isMergeQueued,
   mustDeliverToPr,
+  taskPullRequestUrl,
   usesMergeRequests,
 } from "./task-acceptance"
 import { StatusChip, statusLabelKey } from "./task-card"
@@ -174,8 +176,10 @@ interface TaskDetailSheetProps {
   onMerge: (task: WorkTask) => void
   /** Replaces merge when the task changed nothing (see `hasNothingToMerge`). */
   onComplete: (task: WorkTask) => void
-  /** Push the task to the forge: a new pull request for an issue-sourced
-   *  task, back onto its own branch for a pull-request-sourced one. */
+  /** Push the task to the forge: a new pull request for an issue's task or
+   *  for one whose project lives on a forge, back onto its own branch for a
+   *  pull-request-sourced one, into the pull request an earlier delivery
+   *  opened for a task kept in review after it. */
   onDeliverPr: (task: WorkTask) => void
   /** Opens the page-owned cancel dialog, which records the user's reason.
    *  Both "cancel" and a reviewed task's "abandon" go through it — same
@@ -417,6 +421,24 @@ export function TaskDetailSheet({
     return model ? `${name} · ${model}` : name
   }, [task, agentType])
 
+  // The project's forge remote, for an ordinary reviewed task that could be
+  // delivered to a pull request. Read again whenever the sheet opens on one:
+  // what decides it — an account added for the host, a changed `origin` — can
+  // move while the app is open. A task that already knows where it delivers
+  // (its provenance, or a pull request it reached) does not ask.
+  const remoteFolderId =
+    open &&
+    task != null &&
+    task.status === "review" &&
+    task.source_kind == null &&
+    task.delivery == null &&
+    !hasNothingToMerge(task)
+      ? task.folder_id
+      : null
+  const folderRemote = useFolderForgeRemote(remoteFolderId, {
+    revalidate: true,
+  })
+
   if (!task) return null
 
   // The same resolution, plus a folder default and the worktree path, for the
@@ -430,8 +452,10 @@ export function TaskDetailSheet({
   // The user-authored brief, as typed (the agent receives the block form).
   const promptText = task.config?.display_text?.trim() || null
   const archived = task.archived_at != null
-  /** Set only when this task finished BY delivering — the link to show. */
-  const deliveredPr = deliveredPrUrl(task)
+  /** The pull request this task's work went into, if any — the link to show. */
+  const pullRequest = taskPullRequestUrl(task)
+  /** GitLab's word for a pull request, by the task's own record first. */
+  const mergeRequests = usesMergeRequests(task, folderRemote?.provider)
 
   const canEdit = task.status === "todo" || task.status === "failed"
 
@@ -515,9 +539,7 @@ export function TaskDetailSheet({
         zoneActions.push({
           icon: GitPullRequestArrow,
           label: t(
-            usesMergeRequests(task)
-              ? "actionDeliverPrBackMr"
-              : "actionDeliverPrBack"
+            mergeRequests ? "actionDeliverPrBackMr" : "actionDeliverPrBack"
           ),
           filled: !deferred,
           onClick: () => onDeliverPr(task),
@@ -529,18 +551,30 @@ export function TaskDetailSheet({
           filled: !deferred,
           onClick: () => onMerge(task),
         })
-        // A second way to accept, not a replacement: a task that came from an
-        // issue can still legitimately be landed locally, so both stay on
-        // offer and the merge above keeps the filled slot.
-        if (canDeliverToPr(task)) {
-          zoneActions.push({
-            icon: GitPullRequestArrow,
-            label: t(
-              usesMergeRequests(task) ? "actionDeliverPrMr" : "actionDeliverPr"
-            ),
-            onClick: () => onDeliverPr(task),
-          })
-        }
+      }
+      // A second way to accept, not a replacement: a task that came from an
+      // issue — or from nowhere, in a project whose `origin` lives on a forge —
+      // can still legitimately be landed locally, so both stay on offer and
+      // the merge keeps the filled slot. Once a delivery opened a pull request
+      // the task stayed in review after, the next one pushes into it, and the
+      // button says so — beside "complete" too, when the round left nothing
+      // new: finishing on that pull request is still the way it lands. A
+      // pull-request task's own push back is its primary, above.
+      if (!mustDeliverToPr(task) && canDeliverToPr(task, folderRemote)) {
+        const into = deliversIntoOpenPr(task)
+        zoneActions.push({
+          icon: GitPullRequestArrow,
+          label: t(
+            into
+              ? mergeRequests
+                ? "actionDeliverPrUpdateMr"
+                : "actionDeliverPrUpdate"
+              : mergeRequests
+                ? "actionDeliverPrMr"
+                : "actionDeliverPr"
+          ),
+          onClick: () => onDeliverPr(task),
+        })
       }
     }
     const followUp: ZoneAction = {
@@ -1142,24 +1176,24 @@ export function TaskDetailSheet({
                       </span>
                     </InfoRow>
                   ) : null}
-                  {deliveredPr ? (
+                  {pullRequest ? (
                     <InfoRow
                       label={t(
-                        usesMergeRequests(task)
+                        mergeRequests
                           ? "detailMergeRequest"
                           : "detailPullRequest"
                       )}
                     >
                       <BrowserLink
-                        href={deliveredPr}
+                        href={pullRequest}
                         className="inline-flex min-w-0 items-center gap-1 truncate underline-offset-2 hover:underline"
-                        title={deliveredPr}
+                        title={pullRequest}
                       >
                         <GitPullRequestArrow
                           className="size-3 shrink-0 text-muted-foreground"
                           aria-hidden="true"
                         />
-                        <span className="truncate">{deliveredPr}</span>
+                        <span className="truncate">{pullRequest}</span>
                       </BrowserLink>
                     </InfoRow>
                   ) : null}
@@ -1223,7 +1257,7 @@ export function TaskDetailSheet({
                       {mustDeliverToPr(task) && files.length > 0 ? (
                         <span className="ml-1.5 font-normal normal-case tracking-normal text-muted-foreground/70">
                           {t(
-                            usesMergeRequests(task)
+                            mergeRequests
                               ? "detailFilesIncludesMr"
                               : "detailFilesIncludesPr"
                           )}
@@ -1713,6 +1747,8 @@ const EVENT_KIND_KEYS = {
   agent_verdict: "eventAgentVerdict",
   merge_attempt: "eventMergeAttempt",
   merge_queued: "eventMergeQueued",
+  deliver_attempt: "eventDeliverAttempt",
+  delivered_pr: "eventDeliveredPr",
   merge_conflict: "eventMergeConflict",
   preflight_result: "eventPreflight",
   cleanup_failed: "eventCleanupFailed",
@@ -1891,6 +1927,10 @@ function timelineDetail(event: WorkTaskEvent): string | null {
       )
     case "merge_attempt":
       return str("strategy")
+    case "deliver_attempt":
+      return str("remote_branch")
+    case "delivered_pr":
+      return str("pr_url")
     case "merge_conflict": {
       const files = Array.isArray(p.files) ? (p.files as string[]) : []
       return files.join(", ") || null

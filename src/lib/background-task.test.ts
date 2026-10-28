@@ -191,6 +191,14 @@ describe("parseBackgroundLaunch", () => {
       )
     ).toEqual({ taskId: "bz81ab3cd" })
   })
+  it("recognizes OpenCode 2's background shell acknowledgement", () => {
+    // packages/core/src/tool/plugin/shell.ts `backgroundResult`, 2.2.0 capture.
+    expect(
+      parseBackgroundLaunch(
+        "Command moved to the background (shell ID: sh_17d9d0e2d001XnyG98WPjd9Z7G).\nOutput is streaming to: /w/xdg/data/opencode/shell/sh_17d9d0e2d001XnyG98WPjd9Z7G.log"
+      )
+    ).toEqual({ taskId: "sh_17d9d0e2d001XnyG98WPjd9Z7G" })
+  })
   it("leaves an MCP tool that was moved to the background alone", () => {
     // Not a command acknowledgement: the MCP card has no launch body to swap.
     expect(

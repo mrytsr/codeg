@@ -114,6 +114,10 @@ export interface ComposerAttachmentsOptions {
   /** Start directory for the native picker and the server file browser. */
   defaultPath?: string | null
   logLabel?: LogLabel
+  /** Called synchronously when a file intake (a read, an upload, a picker)
+   *  starts while none was in flight: content is on its way before React
+   *  renders it. `intakePending` reports when the last one has settled. */
+  onIntakeStart?: () => void
 }
 
 export interface ComposerAttachments {
@@ -127,6 +131,15 @@ export interface ComposerAttachments {
   hasUploadingImage: boolean
   /** An OS/browser drag is hovering the composer. */
   isDragActive: boolean
+  /** A file intake (read, upload, picker) is still in flight. */
+  intakePending: boolean
+  /** Bumped whenever an intake starts or the last one settles — even when
+   *  both happen within one render batch, so a host re-reads `intakePending`
+   *  after every intake. */
+  intakeRevision: number
+  /** For a host's own async intake (e.g. a context-menu paste reading the
+   *  clipboard): counts it like the hook's own, until the returned settle. */
+  beginIntake: () => () => void
   /** Local desktop: OS paths are readable by the agent, so the native picker is
    *  offered. False in web mode and for a desktop bound to a remote workspace. */
   showNativePaperclip: boolean
@@ -199,6 +212,7 @@ export function useComposerAttachments({
   attachmentTabId = null,
   defaultPath = null,
   logLabel = "Composer",
+  onIntakeStart,
 }: ComposerAttachmentsOptions): ComposerAttachments {
   // Same namespace the conversation composer has always used for these toasts,
   // so no message moves and every surface reports uploads identically.
@@ -243,6 +257,32 @@ export function useComposerAttachments({
   useEffect(() => {
     pageHandoffNameRef.current = pageHandoffName
   }, [pageHandoffName])
+
+  // Intakes in flight, counted the moment each starts (before any await), so
+  // `onIntakeStart` tells the host about content still on its way; the state
+  // flips back once the last intake has settled and its content is set.
+  const intakeCountRef = useRef(0)
+  const [intake, setIntake] = useState({ pending: false, revision: 0 })
+  const onIntakeStartRef = useRef(onIntakeStart)
+  useEffect(() => {
+    onIntakeStartRef.current = onIntakeStart
+  }, [onIntakeStart])
+  const beginIntake = useCallback(() => {
+    intakeCountRef.current += 1
+    if (intakeCountRef.current === 1) {
+      onIntakeStartRef.current?.()
+      setIntake((prev) => ({ pending: true, revision: prev.revision + 1 }))
+    }
+    let settled = false
+    return () => {
+      if (settled) return
+      settled = true
+      intakeCountRef.current -= 1
+      if (intakeCountRef.current === 0) {
+        setIntake((prev) => ({ pending: false, revision: prev.revision + 1 }))
+      }
+    }
+  }, [])
 
   const setDragActiveIfChanged = useCallback((next: boolean) => {
     if (dragActiveRef.current === next) return
@@ -946,7 +986,7 @@ export function useComposerAttachments({
     uploadPathsToRemoteRef.current = uploadPathsToRemote
   }, [uploadPathsToRemote])
 
-  const appendFilesFromInput = useCallback(
+  const appendFilesFromInputNow = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return
       const imageFiles: File[] = []
@@ -968,6 +1008,18 @@ export function useComposerAttachments({
       }
     },
     [appendFilesAsResources, appendImageAttachments, canAttachImages]
+  )
+  const appendFilesFromInput = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) return
+      const settle = beginIntake()
+      try {
+        await appendFilesFromInputNow(files)
+      } finally {
+        settle()
+      }
+    },
+    [appendFilesFromInputNow, beginIntake]
   )
 
   // Routed from RichComposer's `onPasteFiles`. Returns true when the paste was
@@ -998,6 +1050,7 @@ export function useComposerAttachments({
       // web content isn't hijacked into an image attachment. Kept synchronous
       // so `imageFilesFromClipboardApi` runs inside the paste user gesture.
       if (clipboardHasText(event.clipboardData)) return false
+      const settle = beginIntake()
       void imageFilesFromClipboardApi()
         .then((imageFiles) => {
           if (imageFiles.length === 0) return
@@ -1006,10 +1059,11 @@ export function useComposerAttachments({
         .catch((error) => {
           console.error(`[${logLabel}] clipboard image paste failed:`, error)
         })
+        .finally(settle)
       // The default paste of a textless clipboard is a no-op, so don't claim it.
       return false
     },
-    [appendFilesFromInput, disabled, logLabel]
+    [appendFilesFromInput, beginIntake, disabled, logLabel]
   )
 
   // Insert an inline file reference for a file-tree entry dropped onto the
@@ -1148,21 +1202,28 @@ export function useComposerAttachments({
         setDragActiveIfChanged(false)
         if (Date.now() - lastDomDropAtRef.current < 250) return
         if (!inside || disabledRef.current) return
+        const settle = beginIntake()
         if (getActiveRemoteConnectionId() !== null) {
           // Remote workspace: local OS paths are unreachable from the
           // remote agent, so stream the bytes through the upload proxy and
           // attach the resulting server-side paths instead.
-          void uploadPathsToRemoteRef.current(payload.paths).catch((error) => {
-            console.error(
-              `[${logLabel}] remote drag-drop upload failed:`,
-              error
-            )
-          })
+          void uploadPathsToRemoteRef
+            .current(payload.paths)
+            .catch((error) => {
+              console.error(
+                `[${logLabel}] remote drag-drop upload failed:`,
+                error
+              )
+            })
+            .finally(settle)
           return
         }
-        void appendPathsFromDropRef.current(payload.paths).catch((error) => {
-          console.error(`[${logLabel}] drag drop paths failed:`, error)
-        })
+        void appendPathsFromDropRef
+          .current(payload.paths)
+          .catch((error) => {
+            console.error(`[${logLabel}] drag drop paths failed:`, error)
+          })
+          .finally(settle)
         return
       }
       setDragActiveIfChanged(inside && !disabledRef.current)
@@ -1234,12 +1295,13 @@ export function useComposerAttachments({
       cancelled = true
       cleanupListeners()
     }
-  }, [containerRef, logLabel, setDragActiveIfChanged])
+  }, [beginIntake, containerRef, logLabel, setDragActiveIfChanged])
 
   const handlePickFiles = useCallback(async () => {
     if (disabled) return
     // Only wired up when `showNativePaperclip` is true (i.e. local desktop),
     // so we can hand raw OS paths to the local agent without a round-trip.
+    const settle = beginIntake()
     try {
       const selected = await openFileDialog({
         multiple: true,
@@ -1251,8 +1313,10 @@ export function useComposerAttachments({
       appendResourceAttachments(picked.filter((item): item is string => !!item))
     } catch (error) {
       console.error(`[${logLabel}] pick files failed:`, error)
+    } finally {
+      settle()
     }
-  }, [appendResourceAttachments, defaultPath, disabled, logLabel])
+  }, [appendResourceAttachments, beginIntake, defaultPath, disabled, logLabel])
 
   const handleUploadLocalFiles = useCallback(async () => {
     if (disabled) return
@@ -1392,6 +1456,9 @@ export function useComposerAttachments({
     imageAttachments,
     hasUploadingImage,
     isDragActive,
+    intakePending: intake.pending,
+    intakeRevision: intake.revision,
+    beginIntake,
     showNativePaperclip,
     canAttachImages,
     embeddedPayloadsRef,

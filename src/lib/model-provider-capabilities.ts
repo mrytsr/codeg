@@ -100,9 +100,7 @@ export function countCompatibleModelProviders(
   agentType: AgentType,
   customApiTypes: readonly ModelProviderApiType[] = []
 ): number {
-  const supported = new Set(
-    getModelProviderApiTypes(agentType, customApiTypes)
-  )
+  const supported = new Set(getModelProviderApiTypes(agentType, customApiTypes))
   return providers.filter(
     (provider) =>
       provider.enabled &&

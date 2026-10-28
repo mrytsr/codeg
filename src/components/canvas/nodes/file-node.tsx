@@ -71,7 +71,12 @@ export const FileNode = memo(function FileNode({
     switchFileTab,
     toggleFileTabPreview,
   } = useWorkspaceActions()
-  const { fileTabs, previewFileTabIds } = useWorkspaceFileTabs()
+  const {
+    fileTabs: visibleFileTabs,
+    allFileTabs,
+    previewFileTabIds,
+  } = useWorkspaceFileTabs()
+  const fileTabs = allFileTabs ?? visibleFileTabs
   const { openConversations } = useWorkbenchRoute()
   const allFolders = useAppWorkspaceStore((s) => s.allFolders)
 

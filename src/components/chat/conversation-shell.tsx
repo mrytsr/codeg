@@ -255,7 +255,11 @@ export function ConversationShell({
         />
       )}
       {asyncTasks && asyncTasks.length > 0 && (
-        <AsyncTaskStrip tasks={asyncTasks} onStop={onStopAsyncTask} />
+        <AsyncTaskStrip
+          tasks={asyncTasks}
+          onStop={onStopAsyncTask}
+          agentName={agentName}
+        />
       )}
 
       <div className={cn("flex-1 min-h-0", resizableWidth && "relative")}>

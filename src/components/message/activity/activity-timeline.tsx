@@ -32,8 +32,7 @@ import { GenericRow, ToolResultRow } from "./rows/generic-row"
 import { HostedRow, NoteRow } from "./rows/hosted-row"
 import { McpRow } from "./rows/mcp-row"
 import { ThoughtRow } from "./rows/thought-row"
-import { WorkingSpinner } from "./rail-icon"
-import { useEndMarkLine } from "./use-end-mark-line"
+import { TimelineFoot, type ActivityFoot } from "./timeline-foot"
 import { useLiveToolStep } from "./use-live-step"
 import { useRailGrowth } from "./use-rail-growth"
 
@@ -50,24 +49,25 @@ const LONG_TIMELINE_TAIL = 50
 const LONG_TIMELINE_STEP = 200
 /** Where a long reply's hidden middle sits among its rows (and its key). */
 const FOLD = "fold"
-/** The turning mark at the foot of a live reply's rail (its key). */
-const WORKING = "working"
+/** The foot of a list's rail (its key). */
+const FOOT = "foot"
 
 export const ActivityTimeline = memo(function ActivityTimeline({
   model,
   isStreaming,
   renderPart,
   pinnedOnly = false,
-  working = false,
+  foot,
   headed = false,
 }: {
   model: ActivityModel
   isStreaming: boolean
   renderPart: (part: AdaptedContentPart, key: string) => ReactNode
   pinnedOnly?: boolean
-  /** The reply ends on this list while its agent is at work: the rail runs
-   *  on past the last row to a turning mark. */
-  working?: boolean
+  /** The list folds away with its host — the reply, a sub-agent's row, a
+   *  goal's card: the rail runs on past the last row to a foot, the turning
+   *  ring while the steps go on and then a row that folds them. */
+  foot?: ActivityFoot
   /** The list hangs under the turn's header capsule: its first step sits as
    *  far below it as a step below the one before, and the rail runs up to
    *  it (globals.css). */
@@ -80,11 +80,16 @@ export const ActivityTimeline = memo(function ActivityTimeline({
       isStreaming,
       recoveredKeys: model.summary.recoveredKeys,
       pinnedOnly,
-      renderNested: (nested: ActivityModel, nestedStreaming: boolean) => (
+      renderNested: (
+        nested: ActivityModel,
+        nestedStreaming: boolean,
+        nestedFoot?: ActivityFoot
+      ) => (
         <ActivityTimeline
           model={nested}
           isStreaming={nestedStreaming}
           renderPart={renderPart}
+          foot={nestedFoot}
         />
       ),
     }),
@@ -95,11 +100,7 @@ export const ActivityTimeline = memo(function ActivityTimeline({
   // virtualization keeps working: this only bounds one row's own DOM.
   const [revealed, setRevealed] = useState(0)
   const items = model.items
-  // Done, it ends on its end mark, level with its last row's last line — once
-  // there is a list to end (none is drawn without rows).
-  const reached = !pinnedOnly && !isStreaming
   const listRef = useRef<HTMLOListElement>(null)
-  useEndMarkLine(listRef, reached && items.length > 0)
   // Still going, its rail grows down to each step that joins it.
   useRailGrowth(listRef, !pinnedOnly && isStreaming && items.length > 0)
   const long = items.length > LONG_TIMELINE_ROWS && !pinnedOnly
@@ -131,10 +132,6 @@ export const ActivityTimeline = memo(function ActivityTimeline({
         ref={listRef}
         role="list"
         className="activity-timeline empty:hidden"
-        // Its end mark, once its steps are done — the reply's, or a
-        // sub-agent's (globals.css); the rows still running under a folded
-        // reply are no list of steps to end.
-        data-end={pinnedOnly ? undefined : reached ? "reached" : "pending"}
         data-headed={headed ? "" : undefined}
       >
         {rows.map((item) =>
@@ -164,16 +161,15 @@ export const ActivityTimeline = memo(function ActivityTimeline({
           )
         )}
         {/* Last, so the rows that join go in above it: the last row's segment
-            runs on to it like to a row's ring. */}
-        {working && isStreaming && !pinnedOnly ? (
-          <li
-            key={WORKING}
-            aria-hidden="true"
-            className="activity-item h-6"
-            data-marker="working"
-          >
-            <WorkingSpinner />
-          </li>
+            runs on to it like to a row's ring. The rows still running under
+            a folded reply are no list to fold. */}
+        {foot && !pinnedOnly ? (
+          <TimelineFoot
+            key={FOOT}
+            working={foot.working}
+            what={foot.what}
+            onFold={foot.onFold}
+          />
         ) : null}
       </ol>
     </ActivityRenderProvider>
@@ -201,7 +197,7 @@ const ActivityItemView = memo(function ActivityItemView({
   followed,
 }: {
   item: ActivityItem
-  /** A group with something after it in the reply (see `CommandGroupRow`). */
+  /** A group with something after it in the reply (see `useGroupGoing`). */
   followed: boolean
 }) {
   const { pinnedOnly } = useActivityRender()
@@ -212,6 +208,7 @@ const ActivityItemView = memo(function ActivityItemView({
         groupKey={item.key}
         steps={item.steps}
         status={item.status}
+        followed={followed}
       />
     ) : (
       <CommandGroupRow
@@ -273,7 +270,16 @@ function StepView({ step }: { step: ActivityStep }) {
         >
           <GoalRunPart
             part={step.part}
-            renderBody={() => renderNested(step.model, step.part.isRunning)}
+            renderBody={(fold) =>
+              renderNested(step.model, step.part.isRunning, {
+                working: step.part.isRunning,
+                what:
+                  step.model.summary.steps > 0
+                    ? t("header.steps", { count: step.model.summary.steps })
+                    : t("kind.goal"),
+                onFold: fold,
+              })
+            }
           />
         </HostedRow>
       )
@@ -301,6 +307,7 @@ function ToolStepView({ step: given }: { step: ToolStep }) {
     case "command":
     case "script":
     case "shell-session":
+    case "monitor":
       return <CommandRow step={step} />
     case "edit":
       return <EditRow step={step} />
@@ -310,6 +317,7 @@ function ToolStepView({ step: given }: { step: ToolStep }) {
     case "skill":
     case "todo":
     case "completion":
+    case "network":
       return <GenericRow step={step} />
     case "agent":
       return <AgentRow step={step} />

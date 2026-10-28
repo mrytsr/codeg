@@ -24,7 +24,14 @@ vi.mock("@/lib/transport", async (importOriginal) => {
   const stub = () =>
     new Proxy(
       {},
-      { get: () => () => Promise.resolve([] as unknown[]) }
+      {
+        get:
+          (_target, prop) =>
+          (..._args: unknown[]) =>
+            prop === "subscribe"
+              ? Promise.resolve(() => {})
+              : Promise.resolve([] as unknown[]),
+      }
     )
   return { ...actual, getTransport: stub, getShellTransport: stub }
 })
@@ -38,10 +45,10 @@ describe("ZCode settings panel", () => {
       agent_type: "zcode",
       name: "ZCode",
       registry_id: "codeg-zcode-acp",
-      registry_version: "0.69.2",
-      installed_version: "0.69.2",
+      registry_version: "0.76.2",
+      installed_version: "0.76.2",
       description: "Official ZCode runtime via the community ACP bridge",
-      skills_capable: false,
+      skills_capable: true,
       supports_custom_version: true,
       available: true,
       distribution_type: "npx",
@@ -54,7 +61,6 @@ describe("ZCode settings panel", () => {
       },
       config_json: null,
       config_file_path: null,
-      opencode_auth_json: null,
       codex_auth_json: null,
       codex_config_toml: null,
       codex_model_catalog: null,

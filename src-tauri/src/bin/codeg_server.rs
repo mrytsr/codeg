@@ -734,6 +734,11 @@ async fn async_main(
         });
     }
 
+    // The Codex model list refresher (mirrors lib.rs setup).
+    if let Some(scheduler) = codeg_lib::acp::codex_catalog_refresh::build(state.emitter.clone()) {
+        tokio::spawn(codeg_lib::acp::codex_catalog_refresh::run(scheduler));
+    }
+
     // Label worktree folders registered before aliases were seeded at creation
     // with the branch they have checked out (mirrors lib.rs setup). Background;
     // changed folders are broadcast, so a browser that already fetched its

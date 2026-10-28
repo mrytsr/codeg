@@ -699,7 +699,9 @@ fn compact_batch(pending: &[Queued], compactable: bool) -> (String, bool) {
             // absent on both) is the only case where merging loses nothing.
             Some(kind)
                 if open.as_ref().is_some_and(|(open_kind, open_entry)| {
-                    *open_kind == kind && open_entry.p.get("_meta") == entry.p.get("_meta")
+                    *open_kind == kind
+                        && open_entry.p.get("_meta") == entry.p.get("_meta")
+                        && open_entry.p.get("messageId") == entry.p.get("messageId")
                 }) =>
             {
                 let (_, open_entry) = open.as_mut().expect("guard matched Some");
@@ -2138,6 +2140,36 @@ mod tests {
         );
         assert_eq!(entries[1].p["_meta"], serde_json::json!({"a": 1}));
         assert_eq!(entries[2].p["_meta"], serde_json::json!({"a": 2}));
+    }
+
+    #[test]
+    fn typed_message_ids_survive_recording_and_separate_compacted_messages() {
+        use agent_client_protocol::schema::v1::SessionUpdate;
+        let message = |t, id| {
+            // Exercise the same typed decode/encode boundary as the live
+            // notification handler, not only hand-built transcript JSON.
+            let update: SessionUpdate = serde_json::from_value(serde_json::json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "x"},
+                "messageId": id,
+            })).unwrap();
+            PendingRecord::Entry(TranscriptEntry {
+                t, k: EntryKind::Update, steer: false,
+                p: serde_json::to_value(update).unwrap(),
+            })
+        };
+        let pending: Vec<_> = vec![
+            prompt_record(1, "hi"),
+            message(2, "msg-first"), message(3, "msg-first"),
+            message(4, "msg-second"), message(5, "msg-second"),
+        ].into_iter().map(queued).collect();
+        let (lines, _) = compact_batch(&pending, false);
+        let entries = parse_transcript(&lines).entries;
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[1].p["messageId"], "msg-first");
+        assert_eq!(entries[2].p["messageId"], "msg-second");
+        assert_eq!(entries[1].p["content"]["text"], "xx");
+        assert_eq!(entries[2].p["content"]["text"], "xx");
     }
 
     /// The frontend refetches conversation detail the moment a turn completes,

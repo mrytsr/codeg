@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useMemo, type MouseEvent } from "react"
+import { memo, useMemo, type MouseEvent, type Ref } from "react"
 import { useTranslations } from "next-intl"
 
 import type { ActivitySummary } from "@/lib/activity/types"
@@ -45,6 +45,7 @@ const CATEGORY_KEY = {
  * that opens the turn at that step.
  */
 export const ActivityHeader = memo(function ActivityHeader({
+  ref,
   summary,
   completed,
   hasSteps,
@@ -52,6 +53,8 @@ export const ActivityHeader = memo(function ActivityHeader({
   toggle,
   onJumpToFailure,
 }: {
+  /** The capsule, for the turn to bring back into view as it folds. */
+  ref?: Ref<HTMLDivElement>
   summary: ActivitySummary | null
   completed: boolean
   hasSteps: boolean
@@ -125,13 +128,14 @@ export const ActivityHeader = memo(function ActivityHeader({
 
   return (
     <div
-      // `ws-msg-chip`: over a workspace background image the capsule turns
-      // translucent like the reply's other small surfaces, with its own ring.
-      // A block, not inline: no line box around it adds room under it, so
-      // what follows starts at its bottom edge.
+      ref={ref}
+      // `activity-capsule`: a translucent wash of the steps' secondary grey,
+      // grey in every theme, with a ring over a workspace background image
+      // (globals.css). A block, not inline: no line box around it adds room
+      // under it, so what follows starts at its bottom edge.
       className={cn(
-        "ws-msg-chip flex h-8 w-fit max-w-full min-w-0 items-center gap-2 rounded-full bg-muted/60 px-4 text-xs transition-colors",
-        toggle && "group/row cursor-pointer hover:bg-muted"
+        "activity-capsule flex h-8 w-fit max-w-full min-w-0 items-center gap-2 rounded-full bg-activity-capsule px-4 text-xs transition-colors",
+        toggle && "group/row cursor-pointer hover:bg-activity-capsule-hover"
       )}
       onClick={onHeaderClick}
     >
@@ -158,7 +162,7 @@ export const ActivityHeader = memo(function ActivityHeader({
           )}
           {hasSummaryLine ? (
             <span
-              className="activity-mono min-w-0 truncate text-xs text-muted-foreground"
+              className="activity-mono min-w-0 truncate text-xs text-activity-muted-strong"
               title={tooltip || undefined}
             >
               {pieces.join(separator)}
@@ -168,7 +172,7 @@ export const ActivityHeader = memo(function ActivityHeader({
                   {failureClause.danger && onJumpToFailure ? (
                     <button
                       type="button"
-                      className="rounded-sm text-tone-danger underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="rounded-sm text-activity-capsule-danger underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       title={t("header.jumpToFailure")}
                       onClick={onJumpToFailure}
                     >
@@ -177,7 +181,9 @@ export const ActivityHeader = memo(function ActivityHeader({
                   ) : (
                     <span
                       className={
-                        failureClause.danger ? "text-tone-danger" : undefined
+                        failureClause.danger
+                          ? "text-activity-capsule-danger"
+                          : undefined
                       }
                     >
                       {failureClause.text}
@@ -202,7 +208,7 @@ export const ActivityHeader = memo(function ActivityHeader({
         {elapsed && completed ? (
           <span
             className={cn(
-              "activity-mono shrink-0 whitespace-pre text-xs text-muted-foreground",
+              "activity-mono shrink-0 whitespace-pre text-xs text-activity-muted-strong",
               !hasSummaryLine && "ms-2"
             )}
           >

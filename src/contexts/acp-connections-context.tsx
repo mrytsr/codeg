@@ -16,7 +16,10 @@ import type {
   EventStreamSubscription,
 } from "@/lib/transport/types"
 import { randomUUID } from "@/lib/utils"
-import { inferLiveToolName } from "@/lib/tool-call-normalization"
+import {
+  extractClaudeCodeToolName,
+  inferLiveToolName,
+} from "@/lib/tool-call-normalization"
 import {
   toolStatusTerminal,
   toolStatusUnsettled,
@@ -1348,6 +1351,22 @@ function mergePermissionToolCallWithLiveInfo(
     next.toolCallId = liveInfo.tool_call_id
     changed = true
   }
+  // Which tool the request is about, by Claude Code's own name. The request
+  // claude-agent-acp sends an AIR client names no tool, only the live call
+  // does; the card needs it to recognize a sandbox's network request
+  // (`SandboxNetworkAccess {host}`), whose request is a bare host.
+  const liveToolName = extractClaudeCodeToolName(liveInfo.meta)
+  if (liveToolName) {
+    const meta = asRecord(next._meta)
+    const claudeCode = asRecord(meta?.claudeCode)
+    if (typeof claudeCode?.toolName !== "string") {
+      next._meta = {
+        ...meta,
+        claudeCode: { ...claudeCode, toolName: liveToolName },
+      }
+      changed = true
+    }
+  }
   return changed ? next : toolCall
 }
 
@@ -2409,23 +2428,33 @@ function connectionsReducer(
       // the garbled-timeline bug), but its context is still recorded so a
       // background permission request can render command/diff details.
       if (conn.status !== "prompting") {
+        const info: ToolCallInfo = {
+          tool_call_id: action.tool_call_id,
+          title: action.title,
+          kind: action.kind,
+          status: action.status,
+          content: action.content,
+          raw_input: action.raw_input,
+          raw_output_chunks:
+            action.raw_output !== null ? [action.raw_output] : [],
+          raw_output_total_bytes: action.raw_output?.length ?? 0,
+          locations: action.locations,
+          meta: action.meta,
+          images: action.images ?? [],
+        }
         const next = new Map(state)
         next.set(action.contextKey, {
           ...conn,
-          outOfTurnToolCalls: recordOutOfTurnToolCall(conn.outOfTurnToolCalls, {
-            tool_call_id: action.tool_call_id,
-            title: action.title,
-            kind: action.kind,
-            status: action.status,
-            content: action.content,
-            raw_input: action.raw_input,
-            raw_output_chunks:
-              action.raw_output !== null ? [action.raw_output] : [],
-            raw_output_total_bytes: action.raw_output?.length ?? 0,
-            locations: action.locations,
-            meta: action.meta,
-            images: action.images ?? [],
-          }),
+          outOfTurnToolCalls: recordOutOfTurnToolCall(
+            conn.outOfTurnToolCalls,
+            info
+          ),
+          // A request that came in before the call it is about (as in a turn
+          // Claude Code runs on its own) is filled in now, as an update is.
+          pendingPermission: mergePendingPermissionWithLiveInfo(
+            conn.pendingPermission,
+            info
+          ),
         })
         return next
       }
@@ -2457,6 +2486,13 @@ function connectionsReducer(
                   action.raw_output !== null
                     ? action.raw_output.length
                     : block.info.raw_output_total_bytes,
+                // The block may be the placeholder a permission request drew
+                // before this frame was applied (the agent's announcement and
+                // its request reach codeg on separate paths, either first).
+                // The announcement is what names the tool
+                // (`_meta.claudeCode.toolName`), so its `_meta` must land.
+                locations: action.locations ?? block.info.locations,
+                meta: action.meta ?? block.info.meta,
                 images:
                   action.images !== null ? action.images : block.info.images,
               },

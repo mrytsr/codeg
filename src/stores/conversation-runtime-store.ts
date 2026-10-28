@@ -28,6 +28,7 @@ import {
 } from "@/lib/turn-window"
 import {
   inferLiveToolName,
+  PARENT_TOOL_CALL_META_KEY,
   parseGoalUpdateTitle,
 } from "@/lib/tool-call-normalization"
 import {
@@ -1193,12 +1194,15 @@ export function buildStreamingTurnsFromLiveMessage(
         // Only capture children while the agent is still running
         positionalAgentId = isFinal ? null : block.info.tool_call_id
       } else {
-        // Extract the parent tool-call id from ACP meta. Both Claude Code and
-        // CodeBuddy link a native sub-agent's child tool calls to the parent
-        // Agent tool call this way — just under different keys:
+        // Extract the parent tool-call id from ACP meta. Claude Code, CodeBuddy
+        // and OpenCode all link a native sub-agent's child tool calls to the
+        // parent Agent tool call this way — just under different keys:
         //   - Claude Code: nested `meta.claudeCode.parentToolUseId`
         //   - CodeBuddy:   flat  `meta["codebuddy.ai/parentToolCallId"]`
-        // Reading both makes CodeBuddy sub-agents nest precisely (like Claude
+        //   - OpenCode 2:  flat  `meta["codeg.parentToolCallId"]`, stamped by
+        //     the backend (`opencode_frame_route`), since OpenCode marks a
+        //     sub-agent's calls only with the child SESSION they ran in
+        // Reading them makes those sub-agents nest precisely (like Claude
         // Code) instead of falling back to the positional heuristic, which the
         // sub-agent's interleaved thinking blocks break. Guard each access level
         // to avoid crashes on unexpected shapes from other agents.
@@ -1217,6 +1221,12 @@ export function buildStreamingTurnsFromLiveMessage(
               "codebuddy.ai/parentToolCallId"
             ]
             if (typeof cbParent === "string") parentId = cbParent
+          }
+          if (!parentId) {
+            const codegParent = (meta as Record<string, unknown>)[
+              PARENT_TOOL_CALL_META_KEY
+            ]
+            if (typeof codegParent === "string") parentId = codegParent
           }
         }
 

@@ -39,6 +39,7 @@ import { getCurrentWindowLabel } from "@/lib/browser/window-label"
 import { closeCurrentWindow } from "@/lib/platform"
 import { getShellTransport, isDesktop } from "@/lib/transport"
 import { SearchCommandDialog } from "@/components/conversations/search-command-dialog"
+import { useVisibleConversationTabs } from "@/stores/tab-store"
 import { WorkspaceFolderDialog } from "@/components/layout/workspace-folder-dialog"
 
 /**
@@ -57,7 +58,7 @@ export function WorkspaceChromeController() {
   const { toggle: toggleTerminal } = useTerminalContext()
   const { openNewConversationTab, openTab, switchTab, closeTab } =
     useTabActions()
-  const tabs = useTabStore((s) => s.tabs)
+  const tabs = useVisibleConversationTabs()
   const activeTabId = useTabStore((s) => s.activeTabId)
   // Tab-close/navigation shortcuts used to live in the visible tab strips.
   // Mobile no longer mounts those strips, so this always-mounted controller now

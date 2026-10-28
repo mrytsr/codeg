@@ -58,6 +58,14 @@ describe("background task row", () => {
     expect(rows()[0]!.querySelector('[title="Polled 2 times"]')).not.toBeNull()
   })
 
+  it("sets its label, id and output line in one ink", () => {
+    renderPolls([poll({ output: COMPLETED })])
+    const row = within(rows()[0]!)
+    for (const text of ["Task finished", "#bfb5xnq1t", "BUILD OK MARKER"]) {
+      expect(row.getByText(text)).toHaveClass("text-activity-secondary")
+    }
+  })
+
   it("shows the output's first line, and the whole output when opened", () => {
     renderPolls([poll({ output: COMPLETED })])
     expect(screen.getByText("BUILD OK MARKER")).toBeInTheDocument()

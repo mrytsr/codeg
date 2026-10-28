@@ -127,7 +127,12 @@ function FileViewerBody({ request }: { request: FileViewerRequest }) {
     switchFileTab,
     toggleFileTabPreview,
   } = useWorkspaceActions()
-  const { fileTabs, previewFileTabIds } = useWorkspaceFileTabs()
+  const {
+    fileTabs: visibleFileTabs,
+    allFileTabs,
+    previewFileTabIds,
+  } = useWorkspaceFileTabs()
+  const fileTabs = allFileTabs ?? visibleFileTabs
   // Null only outside the workspace layout, where there is no file column to
   // hand the tab over to — the action hides itself rather than throwing.
   const route = useOptionalWorkbenchRoute()

@@ -12,7 +12,7 @@ use crate::acp::custom_registry;
 use crate::acp::error::AcpError;
 use crate::acp::latest_release;
 use crate::acp::manager::ConnectionManager;
-use crate::acp::opencode_plugins::{self, PluginCheckSummary};
+use crate::acp::opencode_plugins::{self, PluginList};
 use crate::acp::preflight::{self, PreflightResult};
 use crate::acp::registry;
 use crate::acp::types::{
@@ -240,13 +240,32 @@ pub(crate) fn resolve_system_agent_binary_for(agent_type: AgentType, cmd: &str) 
     if let Some(path) = resolve_system_agent_binary(cmd) {
         return Some(path);
     }
+    resolve_system_agent_installer_binary(agent_type, cmd, &home_dir_or_default())
+}
+
+fn resolve_system_agent_installer_binary(
+    agent_type: AgentType,
+    cmd: &str,
+    home: &Path,
+) -> Option<PathBuf> {
     let exe = binary_cache::executable_file_name(cmd);
-    let home = home_dir_or_default();
     registry::binary_system_dirs(agent_type)
         .iter()
         .find_map(|dir| {
             let cand = home.join(dir).join(&exe);
-            cand.is_file().then_some(cand)
+            if cand.is_file() {
+                return Some(cand);
+            }
+            // The official Windows installer ships a cmd shim, not mcode.exe.
+            // PATH/PATHEXT handles it above; GUI launches also need this fallback.
+            #[cfg(windows)]
+            if agent_type == AgentType::MiniMaxCode {
+                let shim = home.join(dir).join("mcode.cmd");
+                if shim.is_file() {
+                    return Some(shim);
+                }
+            }
+            None
         })
 }
 
@@ -2457,6 +2476,29 @@ const NPM_FOREGROUND_SCRIPTS: &str = "--foreground-scripts";
 /// user's global script policy.
 const NPM_RUN_SCRIPTS_OVERRIDE: &str = "--ignore-scripts=false";
 
+/// The flags that let `package`'s own install scripts run, for the packages
+/// whose install is those scripts ([`npm_package_requires_scripts`]); none for
+/// any other package.
+///
+/// [`NPM_RUN_SCRIPTS_OVERRIDE`] stopped being enough with npm 12, which runs no
+/// install script it was not told to: npm 12.2.1 skipped hermes-agent's
+/// postinstall under `--ignore-scripts=false` ("install scripts blocked
+/// because they are not covered by allowScripts"). A global install or an
+/// `npx` run has no project `package.json` to hold an `allowScripts` policy,
+/// so npm takes `--allow-scripts=<name>` for those, matched against the
+/// package's resolved registry identity: it covers the package being
+/// installed and none of its dependencies. npm 9.6.7, 10.2.4, 10.8.2 and
+/// 11.17.0 accept the flag without a warning and run the script as before.
+fn npm_run_scripts_args(package: &str) -> Vec<String> {
+    if !npm_package_requires_scripts(package) {
+        return Vec::new();
+    }
+    vec![
+        NPM_RUN_SCRIPTS_OVERRIDE.to_string(),
+        format!("--allow-scripts={}", package_name_from_spec(package)),
+    ]
+}
+
 /// Env var that makes Node's own `fetch` read `HTTP_PROXY`/`HTTPS_PROXY`/
 /// `NO_PROXY` (Node ≥24; earlier runtimes ignore an unknown variable).
 ///
@@ -2630,7 +2672,7 @@ async fn install_npm_global_package_streaming_inner(
     emitter: &EventEmitter,
 ) -> Result<(), AcpError> {
     let registry_arg = format!("--registry={NPM_OFFICIAL_REGISTRY}");
-    let run_scripts = npm_package_requires_scripts(package);
+    let script_args = npm_run_scripts_args(package);
 
     emit_agent_install_event(
         emitter,
@@ -2639,15 +2681,8 @@ async fn install_npm_global_package_streaming_inner(
         format!("$ npm install -g {NPM_INCLUDE_OPTIONAL} {package}"),
     );
 
-    let mut args = vec![
-        "install",
-        "-g",
-        NPM_INCLUDE_OPTIONAL,
-        NPM_FOREGROUND_SCRIPTS,
-    ];
-    if run_scripts {
-        args.push(NPM_RUN_SCRIPTS_OVERRIDE);
-    }
+    let mut args = vec!["install", "-g", NPM_INCLUDE_OPTIONAL, NPM_FOREGROUND_SCRIPTS];
+    args.extend(script_args.iter().map(String::as_str));
     args.push(&registry_arg);
     args.push(package);
     let (success, stderr) = run_npm_streaming(&args, task_id, emitter).await?;
@@ -2681,9 +2716,7 @@ async fn install_npm_global_package_streaming_inner(
                 NPM_INCLUDE_OPTIONAL,
                 NPM_FOREGROUND_SCRIPTS,
             ];
-            if run_scripts {
-                retry_args.push(NPM_RUN_SCRIPTS_OVERRIDE);
-            }
+            retry_args.extend(script_args.iter().map(String::as_str));
             retry_args.push(&registry_arg);
             retry_args.push(package);
             let (retry_success, retry_stderr) =
@@ -2751,7 +2784,7 @@ async fn install_npm_to_user_prefix_streaming(
     })?;
 
     let prefix_arg = format!("--prefix={}", prefix.display());
-    let run_scripts = npm_package_requires_scripts(package);
+    let script_args = npm_run_scripts_args(package);
 
     emit_agent_install_event(
         emitter,
@@ -2763,15 +2796,8 @@ async fn install_npm_to_user_prefix_streaming(
         ),
     );
 
-    let mut args = vec![
-        "install",
-        "-g",
-        NPM_INCLUDE_OPTIONAL,
-        NPM_FOREGROUND_SCRIPTS,
-    ];
-    if run_scripts {
-        args.push(NPM_RUN_SCRIPTS_OVERRIDE);
-    }
+    let mut args = vec!["install", "-g", NPM_INCLUDE_OPTIONAL, NPM_FOREGROUND_SCRIPTS];
+    args.extend(script_args.iter().map(String::as_str));
     args.push(&prefix_arg);
     args.push(registry_arg);
     args.push(package);
@@ -2794,9 +2820,7 @@ async fn install_npm_to_user_prefix_streaming(
                 NPM_INCLUDE_OPTIONAL,
                 NPM_FOREGROUND_SCRIPTS,
             ];
-            if run_scripts {
-                force_args.push(NPM_RUN_SCRIPTS_OVERRIDE);
-            }
+            force_args.extend(script_args.iter().map(String::as_str));
             force_args.push(&prefix_arg);
             force_args.push(registry_arg);
             force_args.push(package);
@@ -2932,7 +2956,7 @@ fn home_dir_or_default() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn codex_home_dir() -> PathBuf {
+pub(crate) fn codex_home_dir() -> PathBuf {
     let configured = std::env::var("CODEX_HOME").ok().and_then(|raw| {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -2991,92 +3015,44 @@ fn codex_auth_json_path() -> PathBuf {
     codex_home_dir().join("auth.json")
 }
 
-/// Header codex reads to decide whether a provider authenticates through the
-/// "actor authorization" path. Mirrors `OPENAI_ACTOR_AUTHORIZATION_HEADER` in
-/// codex's `model-provider-info` crate.
-const CODEX_ACTOR_AUTHORIZATION_HEADER: &str = "x-openai-actor-authorization";
-
-/// Mirrors the header half of codex's
-/// `ModelProviderInfo::uses_openai_actor_authorization`. A
-/// `[model_providers.x.http_headers]` sub-table and an inline
-/// `http_headers = { .. }` both parse to `Value::Table`, so one lookup covers
-/// every spelling.
-fn codex_provider_uses_actor_authorization(
-    provider_table: &toml::map::Map<String, toml::Value>,
-) -> bool {
-    provider_table
-        .get("http_headers")
-        .and_then(toml::Value::as_table)
-        .is_some_and(|headers| {
-            headers.iter().any(|(name, value)| {
-                name.eq_ignore_ascii_case(CODEX_ACTOR_AUTHORIZATION_HEADER)
-                    && value.as_str().is_some_and(|value| !value.trim().is_empty())
-            })
-        })
-}
-
-/// Supply codeg's `requires_openai_auth` default without clobbering the user.
-///
-/// Codex defaults the field to `false` and only reads credentials from
-/// `auth.json` when it is `true`, so `true` is correct for a provider codeg
-/// provisioned itself (key in auth.json, no `env_key`) — and wrong for one the
-/// user configured. Worse, codex's `uses_openai_actor_authorization()` requires
-/// `!requires_openai_auth`, so forcing `true` silently disables that auth path.
-/// Write the default only when the field is absent, and never over a provider
-/// that opted into actor authorization.
-fn ensure_codex_provider_auth_default(provider_table: &mut toml::map::Map<String, toml::Value>) {
-    if provider_table.contains_key("requires_openai_auth")
-        || codex_provider_uses_actor_authorization(provider_table)
-    {
-        return;
-    }
-    provider_table.insert(
-        "requires_openai_auth".to_string(),
-        toml::Value::Boolean(true),
-    );
-}
-
-/// OpenCode reads config from `$XDG_CONFIG_HOME/opencode` (falling back to
-/// `~/.config/opencode`) and credentials from `$XDG_DATA_HOME/opencode`
-/// (falling back to `~/.local/share/opencode`) on every platform. codeg must
-/// write where OpenCode reads, so these reuse the same XDG resolution as
-/// `opencode_plugins` (config) and `parsers::opencode` (data) — otherwise a
-/// user with XDG dirs set would get credentials written where OpenCode never
-/// looks, and codeg's own plugin/connect paths would diverge.
-fn opencode_config_dir() -> PathBuf {
-    crate::acp::opencode_plugins::xdg_config_home()
-        .unwrap_or_else(|| home_dir_or_default().join(".config"))
-        .join("opencode")
-}
-
-fn opencode_primary_config_path() -> PathBuf {
-    opencode_config_dir().join("opencode.json")
-}
-
-fn opencode_legacy_config_path() -> PathBuf {
-    opencode_config_dir().join("config.json")
-}
-
+/// OpenCode 2's global config file: the `opencode.jsonc` or `opencode.json`
+/// that wins in its config directory (`OPENCODE_CONFIG_DIR`, else
+/// `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`; see
+/// `acp::opencode_config`). 1.x's `config.json` is not read by OpenCode 2, so it
+/// is no fallback.
 fn resolve_opencode_config_path() -> PathBuf {
-    let primary = opencode_primary_config_path();
-    if primary.exists() {
-        return primary;
-    }
-
-    let legacy = opencode_legacy_config_path();
-    if legacy.exists() {
-        return legacy;
-    }
-
-    primary
+    crate::acp::opencode_config::config_file().unwrap_or_else(|| {
+        home_dir_or_default()
+            .join(".config")
+            .join("opencode")
+            .join(crate::acp::opencode_config::CONFIG_FILE_NAMES[0])
+    })
 }
 
-fn opencode_auth_json_path() -> PathBuf {
-    crate::parsers::opencode::resolve_opencode_base_dir().join("auth.json")
+/// OpenCode's config as the user wrote it — comments, trailing commas and
+/// formatting included — so the panel's raw editor round-trips it and its
+/// structured editors change single keys in place. Text that does not parse is
+/// handed over as well: the panel shows it and refuses structured edits, where
+/// an empty config would invite a save that replaces the user's file.
+fn load_opencode_config_text() -> Option<String> {
+    let raw = fs::read_to_string(resolve_opencode_config_path()).ok()?;
+    let raw = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
+    (!raw.trim().is_empty()).then(|| raw.to_string())
 }
 
-fn load_opencode_auth_json_raw() -> Option<String> {
-    fs::read_to_string(opencode_auth_json_path()).ok()
+/// Write the panel's OpenCode config text as is, once it parses as OpenCode
+/// would parse it (JSON with comments and trailing commas, an object at the
+/// root). Written atomically, so OpenCode never reads a half-written file.
+fn persist_opencode_config_text(text: &str) -> Result<(), AcpError> {
+    crate::acp::opencode_config::parse_object(text)
+        .map_err(|e| AcpError::protocol(format!("invalid OpenCode config: {e}")))?;
+    let text = if text.ends_with('\n') {
+        text.to_string()
+    } else {
+        format!("{text}\n")
+    };
+    crate::acp::opencode_config::write_atomic(&resolve_opencode_config_path(), &text)
+        .map_err(|e| AcpError::protocol(format!("write OpenCode config failed: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -3127,13 +3103,7 @@ fn load_opencode_auth_json_raw() -> Option<String> {
 // [`apply_cline_launch_env`].
 
 fn cline_data_dir() -> PathBuf {
-    if let Ok(custom) = std::env::var("CLINE_DIR") {
-        let trimmed = custom.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
-    home_dir_or_default().join(".cline").join("data")
+    crate::parsers::cline::cline_data_dir()
 }
 
 /// `<data>/settings/providers.json` — the CLI's real credential store, honouring
@@ -3316,7 +3286,26 @@ fn load_cline_provider_settings_at(
             );
         }
     }
+    // The models a session can pick for the provider whose ids are the user's
+    // own: its table in the sibling `models.json`. Shown whichever provider is
+    // selected, so a panel switching to that one edits the table it has.
+    let ids = cline_model_table_ids(
+        &path.with_file_name("models.json"),
+        CLINE_CUSTOM_MODEL_PROVIDER,
+    );
+    if !ids.is_empty() {
+        merged.insert("models".to_string(), serde_json::json!(ids));
+    }
     Some(merged)
+}
+
+/// The ids of `provider`'s table in `models.json`, in the file's order.
+fn cline_model_table_ids(models_path: &Path, provider: &str) -> Vec<String> {
+    read_json_object(models_path)
+        .as_ref()
+        .and_then(|root| root.get("providers")?.get(provider)?.get("models")?.as_object())
+        .map(|models| models.keys().cloned().collect())
+        .unwrap_or_default()
 }
 
 /// The Cline panel's view of the agent's credentials, as a unified config JSON
@@ -3446,6 +3435,16 @@ fn persist_cline_local_config(config_patch_json: Option<&str>) -> Result<(), Acp
             .unwrap_or("anthropic"),
     );
 
+    // The panel's whole `models.json` table, when it sends one; without it the
+    // chosen model is added to whatever the table holds.
+    let table = patch.get("models").and_then(|v| v.as_array()).map(|ids| {
+        ids.iter()
+            .filter_map(|id| id.as_str().map(str::trim))
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    });
+
     persist_cline_provider_settings_at(
         &cline_provider_settings_path(),
         &cline_models_catalog_path(),
@@ -3453,6 +3452,7 @@ fn persist_cline_local_config(config_patch_json: Option<&str>) -> Result<(), Acp
         trim_non_empty(runtime.api_key).as_deref(),
         trim_non_empty(runtime.model).as_deref(),
         trim_non_empty(runtime.api_base_url).as_deref(),
+        table.as_deref(),
     )
 }
 
@@ -3470,6 +3470,7 @@ fn persist_cline_provider_settings_at(
     api_key: Option<&str>,
     model: Option<&str>,
     base_url: Option<&str>,
+    table: Option<&[String]>,
 ) -> Result<(), AcpError> {
     if let Some(base_url) = base_url {
         validate_cline_base_url(base_url)?;
@@ -3560,22 +3561,29 @@ fn persist_cline_provider_settings_at(
     );
 
     write_json_pretty(providers_path, &root, "cline providers.json")?;
-    persist_cline_models_catalog_at(models_path, provider, model, base_url)
+    persist_cline_models_catalog_at(models_path, provider, model, base_url, table)
 }
 
 /// Register the chosen model id in `models.json` so `session/new` can actually
-/// select it.
+/// select it — and, when the panel sends its whole table, exactly the ids in
+/// it (the chosen one always among them).
 ///
 /// Only `openai-compatible` needs this (its model ids are user-authored rather
 /// than catalogued) — for every other provider the model comes from cline's
 /// built-in catalogue and an entry here would be noise. Without it the ACP
 /// session silently starts on the provider's built-in default (`gpt-4o`)
 /// regardless of what `providers.json` names.
+///
+/// Merge-preserving: an entry that stays keeps every field it had, and the
+/// provider entry keeps what codeg does not own — its `protocol`, `client`,
+/// `capabilities`, `modelsSourceUrl`, and the `discoveredModelIds` cline's own
+/// discovery owns (less any id the table no longer holds).
 fn persist_cline_models_catalog_at(
     models_path: &Path,
     provider: &str,
     model: Option<&str>,
     base_url: Option<&str>,
+    table: Option<&[String]>,
 ) -> Result<(), AcpError> {
     if provider != CLINE_CUSTOM_MODEL_PROVIDER {
         return Ok(());
@@ -3602,36 +3610,70 @@ fn persist_cline_models_catalog_at(
         .as_object_mut()
         .ok_or_else(|| AcpError::protocol("cline models.json `providers` must be an object"))?;
 
-    // Keep any extra models the user registered through `cline auth`, but retire
-    // a previously-written entry for the model codeg is replacing.
-    let mut models = providers
+    let mut entry = providers
         .get(provider)
-        .and_then(|entry| entry.get("models"))
         .and_then(|v| v.as_object())
         .cloned()
         .unwrap_or_default();
-    models.insert(
-        model.to_string(),
+    let existing = entry
+        .get("models")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let new_entry = |id: &str| {
         serde_json::json!({
-            "id": model,
-            "name": model,
+            "id": id,
+            "name": id,
             "contextWindow": CLINE_CUSTOM_MODEL_CONTEXT_WINDOW,
             "maxInputTokens": CLINE_CUSTOM_MODEL_CONTEXT_WINDOW,
             "capabilities": ["streaming", "tools", "images"],
-        }),
-    );
+        })
+    };
+    let models = match table {
+        Some(ids) => {
+            let mut wanted: Vec<&str> = ids.iter().map(String::as_str).collect();
+            if !wanted.contains(&model) {
+                wanted.push(model);
+            }
+            let mut out = serde_json::Map::new();
+            for id in wanted {
+                if !out.contains_key(id) {
+                    let kept = existing.get(id).cloned().unwrap_or_else(|| new_entry(id));
+                    out.insert(id.to_string(), kept);
+                }
+            }
+            out
+        }
+        // Keep any extra models the user registered through `cline auth`.
+        None => {
+            let mut out = existing;
+            if !out.contains_key(model) {
+                out.insert(model.to_string(), new_entry(model));
+            }
+            out
+        }
+    };
 
-    providers.insert(
-        provider.to_string(),
-        serde_json::json!({
-            "provider": {
-                "name": "OpenAI Compatible",
-                "baseUrl": base_url,
-                "defaultModelId": model,
-            },
-            "models": serde_json::Value::Object(models),
-        }),
-    );
+    let mut meta = entry
+        .get("provider")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    if !meta
+        .get("name")
+        .and_then(|v| v.as_str())
+        .is_some_and(|name| !name.trim().is_empty())
+    {
+        meta.insert("name".to_string(), serde_json::json!("OpenAI Compatible"));
+    }
+    meta.insert("baseUrl".to_string(), serde_json::json!(base_url));
+    meta.insert("defaultModelId".to_string(), serde_json::json!(model));
+    entry.insert("provider".to_string(), serde_json::Value::Object(meta));
+    if let Some(serde_json::Value::Array(discovered)) = entry.get_mut("discoveredModelIds") {
+        discovered.retain(|id| id.as_str().is_some_and(|id| models.contains_key(id)));
+    }
+    entry.insert("models".to_string(), serde_json::Value::Object(models));
+    providers.insert(provider.to_string(), serde_json::Value::Object(entry));
 
     write_json_pretty(models_path, &root, "cline models.json")
 }
@@ -3918,212 +3960,18 @@ fn load_codex_local_config_json() -> Option<String> {
     serde_json::to_string_pretty(&serde_json::Value::Object(merged)).ok()
 }
 
-fn persist_codex_local_config(config_patch_json: Option<&str>) -> Result<(), AcpError> {
-    let Some(raw_patch) = config_patch_json else {
-        return Ok(());
-    };
-    let runtime = serde_json::from_str::<AgentRuntimeConfig>(raw_patch)
-        .map_err(|e| AcpError::protocol(format!("invalid config_json: {e}")))?;
-    let AgentRuntimeConfig {
-        api_base_url,
-        api_key,
-        model,
-        env,
-    } = runtime;
-
-    let config_path = codex_config_toml_path();
-    let mut toml_value = if config_path.exists() {
-        match fs::read_to_string(&config_path)
-            .ok()
-            .and_then(|raw| raw.parse::<toml::Value>().ok())
-        {
-            Some(existing) if existing.is_table() => existing,
-            _ => toml::Value::Table(toml::map::Map::new()),
-        }
-    } else {
-        toml::Value::Table(toml::map::Map::new())
-    };
-
-    let table = toml_value
-        .as_table_mut()
-        .ok_or_else(|| AcpError::protocol("codex config root must be a TOML table"))?;
-
-    match trim_non_empty(model) {
-        Some(model) => {
-            table.insert("model".to_string(), toml::Value::String(model));
-        }
-        None => {
-            table.remove("model");
-        }
-    }
-
-    let provider_name = table
-        .get("model_provider")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| "codeg".to_string());
-    table.insert(
-        "model_provider".to_string(),
-        toml::Value::String(provider_name.clone()),
-    );
-
-    let providers_item = table
-        .entry("model_providers".to_string())
-        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-    if !providers_item.is_table() {
-        *providers_item = toml::Value::Table(toml::map::Map::new());
-    }
-    let providers = providers_item
-        .as_table_mut()
-        .ok_or_else(|| AcpError::protocol("invalid model_providers table"))?;
-    let provider_item = providers
-        .entry(provider_name.clone())
-        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-    if !provider_item.is_table() {
-        *provider_item = toml::Value::Table(toml::map::Map::new());
-    }
-    let provider_table = provider_item
-        .as_table_mut()
-        .ok_or_else(|| AcpError::protocol("invalid model provider table"))?;
-    match trim_non_empty(api_base_url) {
-        Some(base_url) => {
-            provider_table.insert("base_url".to_string(), toml::Value::String(base_url));
-        }
-        None => {
-            provider_table.remove("base_url");
-        }
-    }
-    if provider_name == "codeg" {
-        provider_table.insert("name".to_string(), toml::Value::String("codeg".to_string()));
-        provider_table.insert(
-            "wire_api".to_string(),
-            toml::Value::String("responses".to_string()),
-        );
-        ensure_codex_provider_auth_default(provider_table);
-    }
-
-    if env.is_empty() {
-        table.remove("env");
-    } else {
-        let mut env_table = toml::map::Map::new();
-        for (key, value) in env {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            env_table.insert(key, toml::Value::String(trimmed.to_string()));
-        }
-        if env_table.is_empty() {
-            table.remove("env");
-        } else {
-            table.insert("env".to_string(), toml::Value::Table(env_table));
-        }
-    }
-
-    let serialized_toml = toml::to_string_pretty(&toml_value)
-        .map_err(|e| AcpError::protocol(format!("serialize codex toml failed: {e}")))?;
-    if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            AcpError::protocol(format!("create codex config directory failed: {e}"))
-        })?;
-    }
-    fs::write(&config_path, format!("{serialized_toml}\n"))
-        .map_err(|e| AcpError::protocol(format!("write codex config failed: {e}")))?;
-
-    let auth_path = codex_auth_json_path();
-    let mut auth_value = if auth_path.exists() {
-        match fs::read_to_string(&auth_path)
-            .ok()
-            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        {
-            Some(existing) if existing.is_object() => existing,
-            _ => serde_json::json!({}),
-        }
-    } else {
-        serde_json::json!({})
-    };
-    let auth_obj = auth_value
-        .as_object_mut()
-        .ok_or_else(|| AcpError::protocol("codex auth root must be object"))?;
-    match trim_non_empty(api_key) {
-        Some(api_key) => {
-            auth_obj.insert(
-                "OPENAI_API_KEY".to_string(),
-                serde_json::Value::String(api_key),
-            );
-        }
-        None => {
-            auth_obj.remove("OPENAI_API_KEY");
-        }
-    }
-    let serialized_auth = serde_json::to_string_pretty(&auth_value)
-        .map_err(|e| AcpError::protocol(format!("serialize codex auth failed: {e}")))?;
-    if let Some(parent) = auth_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| AcpError::protocol(format!("create codex auth directory failed: {e}")))?;
-    }
-    fs::write(&auth_path, format!("{serialized_auth}\n"))
-        .map_err(|e| AcpError::protocol(format!("write codex auth failed: {e}")))?;
-
-    Ok(())
-}
-
-fn persist_codex_native_config_files(
-    codex_auth_json: Option<&str>,
-    codex_config_toml: Option<&str>,
-) -> Result<(), AcpError> {
-    if let Some(raw_toml) = codex_config_toml {
-        toml::from_str::<toml::Table>(raw_toml)
-            .map_err(|e| AcpError::protocol(format!("invalid codex config.toml: {e}")))?;
-        let path = codex_config_toml_path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| AcpError::protocol(format!("create codex directory failed: {e}")))?;
-        }
-        fs::write(&path, raw_toml)
-            .map_err(|e| AcpError::protocol(format!("write codex config.toml failed: {e}")))?;
-    }
-
-    if let Some(raw_auth) = codex_auth_json {
-        let parsed = serde_json::from_str::<serde_json::Value>(raw_auth)
-            .map_err(|e| AcpError::protocol(format!("invalid codex auth.json: {e}")))?;
-        if !parsed.is_object() {
-            return Err(AcpError::protocol(
-                "invalid codex auth.json: root must be a JSON object",
-            ));
-        }
-        let path = codex_auth_json_path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| AcpError::protocol(format!("create codex directory failed: {e}")))?;
-        }
-        fs::write(&path, raw_auth)
-            .map_err(|e| AcpError::protocol(format!("write codex auth.json failed: {e}")))?;
-    }
-
-    Ok(())
-}
-
-/// Read `~/.codex/config.toml` as the base of a structured sandbox merge.
-/// A missing file is an empty base; a real read error fails loudly so a save can
-/// never silently drop the user's existing config.
-fn read_codex_config_or_empty() -> Result<String, AcpError> {
-    let path = codex_config_toml_path();
-    match fs::read_to_string(&path) {
-        Ok(text) => Ok(text),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(e) => Err(AcpError::protocol(format!(
-            "read codex config.toml failed: {e}"
-        ))),
-    }
-}
-
-/// The plain-string `approval_policy` values codex 0.145 accepts.
+/// The plain-string `approval_policy` values codex accepts.
 /// `AskForApproval` also has a `Granular(GranularApprovalConfig)` variant, which
 /// is a TOML *table* rather than a string and is handled separately.
-const CODEX_APPROVAL_POLICIES: &[&str] = &["untrusted", "on-request", "never"];
+const CODEX_APPROVAL_POLICIES: &[&str] = &["on-request", "never"];
+
+/// The string `approval_policy` codex retired: from 0.160 at the latest, a
+/// config.toml carrying it makes codex refuse to load the config at all
+/// ("approval_policy = \"untrusted\" is no longer supported; remove this
+/// setting"), so no Codex session starts — in codeg or in the Codex CLI.
+/// Still READ, so the panel can show the value it found and say it has to go;
+/// never written.
+const CODEX_RETIRED_APPROVAL_POLICY: &str = "untrusted";
 
 /// `SandboxMode` — the complete upstream vocabulary.
 const CODEX_SANDBOX_MODES: &[&str] = &["read-only", "workspace-write", "danger-full-access"];
@@ -4150,7 +3998,9 @@ fn parse_codex_sandbox_settings(raw_toml: &str) -> CodexSandboxSettings {
             "on-failure" => "on-request",
             other => other,
         })
-        .filter(|value| CODEX_APPROVAL_POLICIES.contains(value))
+        .filter(|value| {
+            CODEX_APPROVAL_POLICIES.contains(value) || *value == CODEX_RETIRED_APPROVAL_POLICY
+        })
         .map(str::to_string);
     let granular = approval_item
         .and_then(toml::Value::as_table)
@@ -4237,161 +4087,6 @@ fn is_absolute_config_path(value: &str) -> bool {
     }
 }
 
-/// Whether a `model_catalog_json` value points at the file codeg generates.
-/// Anything else is the user's OWN catalog — hand-written, or authored in the
-/// advanced config.toml editor — and codeg must never delete it. Resolved the
-/// way codex resolves the key, so an absolute path to codeg's own file counts
-/// as codeg-owned too. Unresolvable/foreign values answer `false`, which is the
-/// safe direction (leave the key alone).
-fn is_codeg_owned_catalog_ref(value: &str, codex_home: &Path) -> bool {
-    let value = value.trim();
-    if value.is_empty() {
-        return false;
-    }
-    resolve_codex_home_relative(value, codex_home)
-        == codex_home.join(crate::acp::codex_model_catalog::CATALOG_REL)
-}
-
-/// Remove the root `model_catalog_json` key from codex's config.toml, keeping
-/// comments and every other key byte-identical. Returns `None` (no write) when
-/// the key is absent **or** points at a catalog codeg does not own, so this is
-/// safe to call on every save.
-///
-/// Pairs with [`crate::acp::codex_model_catalog::write_catalog_files`] returning
-/// `None`: codeg's generated files and the reference to them must appear and
-/// vanish together — codex refuses to start on a dangling `model_catalog_json`.
-fn remove_codex_catalog_key(
-    base_toml: &str,
-    codex_home: &Path,
-) -> Result<Option<String>, AcpError> {
-    let mut doc = base_toml
-        .parse::<toml_edit::Document>()
-        .map_err(|e| AcpError::protocol(format!("invalid codex config.toml: {e}")))?;
-    let owned = doc
-        .get("model_catalog_json")
-        .and_then(|v| v.as_str())
-        .map(|v| is_codeg_owned_catalog_ref(v, codex_home))
-        .unwrap_or(false);
-    if !owned {
-        return Ok(None);
-    }
-    doc.as_table_mut().remove("model_catalog_json");
-    Ok(Some(doc.to_string()))
-}
-
-/// Drop codeg's own `model_catalog_json` reference from the config.toml on disk,
-/// if it carries one. Reads fresh so it also cleans up a key written by an
-/// earlier codeg version or by another window since the panel opened.
-fn drop_codex_catalog_reference() -> Result<(), AcpError> {
-    let base = read_codex_config_or_empty()?;
-    if let Some(next) = remove_codex_catalog_key(&base, &codex_home_dir())? {
-        persist_codex_native_config_files(None, Some(&next))?;
-    }
-    Ok(())
-}
-
-/// What [`resync_codex_generated_catalog_at`] did.
-#[derive(Debug, PartialEq)]
-enum CodexCatalogResync {
-    /// No catalog codeg can regenerate: config.toml references none, references
-    /// the user's own, or codeg's intent sidecar is missing.
-    NotOwned,
-    /// The generated catalog was re-expanded against the new official list.
-    Rewritten,
-    /// Nothing deviates from codex's own list any more, so the reference and
-    /// the generated files were removed and codex's catalog applies untouched.
-    Released,
-}
-
-/// Re-expand codeg's generated codex catalog (`model_catalog_json`) against
-/// `snapshot`, the official catalog of the codex that is now installed.
-///
-/// The key is a whole-table replace that codeg only rewrites when the model
-/// settings are saved, so a codex upgrade that ships new official models left
-/// every user with custom models or removed officials on the OLD table: codex
-/// 0.159.1 (codex-acp 2.0.1) made GPT-6.1 Sol its default and they would not
-/// see it until they happened to re-save. Expanding the stored intent (the
-/// source sidecar) against the new catalog is exactly what that re-save writes.
-///
-/// Only a catalog codeg owns is touched — config.toml must reference codeg's
-/// own file, and the sidecar must exist. A catalog without a sidecar is NOT
-/// re-imported: read against the new list, every newly shipped official would
-/// look like one the user removed. The root `model` is left alone; the user's
-/// explicit default is part of the sidecar and survives the rewrite as-is.
-fn resync_codex_generated_catalog_at(
-    codex_home: &Path,
-    snapshot: &[serde_json::Value],
-) -> Result<CodexCatalogResync, AcpError> {
-    let config_path = codex_home.join("config.toml");
-    let config_toml = match fs::read_to_string(&config_path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(CodexCatalogResync::NotOwned)
-        }
-        Err(e) => {
-            return Err(AcpError::protocol(format!(
-                "read codex config.toml failed: {e}"
-            )))
-        }
-    };
-    let owned = config_toml
-        .parse::<toml::Value>()
-        .ok()
-        .as_ref()
-        .and_then(|doc| doc.get("model_catalog_json"))
-        .and_then(toml::Value::as_str)
-        .is_some_and(|value| is_codeg_owned_catalog_ref(value, codex_home));
-    if !owned {
-        return Ok(CodexCatalogResync::NotOwned);
-    }
-    let raw = match fs::read_to_string(codex_home.join(crate::acp::codex_model_catalog::SOURCE_REL))
-    {
-        Ok(raw) => raw,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(CodexCatalogResync::NotOwned)
-        }
-        Err(e) => {
-            return Err(AcpError::protocol(format!(
-                "read codex catalog source failed: {e}"
-            )))
-        }
-    };
-    let config = crate::acp::codex_model_catalog::parse_model_config(Some(&raw));
-    let released = crate::acp::codex_model_catalog::is_effectively_empty(&config, snapshot);
-    if released {
-        // Reference first, files second: codex refuses to start on a
-        // `model_catalog_json` that points at a missing file, so a failure in
-        // between must leave a stale-but-valid table, never a dangling key.
-        if let Some(next) = remove_codex_catalog_key(&config_toml, codex_home)? {
-            fs::write(&config_path, next)
-                .map_err(|e| AcpError::protocol(format!("write codex config.toml failed: {e}")))?;
-        }
-    }
-    crate::acp::codex_model_catalog::write_catalog_files(&raw, codex_home, snapshot)
-        .map_err(|e| AcpError::protocol(e.to_string()))?;
-    Ok(if released {
-        CodexCatalogResync::Released
-    } else {
-        CodexCatalogResync::Rewritten
-    })
-}
-
-/// After codex-acp is (re)installed: refresh the cached official catalog from
-/// the codex it now drives, then bring codeg's generated catalog in line (see
-/// [`resync_codex_generated_catalog_at`]). Only a LIVE catalog is used — the
-/// stale cache or the compiled-in snapshot would just rewrite the old table.
-/// Best-effort: an install never fails over this.
-async fn resync_codex_generated_catalog() {
-    let Some(snapshot) = crate::acp::codex_catalog_source::refresh_live_catalog().await else {
-        tracing::warn!("[acp] codex installed, but its model catalog could not be read");
-        return;
-    };
-    match resync_codex_generated_catalog_at(&codex_home_dir(), &snapshot) {
-        Ok(outcome) => tracing::info!("[acp] codex model catalog after install: {outcome:?}"),
-        Err(e) => tracing::warn!("[acp] codex model catalog resync failed: {e}"),
-    }
-}
-
 /// Apply the Codex panel's sandbox / approval PATCH to the raw config.toml text,
 /// format-preservingly (comments and unmanaged keys are kept). Values are
 /// validated against the upstream vocabularies first, so a UI bug can never
@@ -4402,7 +4097,7 @@ async fn resync_codex_generated_catalog() {
 /// field the removal rules match codex's own defaults: an unset approval/sandbox
 /// drops its key; a `false` flag or empty `writable_roots` drops that key; and a
 /// `[sandbox_workspace_write]` left with no keys at all drops the section.
-fn apply_codex_sandbox_config(
+pub(crate) fn apply_codex_sandbox_config(
     base_toml: &str,
     settings: &CodexSandboxStructuredConfig,
 ) -> Result<String, AcpError> {
@@ -4430,9 +4125,15 @@ fn apply_codex_sandbox_config(
             (Some(policy), _) => {
                 let policy = policy.trim();
                 if !CODEX_APPROVAL_POLICIES.contains(&policy) {
-                    return Err(AcpError::protocol(format!(
-                        "unsupported codex approval_policy: {policy}"
-                    )));
+                    return Err(AcpError::protocol(
+                        if policy == CODEX_RETIRED_APPROVAL_POLICY {
+                            "codex no longer accepts approval_policy = \"untrusted\": \
+                             it refuses to start with it"
+                                .to_string()
+                        } else {
+                            format!("unsupported codex approval_policy: {policy}")
+                        },
+                    ));
                 }
                 // Assigning a value over an existing `[approval_policy.granular]`
                 // table replaces the whole item, which is what switching away
@@ -4694,6 +4395,26 @@ fn parse_grok_settings(raw_toml: &str) -> GrokSettings {
         .and_then(|s| s.get("auto_compact_threshold_percent"))
         .and_then(|v| v.as_integer());
 
+    let custom_extra_models = match custom_model_id.as_deref() {
+        Some(main) => table
+            .as_ref()
+            .and_then(|t| t.get("model"))
+            .and_then(|m| m.as_table())
+            .map(|models| {
+                models
+                    .iter()
+                    .filter(|(key, entry)| {
+                        key.as_str() != main
+                            && entry.get("model_provider").and_then(|v| v.as_str())
+                                == Some(GROK_CODEG_PROVIDER)
+                    })
+                    .map(|(key, _)| key.clone())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+
     GrokSettings {
         default_reasoning_effort: get("models", "default_reasoning_effort"),
         permission_mode: get("ui", "permission_mode")
@@ -4704,6 +4425,7 @@ fn parse_grok_settings(raw_toml: &str) -> GrokSettings {
         custom_api_backend,
         custom_context_window,
         custom_reasoning_efforts,
+        custom_extra_models,
         auto_compact_threshold_percent,
     }
 }
@@ -4712,8 +4434,9 @@ fn parse_grok_settings(raw_toml: &str) -> GrokSettings {
 /// (Grok's config reference: "Allowed reasoning-effort values for this model.
 /// When omitted, the menu comes from the endpoint's `/v1/models` row"). That
 /// endpoint is Grok's model catalog (xAI's, or `[endpoints].models_base_url`),
-/// matched by model id: grok 1.0.62 never fetches the list of a model's own
-/// `base_url`, so a custom model the catalog lacks has levels only from here.
+/// matched by model id: grok 1.0.62 and 1.0.70 never fetch the list of a
+/// model's own `base_url`, so a custom model the catalog lacks has levels only
+/// from here.
 const GROK_REASONING_EFFORTS_KEY: &str = "reasoning_efforts";
 
 /// One `reasoning_efforts` level as the panel compares it: trimmed and
@@ -4867,8 +4590,10 @@ pub(crate) fn grok_launch_permission_mode() -> Option<String> {
 /// The loss is inherent to the three presets and is NOT introduced here —
 /// injecting nothing (the previous behavior) yields `agent`, i.e. the same
 /// `on-request` PLUS a widened sandbox. Mapping is therefore strictly better on
-/// the sandbox axis and neutral on the approval axis; the panel discloses the
-/// approval loss to the user rather than pretending it away.
+/// the sandbox axis and neutral on the approval axis. It is also moot on the
+/// codex codeg pins: codex retired `untrusted` and refuses a config carrying it
+/// ([`CODEX_RETIRED_APPROVAL_POLICY`]), so no session starts with it at all,
+/// and the panel says the value has to go rather than describing a fallback.
 ///
 /// **The read-only sandbox, on codex-acp 1.7.0–1.13.x.** No preset carries one
 /// there, and the adapter re-sends the selected preset's `sandboxPolicy` on
@@ -4900,7 +4625,8 @@ fn codex_initial_agent_mode(settings: &CodexSandboxSettings) -> Option<&'static 
         return None;
     }
     // `parse_codex_sandbox_settings` has already folded `on-failure` into
-    // `on-request` and dropped anything outside `CODEX_APPROVAL_POLICIES`.
+    // `on-request` and dropped anything outside `CODEX_APPROVAL_POLICIES` and
+    // the retired `untrusted`.
     let never = settings.approval_policy.as_deref() == Some("never");
     match settings.sandbox_mode.as_deref() {
         // The tightest preset on EVERY adapter generation: a real read-only
@@ -5057,11 +4783,18 @@ fn apply_grok_custom_model(
                         tbl.insert(GROK_REASONING_EFFORTS_KEY, levels);
                     }
                 }
+                // The managed model carries its endpoint itself; one that was
+                // an extra before stops leaning on codeg's provider.
+                if tbl.get("model_provider").and_then(|v| v.as_str()) == Some(GROK_CODEG_PROVIDER) {
+                    tbl.remove("model_provider");
+                }
             }
             // Make the managed model the default for new sessions.
             set_or_remove_grok_key(doc, "models", "default", Some(id))?;
+            apply_grok_extra_models(doc, id, settings)?;
         }
         None => {
+            remove_grok_extra_models(doc);
             if let Some(prev) = prev_id.as_deref() {
                 remove_grok_model_block(doc, prev);
                 // Clear the default only when it still points at the removed block.
@@ -5078,6 +4811,146 @@ fn apply_grok_custom_model(
         }
     }
     Ok(())
+}
+
+/// The provider codeg's extra Grok models point at: `[model_providers.codeg]`,
+/// holding the managed model's endpoint, key and backend. A `[model.<id>]`
+/// naming it is one codeg added, and the only kind codeg removes again.
+const GROK_CODEG_PROVIDER: &str = "codeg";
+
+/// The `[model.<id>]` tables codeg added for the endpoint's other models.
+fn grok_codeg_extra_ids(doc: &toml_edit::Document) -> Vec<String> {
+    doc.get("model")
+        .and_then(|m| m.as_table_like())
+        .map(|models| {
+            models
+                .iter()
+                .filter(|(_, entry)| {
+                    entry
+                        .as_table_like()
+                        .and_then(|t| t.get("model_provider"))
+                        .and_then(|v| v.as_str())
+                        == Some(GROK_CODEG_PROVIDER)
+                })
+                .map(|(key, _)| key.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Make codeg's extra models those `settings` asks for (beside the managed
+/// model `main_id`), on a `[model_providers.codeg]` that follows the managed
+/// endpoint. A `[model.<id>]` of the user's own is never taken over.
+fn apply_grok_extra_models(
+    doc: &mut toml_edit::Document,
+    main_id: &str,
+    settings: &GrokStructuredConfig,
+) -> Result<(), AcpError> {
+    let owned = grok_codeg_extra_ids(doc);
+    let mut wanted: Vec<String> = Vec::new();
+    let source: Vec<&str> = match settings.custom_extra_models.as_deref() {
+        Some(ids) => ids.iter().map(|id| id.trim()).collect(),
+        None => owned.iter().map(String::as_str).collect(),
+    };
+    for id in source {
+        if !id.is_empty() && id != main_id && !wanted.iter().any(|w| w == id) {
+            wanted.push(id.to_string());
+        }
+    }
+    for id in owned.iter().filter(|id| id.as_str() != main_id) {
+        if !wanted.contains(id) {
+            remove_grok_model_block(doc, id);
+        }
+    }
+    // A name the user's own table already holds stays theirs.
+    wanted.retain(|id| owned.contains(id) || !grok_model_block_exists(doc, id));
+    if wanted.is_empty() {
+        remove_grok_codeg_provider(doc);
+        return Ok(());
+    }
+    {
+        let provider = grok_codeg_provider_table_mut(doc)?;
+        grok_tbl_set_str(provider, "base_url", trimmed_opt(settings.custom_base_url.as_deref()));
+        grok_tbl_set_str(provider, "api_key", trimmed_opt(settings.custom_api_key.as_deref()));
+        grok_tbl_set_str(
+            provider,
+            "api_backend",
+            trimmed_opt(settings.custom_api_backend.as_deref()),
+        );
+    }
+    for id in &wanted {
+        let tbl = grok_model_table_mut(doc, id)?;
+        grok_tbl_set_str(tbl, "model", Some(id));
+        grok_tbl_set_str(tbl, "model_provider", Some(GROK_CODEG_PROVIDER));
+    }
+    Ok(())
+}
+
+/// Remove every extra model codeg added, and its provider.
+fn remove_grok_extra_models(doc: &mut toml_edit::Document) {
+    for id in grok_codeg_extra_ids(doc) {
+        remove_grok_model_block(doc, &id);
+    }
+    remove_grok_codeg_provider(doc);
+}
+
+/// Mutable handle to `[model_providers.codeg]`, creating it (under an implicit
+/// `[model_providers]`) as needed.
+fn grok_codeg_provider_table_mut(
+    doc: &mut toml_edit::Document,
+) -> Result<&mut dyn toml_edit::TableLike, AcpError> {
+    let providers = &mut doc["model_providers"];
+    if providers.is_none() {
+        let mut parent = toml_edit::Table::new();
+        parent.set_implicit(true);
+        *providers = toml_edit::Item::Table(parent);
+    }
+    let parent = providers.as_table_like_mut().ok_or_else(|| {
+        AcpError::protocol("cannot write [model_providers.codeg]: [model_providers] is not a table")
+    })?;
+    if parent.get(GROK_CODEG_PROVIDER).is_none() {
+        parent.insert(GROK_CODEG_PROVIDER, toml_edit::Item::Table(toml_edit::Table::new()));
+    }
+    parent
+        .get_mut(GROK_CODEG_PROVIDER)
+        .and_then(|entry| entry.as_table_like_mut())
+        .ok_or_else(|| {
+            AcpError::protocol("cannot write [model_providers.codeg]: it exists but is not a table")
+        })
+}
+
+/// What codeg writes in `[model_providers.codeg]`, and takes back once no
+/// extra model rides it.
+const GROK_CODEG_PROVIDER_KEYS: [&str; 3] = ["base_url", "api_key", "api_backend"];
+
+/// Take codeg's endpoint and key back out of its provider, and drop the
+/// table once nothing else is in it. A key the user added
+/// (`max_request_bytes`, `extra_headers`, …) stays for the next time codeg's
+/// extras ride the provider: Grok accepts a provider no model names, and none
+/// does once codeg's extras are gone.
+fn remove_grok_codeg_provider(doc: &mut toml_edit::Document) {
+    let Some(parent) = doc
+        .get_mut("model_providers")
+        .and_then(|m| m.as_table_like_mut())
+    else {
+        return;
+    };
+    let Some(table) = parent
+        .get_mut(GROK_CODEG_PROVIDER)
+        .and_then(|entry| entry.as_table_like_mut())
+    else {
+        return;
+    };
+    for key in GROK_CODEG_PROVIDER_KEYS {
+        table.remove(key);
+    }
+    if table.iter().next().is_some() {
+        return;
+    }
+    parent.remove(GROK_CODEG_PROVIDER);
+    if parent.iter().next().is_none() {
+        doc.remove("model_providers");
+    }
 }
 
 /// `[model.<id>].<key>` as a plain value item (an array of tables becomes an
@@ -5333,23 +5206,6 @@ fn set_or_remove_grok_number(
     Ok(())
 }
 
-fn persist_opencode_auth_json(raw_auth: &str) -> Result<(), AcpError> {
-    let parsed = serde_json::from_str::<serde_json::Value>(raw_auth)
-        .map_err(|e| AcpError::protocol(format!("invalid opencode auth.json: {e}")))?;
-    if !parsed.is_object() {
-        return Err(AcpError::protocol(
-            "invalid opencode auth.json: root must be a JSON object",
-        ));
-    }
-    let path = opencode_auth_json_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| AcpError::protocol(format!("create opencode directory failed: {e}")))?;
-    }
-    fs::write(&path, format!("{raw_auth}\n"))
-        .map_err(|e| AcpError::protocol(format!("write opencode auth.json failed: {e}")))?;
-    Ok(())
-}
 
 // ---------------------------------------------------------------------------
 // Kimi Code config helpers
@@ -6273,61 +6129,44 @@ pub(crate) async fn acp_update_kimi_code_config_and_refresh(
     .await)
 }
 
-/// Validate an API key + endpoint by listing the account's models. GETs
-/// `<base_url>/models` with the key as a Bearer token and returns the model ids
-/// (OpenAI-compatible `{ "data": [{ "id": ... }] }`). Surfaces the provider's
-/// own error message on failure. Lets the settings panel populate a model picker
-/// and doubles as a one-click connection test — directly preventing the
-/// "Not found the model ..." trap of typing a model the account can't access.
-pub(crate) async fn acp_fetch_kimi_models_core(
-    base_url: &str,
-    api_key: &str,
-) -> Result<Vec<String>, AcpError> {
-    let base = base_url.trim().trim_end_matches('/');
-    if base.is_empty() {
-        return Err(AcpError::protocol("base URL is required to list models"));
+/// Keep the `/model` picker ids of a Claude agent with no model provider
+/// bound ([`crate::acp::claude_model_picker`]); none clears them.
+async fn store_claude_model_picker(
+    models: &[String],
+    conn: &sea_orm::DatabaseConnection,
+) -> Result<(), AcpError> {
+    use crate::acp::claude_model_picker as picker;
+    use crate::db::service::app_metadata_service;
+    let ids = picker::normalize(models.iter().map(String::as_str));
+    if let Some(why) = picker::invalid(&ids) {
+        return Err(AcpError::protocol(why));
     }
-    let key = api_key.trim();
-    if key.is_empty() {
-        return Err(AcpError::protocol("API key is required to list models"));
+    match picker::encode(&ids) {
+        Some(stored) => {
+            app_metadata_service::upsert_value(conn, picker::METADATA_KEY, &stored).await
+        }
+        None => app_metadata_service::delete_value(conn, picker::METADATA_KEY).await,
     }
-    let url = format!("{base}/models");
-    let resp = reqwest::Client::new()
-        .get(&url)
-        .bearer_auth(key)
-        .timeout(std::time::Duration::from_secs(20))
-        .send()
-        .await
-        .map_err(|e| AcpError::protocol(format!("list models request failed: {e}")))?;
-    let status = resp.status();
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| AcpError::protocol(format!("list models returned invalid JSON: {e}")))?;
-    if !status.is_success() {
-        let msg = body
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("request rejected");
-        return Err(AcpError::protocol(format!("{status}: {msg}")));
-    }
-    let mut ids: Vec<String> = body
-        .get("data")
-        .and_then(serde_json::Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|m| {
-                    m.get("id")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string)
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    ids.sort();
-    ids.dedup();
-    Ok(ids)
+    .map_err(|e| AcpError::protocol(e.to_string()))
+}
+
+/// [`store_claude_model_picker`], then flag the running sessions the ids now
+/// differ from. A bound provider keeps its own ids, in its model JSON.
+pub(crate) async fn acp_update_claude_model_picker_core(
+    models: Vec<String>,
+    db: &AppDatabase,
+    manager: &ConnectionManager,
+    data_dir: &Path,
+) -> Result<usize, AcpError> {
+    store_claude_model_picker(&models, &db.conn).await?;
+    Ok(refresh_config_staleness(
+        manager,
+        db,
+        data_dir,
+        &[AgentType::ClaudeCode],
+        ConfigStaleKind::AgentConfig,
+    )
+    .await)
 }
 
 // ---------------------------------------------------------------------------
@@ -6437,6 +6276,26 @@ fn account_home_dir() -> Option<PathBuf> {
 #[cfg(not(unix))]
 fn account_home_dir() -> Option<PathBuf> {
     dirs::home_dir()
+}
+
+/// What `os.homedir()` answers in a Node child that inherits codeg's own
+/// environment: `HOME` (`USERPROFILE` on Windows) when it is set, otherwise the
+/// account's home. `dirs::home_dir()` gives the same answer on unix, but on
+/// Windows it asks the OS for the profile folder and never reads `USERPROFILE`,
+/// so a codeg started with `USERPROFILE` pointing elsewhere would name another
+/// home than its Node children use.
+fn inherited_node_home_dir() -> PathBuf {
+    node_home_from(std::env::var_os(CHILD_HOME_KEY))
+}
+
+/// [`inherited_node_home_dir`] with codeg's home variable handed in. An empty
+/// value counts as unset: it names no folder codeg could manage.
+fn node_home_from(variable: Option<std::ffi::OsString>) -> PathBuf {
+    variable
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(account_home_dir)
+        .unwrap_or_else(home_dir_or_default)
 }
 
 /// Read the launch's agent-directory `enabledModels` preference. Missing,
@@ -6765,6 +6624,30 @@ fn pi_settings_dir_checked(pi_dir: PathBuf) -> Result<PathBuf, AcpError> {
 
 async fn pi_settings_dir_from_db(db: &AppDatabase) -> Result<PathBuf, AcpError> {
     pi_settings_dir_checked(pi_agent_dir_for_env(&pi_runtime_env_from_db(db).await?))
+}
+
+/// The API key pi keeps for `provider` in its `auth.json`
+/// (`{"<provider>": {"type": "api_key", "key": …}}`), if it keeps one.
+pub(crate) async fn pi_stored_api_key(
+    db: &AppDatabase,
+    provider: &str,
+) -> Result<Option<String>, AcpError> {
+    let dir = pi_settings_dir_from_db(db).await?;
+    Ok(pi_stored_api_key_at(&dir, provider))
+}
+
+fn pi_stored_api_key_at(pi_dir: &Path, provider: &str) -> Option<String> {
+    let auth = read_json_object_or_empty(&pi_dir.join("auth.json"));
+    let entry = auth.get(provider)?;
+    if entry.get("type").and_then(serde_json::Value::as_str) != Some("api_key") {
+        return None;
+    }
+    entry
+        .get("key")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(str::to_string)
 }
 
 /// Project-trust state for `cwd` against explicit files. Split from the DB-backed
@@ -7248,6 +7131,11 @@ pub(crate) struct PiConfigUpdate {
     /// or a client that predates the control). Ignored when `custom_base_url` is
     /// `None` — a built-in model carries pi's own, more accurate declaration.
     pub model_reasoning: Option<PiModelReasoningSpec>,
+    /// The custom provider's whole model list, when the panel sends one: its
+    /// `models` become exactly these ids, `model` always among them. `None`
+    /// adds `model` to whatever the list holds. Ignored without
+    /// `custom_base_url`.
+    pub custom_models: Option<Vec<String>>,
 }
 
 /// A model's reasoning capability as pi records it in `models.json`.
@@ -7312,6 +7200,41 @@ fn write_json_object_pretty(
     fs::write(path, text)
         .map_err(|e| AcpError::protocol(format!("write pi config failed: {e}")))?;
     Ok(())
+}
+
+/// Make a custom provider's `models` exactly `ids`, `model_id` always among
+/// them: an entry that stays keeps every field it had, a new one is
+/// `{id, name: id}`. Every entry written is one pi's schema accepts — pi drops
+/// the whole of `models.json`, every custom provider with it, over a single
+/// invalid entry — so one without an `id` (already invalid) goes.
+fn set_pi_custom_models(
+    entry: &mut serde_json::Map<String, serde_json::Value>,
+    ids: &[String],
+    model_id: &str,
+) {
+    let mut existing: HashMap<String, serde_json::Value> = HashMap::new();
+    if let Some(serde_json::Value::Array(items)) = entry.remove("models") {
+        for item in items {
+            if let Some(id) = item.get("id").and_then(serde_json::Value::as_str) {
+                existing.entry(id.to_string()).or_insert(item);
+            }
+        }
+    }
+    let mut wanted: Vec<String> = Vec::new();
+    for id in ids.iter().map(|id| id.trim()).chain([model_id]) {
+        if !id.is_empty() && !wanted.iter().any(|w| w == id) {
+            wanted.push(id.to_string());
+        }
+    }
+    let models = wanted
+        .into_iter()
+        .map(|id| {
+            existing
+                .remove(&id)
+                .unwrap_or_else(|| serde_json::json!({ "id": id, "name": id }))
+        })
+        .collect();
+    entry.insert("models".to_string(), serde_json::Value::Array(models));
 }
 
 /// Upsert `model_id` into a custom provider's `models` array, applying `reasoning`
@@ -7784,6 +7707,9 @@ pub(crate) async fn acp_update_pi_config_core(
             "api".to_string(),
             serde_json::Value::String(custom_api.to_string()),
         );
+        if let Some(ids) = update.custom_models.as_deref() {
+            set_pi_custom_models(&mut entry, ids, model);
+        }
         apply_pi_custom_model(&mut entry, model, update.model_reasoning.as_ref());
         providers.insert(provider.to_string(), serde_json::Value::Object(entry));
         models_doc.insert(
@@ -8449,7 +8375,28 @@ fn yaml_str(value: &serde_yaml::Value, key: &str) -> Option<String> {
 fn existing_hermes_model_provider(existing: Option<&str>) -> Option<String> {
     let raw = existing?;
     let value: serde_yaml::Value = serde_yaml::from_str(raw).ok()?;
-    value.get("model").and_then(|m| yaml_str(m, "provider"))
+    value
+        .get("model")
+        .and_then(|m| yaml_str(m, "provider"))
+        .map(|provider| hermes_panel_provider(&provider).to_string())
+}
+
+/// The named provider codeg writes the panel's `custom` endpoint as
+/// (`providers.codeg`, picked with `model.provider: custom:codeg`). Hermes asks
+/// a named provider's `/models` with that provider's key and lists every model
+/// it serves, where `model.provider: custom` is probed with no key at all and
+/// offers only the configured model.
+const HERMES_CODEG_PROVIDER: &str = "codeg";
+const HERMES_CODEG_PROVIDER_REF: &str = "custom:codeg";
+
+/// The panel's provider id for a `model.provider` value: codeg's named
+/// provider is the panel's `custom`; anything else is itself.
+fn hermes_panel_provider(provider: &str) -> &str {
+    if provider == HERMES_CODEG_PROVIDER_REF {
+        "custom"
+    } else {
+        provider
+    }
 }
 
 /// How `merge_hermes_model_config` should treat the `model.base_url` field.
@@ -8515,6 +8462,28 @@ fn merge_hermes_model_config(
         .and_then(Value::as_mapping_mut)
         .expect("model is a mapping");
 
+    if hermes_inlines_api_key(provider) {
+        model_map.insert(
+            Value::String("provider".to_string()),
+            Value::String(HERMES_CODEG_PROVIDER_REF.to_string()),
+        );
+        if !model.is_empty() {
+            model_map.insert(
+                Value::String("default".to_string()),
+                Value::String(model.to_string()),
+            );
+        }
+        write_hermes_codeg_provider(root_map, base_url, inline_api_key);
+        return serde_yaml::to_string(&root)
+            .map_err(|e| AcpError::protocol(format!("serialize hermes config.yaml failed: {e}")));
+    }
+    // Any other provider: codeg's named provider is no longer what the panel
+    // configures, and Hermes would go on listing its models.
+    remove_hermes_codeg_provider(root_map);
+    let model_map = root_map
+        .get_mut(&model_key)
+        .and_then(Value::as_mapping_mut)
+        .expect("model is a mapping");
     model_map.insert(
         Value::String("provider".to_string()),
         Value::String(provider.to_string()),
@@ -8564,6 +8533,126 @@ fn merge_hermes_model_config(
 
     serde_yaml::to_string(&root)
         .map_err(|e| AcpError::protocol(format!("serialize hermes config.yaml failed: {e}")))
+}
+
+/// Write the panel's `custom` endpoint into codeg's named provider
+/// (`providers.codeg`): `base_url`, the key (or none, for a keyless local
+/// server), and the `api_mode` a raw-editor user gave it — scrubbed when the
+/// panel switched to custom from another provider. A config from before the
+/// named provider moves its inline `model.base_url` / `api_key` / `api_mode`
+/// there, and an entry switched off is switched back on. Every other key of
+/// the provider entry, and every other provider, stays as it was.
+fn write_hermes_codeg_provider(
+    root_map: &mut serde_yaml::Mapping,
+    base_url: BaseUrlWrite<'_>,
+    inline_api_key: InlineApiKeyWrite<'_>,
+) {
+    use serde_yaml::{Mapping, Value};
+    let key = |k: &str| Value::String(k.to_string());
+    // What an inline (pre-named-provider) custom config carried.
+    let mut legacy = Mapping::new();
+    if let Some(model_map) = root_map.get_mut(key("model")).and_then(Value::as_mapping_mut) {
+        for field in ["base_url", "api_key", "api_mode"] {
+            if let Some(value) = model_map.remove(key(field)) {
+                legacy.insert(key(field), value);
+            }
+        }
+    }
+    if !root_map
+        .get(key("providers"))
+        .map(Value::is_mapping)
+        .unwrap_or(false)
+    {
+        root_map.insert(key("providers"), Value::Mapping(Mapping::new()));
+    }
+    let providers = root_map
+        .get_mut(key("providers"))
+        .and_then(Value::as_mapping_mut)
+        .expect("providers is a mapping");
+    if !providers
+        .get(key(HERMES_CODEG_PROVIDER))
+        .map(Value::is_mapping)
+        .unwrap_or(false)
+    {
+        providers.insert(key(HERMES_CODEG_PROVIDER), Value::Mapping(Mapping::new()));
+    }
+    let entry = providers
+        .get_mut(key(HERMES_CODEG_PROVIDER))
+        .and_then(Value::as_mapping_mut)
+        .expect("providers.codeg is a mapping");
+    // Switched off while the panel configured another provider.
+    if entry.get(key("enabled")) != Some(&Value::Bool(true)) {
+        entry.shift_remove(key("enabled"));
+    }
+    for (field, value) in legacy {
+        if entry.get(&field).is_none() {
+            entry.insert(field, value);
+        }
+    }
+    match base_url {
+        BaseUrlWrite::Set(url) if !url.trim().is_empty() => {
+            entry.insert(key("base_url"), Value::String(url.trim().to_string()));
+        }
+        BaseUrlWrite::Set(_) => {
+            entry.remove(key("base_url"));
+        }
+        BaseUrlWrite::Preserve => {}
+    }
+    match inline_api_key {
+        InlineApiKeyWrite::Set { key: api_key, scrub_mode } => {
+            if api_key.trim().is_empty() {
+                entry.remove(key("api_key"));
+            } else {
+                entry.insert(key("api_key"), Value::String(api_key.trim().to_string()));
+            }
+            if scrub_mode {
+                entry.remove(key("api_mode"));
+            }
+        }
+        InlineApiKeyWrite::Clear => {
+            entry.remove(key("api_key"));
+            entry.remove(key("api_mode"));
+        }
+    }
+}
+
+/// What codeg writes in `providers.codeg`, and takes back once the panel
+/// configures another provider.
+const HERMES_CODEG_PROVIDER_KEYS: [&str; 4] = ["base_url", "api_key", "api_mode", "enabled"];
+
+/// Take codeg's endpoint and key back out of its named provider, and drop
+/// the entry — and the `providers` map once it is empty — when nothing else
+/// is in it. A key the user added (`models`, `extra_headers`, …) stays for
+/// the next time the panel configures `custom`, the entry switched off
+/// (`enabled: false`) meanwhile: Hermes lists a URL-less entry's `models`.
+fn remove_hermes_codeg_provider(root_map: &mut serde_yaml::Mapping) {
+    use serde_yaml::Value;
+    let providers_key = Value::String("providers".to_string());
+    let Some(providers) = root_map
+        .get_mut(&providers_key)
+        .and_then(Value::as_mapping_mut)
+    else {
+        return;
+    };
+    let codeg_key = Value::String(HERMES_CODEG_PROVIDER.to_string());
+    let Some(entry) = providers
+        .get_mut(&codeg_key)
+        .and_then(Value::as_mapping_mut)
+    else {
+        return;
+    };
+    // Shifting, not swapping, keeps the user's keys in the order they wrote.
+    for field in HERMES_CODEG_PROVIDER_KEYS {
+        entry.shift_remove(Value::String(field.to_string()));
+    }
+    if !entry.is_empty() {
+        entry.insert(Value::String("enabled".to_string()), Value::Bool(false));
+        return;
+    }
+    providers.shift_remove(&codeg_key);
+    if providers.is_empty() {
+        root_map.shift_remove(&providers_key);
+    }
 }
 
 /// Quote a single argv token for the current platform's shell, only when it
@@ -8649,22 +8738,28 @@ async fn hermes_setup_argvs() -> (Vec<String>, Vec<String>) {
         // change can't resurrect a stale recipe.
         _ => "hermes-agent@0.22.2",
     };
-    let build = |tail: &[&str]| -> Vec<String> {
-        let mut argv = vec![
-            "npx".to_string(),
-            "-y".to_string(),
-            // The wrapper's postinstall bootstrap IS the install; without this
-            // a user-level ignore-scripts=true yields a shim that exits
-            // "runtime is not ready" (npx accepts npm config flags).
-            NPM_RUN_SCRIPTS_OVERRIDE.to_string(),
-            "--package".to_string(),
-            package.to_string(),
-            "hermes".to_string(),
-        ];
-        argv.extend(tail.iter().map(|s| s.to_string()));
-        argv
-    };
-    (build(&["acp", "--setup"]), build(&["model"]))
+    (
+        hermes_npx_argv(package, &["acp", "--setup"]),
+        hermes_npx_argv(package, &["model"]),
+    )
+}
+
+/// `npx -y <script flags> --package <spec> hermes <tail…>`: a Hermes command
+/// for a machine where no `hermes` resolves. The wrapper's postinstall
+/// bootstrap IS the install, so the npx run gets the same script flags as an
+/// install ([`npm_run_scripts_args`]); without them a user-level
+/// `ignore-scripts=true`, or npm 12's default block on install scripts, skips
+/// the bootstrap (npx accepts npm config flags).
+fn hermes_npx_argv(package: &str, tail: &[&str]) -> Vec<String> {
+    let mut argv = vec!["npx".to_string(), "-y".to_string()];
+    argv.extend(npm_run_scripts_args(package));
+    argv.extend([
+        "--package".to_string(),
+        package.to_string(),
+        "hermes".to_string(),
+    ]);
+    argv.extend(tail.iter().map(|s| s.to_string()));
+    argv
 }
 
 /// Build the displayed/runnable `(setup, model)` shell commands for the Hermes
@@ -8714,26 +8809,55 @@ fn project_hermes_key_and_base(
     (api_key, base_url)
 }
 
+/// What config.yaml says the panel's provider, model, endpoint and inline key
+/// are.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct HermesModelProjection {
+    provider: Option<String>,
+    model: Option<String>,
+    base_url: Option<String>,
+    api_key: Option<String>,
+}
+
+fn hermes_model_projection(raw_yaml: &str) -> HermesModelProjection {
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(raw_yaml) else {
+        return HermesModelProjection::default();
+    };
+    let Some(model_section) = value.get("model") else {
+        return HermesModelProjection::default();
+    };
+    let provider = yaml_str(model_section, "provider");
+    // codeg's named provider is the panel's `custom`, its endpoint and key in
+    // `providers.codeg`; a config from before keeps them inline.
+    let endpoint = if provider.as_deref() == Some(HERMES_CODEG_PROVIDER_REF) {
+        value
+            .get("providers")
+            .and_then(|p| p.get(HERMES_CODEG_PROVIDER))
+    } else {
+        Some(model_section)
+    };
+    HermesModelProjection {
+        model: yaml_str(model_section, "default"),
+        base_url: endpoint.and_then(|e| yaml_str(e, "base_url")),
+        api_key: endpoint.and_then(|e| yaml_str(e, "api_key")),
+        provider: provider.map(|p| hermes_panel_provider(&p).to_string()),
+    }
+}
+
 async fn load_hermes_local_config_json() -> Option<String> {
     let env_map = fs::read_to_string(hermes_env_path())
         .ok()
         .map(|raw| parse_env_file(&raw))
         .unwrap_or_default();
 
-    let mut provider: Option<String> = None;
-    let mut model: Option<String> = None;
-    let mut yaml_base_url: Option<String> = None;
-    let mut yaml_api_key: Option<String> = None;
-    if let Ok(raw_yaml) = fs::read_to_string(hermes_config_yaml_path()) {
-        if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&raw_yaml) {
-            if let Some(model_section) = value.get("model") {
-                provider = yaml_str(model_section, "provider");
-                model = yaml_str(model_section, "default");
-                yaml_base_url = yaml_str(model_section, "base_url");
-                yaml_api_key = yaml_str(model_section, "api_key");
-            }
-        }
-    }
+    let HermesModelProjection {
+        provider,
+        model,
+        base_url: yaml_base_url,
+        api_key: yaml_api_key,
+    } = fs::read_to_string(hermes_config_yaml_path())
+        .map(|raw| hermes_model_projection(&raw))
+        .unwrap_or_default();
 
     let (api_key, base_url) = match provider.as_deref() {
         Some(p) => project_hermes_key_and_base(
@@ -9302,6 +9426,9 @@ pub(crate) fn load_agent_local_config_json(agent_type: AgentType) -> Option<Stri
     if agent_type == AgentType::KimiCode {
         return load_kimi_code_config_json();
     }
+    if agent_type == AgentType::OpenCode {
+        return load_opencode_config_text();
+    }
 
     let path = agent_local_config_path(agent_type)?;
     if !path.exists() {
@@ -9386,7 +9513,13 @@ fn persist_agent_local_config_json(
     config_patch_json: Option<&str>,
 ) -> Result<(), AcpError> {
     if agent_type == AgentType::Codex {
-        return persist_codex_local_config(config_patch_json);
+        // codex's files are written by the commit coordinator alone
+        // (`codex_catalog::commit_user_change`), which owns the keys codeg
+        // manages and writes config.toml and auth.json as one change; every
+        // Codex save returns before reaching here.
+        return Err(AcpError::protocol(
+            "codex's config is written by the commit coordinator, not merged here",
+        ));
     }
     if agent_type == AgentType::Cline {
         return persist_cline_local_config(config_patch_json);
@@ -9406,24 +9539,18 @@ fn persist_agent_local_config_json(
         return Ok(());
     };
 
+    // The panel sends OpenCode's whole file, possibly with comments: it is
+    // validated as OpenCode parses it and written as sent, never re-serialized.
+    if agent_type == AgentType::OpenCode {
+        return persist_opencode_config_text(raw_patch);
+    }
+
     let patch = serde_json::from_str::<serde_json::Value>(raw_patch)
         .map_err(|e| AcpError::protocol(format!("invalid config_json: {e}")))?;
     if !patch.is_object() {
         return Err(AcpError::protocol(
             "invalid config_json: root must be a JSON object",
         ));
-    }
-
-    if agent_type == AgentType::OpenCode {
-        let serialized = serde_json::to_string_pretty(&patch)
-            .map_err(|e| AcpError::protocol(format!("serialize config_json failed: {e}")))?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| AcpError::protocol(format!("create config directory failed: {e}")))?;
-        }
-        fs::write(&path, format!("{serialized}\n"))
-            .map_err(|e| AcpError::protocol(format!("write local config failed: {e}")))?;
-        return Ok(());
     }
 
     let mut base = if path.exists() {
@@ -9474,23 +9601,34 @@ pub(crate) fn skill_storage_spec(agent_type: AgentType) -> Option<SkillStorageSp
             ],
             project_rel_dirs: vec![".codex/skills", ".agents/skills"],
         }),
-        AgentType::OpenCode => Some(SkillStorageSpec {
-            kind: SkillStorageKind::SkillDirectoryOnly,
-            // OpenCode is a "universal" agent for the `skills` CLI (its
-            // skillsDir is `.agents/skills`): a global `skills add` writes the
-            // real skill into the shared `~/.agents/skills` store and does NOT
-            // create a `~/.config/opencode/skills` symlink. OpenCode reads both
-            // locations, so probe both — otherwise CLI-installed skills are
-            // invisible here and in Settings → Skills.
-            global_dirs: vec![
-                home_dir_or_default()
-                    .join(".config")
-                    .join("opencode")
-                    .join("skills"),
-                home_dir_or_default().join(".agents").join("skills"),
-            ],
-            project_rel_dirs: vec![".agents/skills", ".opencode/skills"],
-        }),
+        // OpenCode 2 reads skills from `skills/` and `skill/` under its config
+        // directory — `$OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`,
+        // else `~/.config/opencode` (`acp::opencode_config`) — from the shared
+        // `~/.agents/skills`, and in a project from `.opencode/skills`,
+        // `.opencode/skill` and `.agents/skills` (`core/src/config/plugin/
+        // skill.ts`, `compatibility.ts`). A skill is an `<id>/SKILL.md` bundle
+        // or, at the top of one of those directories, a flat `<id>.md`
+        // (`skill-scan.ts`, `skill-file.ts`). New skills go to the first of
+        // each list, the layout OpenCode documents. It also reads
+        // `.claude/skills`, which codeg lists under Claude Code.
+        //
+        // `~/.agents/skills` matters beyond OpenCode: OpenCode is a
+        // "universal" agent for the `skills` CLI, whose global `skills add`
+        // writes the real skill there and links nothing into OpenCode's own
+        // directory, so without it CLI-installed skills would be invisible.
+        AgentType::OpenCode => {
+            let config_dir = crate::acp::opencode_config::config_dir()
+                .unwrap_or_else(|| home_dir_or_default().join(".config").join("opencode"));
+            Some(SkillStorageSpec {
+                kind: SkillStorageKind::SkillDirectoryOrMarkdownFile,
+                global_dirs: vec![
+                    config_dir.join("skills"),
+                    config_dir.join("skill"),
+                    home_dir_or_default().join(".agents").join("skills"),
+                ],
+                project_rel_dirs: vec![".opencode/skills", ".opencode/skill", ".agents/skills"],
+            })
+        }
         AgentType::Gemini => Some(SkillStorageSpec {
             kind: SkillStorageKind::SkillDirectoryOnly,
             global_dirs: vec![
@@ -9705,12 +9843,13 @@ pub(crate) fn skill_storage_spec(agent_type: AgentType) -> Option<SkillStorageSp
         // Command Code loads `<id>/SKILL.md` bundles — found recursively, never
         // a flat `<id>.md` — from `~/.commandcode/skills` and the shared
         // `~/.agents/skills` store, plus `.commandcode/skills` and
-        // `.agents/skills` in the project. Verified against 1.84.0 and 1.86.3
-        // by planting one skill in each candidate directory: exactly those four
-        // reached the session's commands, while `.claude/skills` (project and
-        // user) and the flat file were ignored. The Command Code directory
-        // leads so linking targets it without touching the shared store (the
-        // TRAE CLI ordering); on a name clash Command Code prefers it too.
+        // `.agents/skills` in the project. Verified against 1.84.0, 1.86.3 and
+        // 1.88.0 by planting one skill in each candidate directory: exactly
+        // those four reached the session's commands, while `.claude/skills`
+        // (project and user) and the flat file were ignored. The Command Code
+        // directory leads so linking targets it without touching the shared
+        // store (the TRAE CLI ordering); on a name clash Command Code prefers
+        // it too.
         AgentType::CommandCode => Some(SkillStorageSpec {
             kind: SkillStorageKind::SkillDirectoryOnly,
             global_dirs: vec![
@@ -9719,6 +9858,52 @@ pub(crate) fn skill_storage_spec(agent_type: AgentType) -> Option<SkillStorageSp
             ],
             project_rel_dirs: vec![".commandcode/skills", ".agents/skills"],
         }),
+        // The skills a ZCode session can use are the ones the official ZCode
+        // runtime (`zcode app-server`, which the bridge spawns) loads — not the
+        // bridge's own `$name` command list. The runtime's roots are
+        // `resolveDefaultSkillRoots` in apps/zcode-cli/packages/adapters/src/
+        // skills/roots.ts (read at the 0.16.9 and 0.17.0 sources): user
+        // `<os home>/.zcode/skills` then `<os home>/.agents/skills`, and for
+        // every directory from the cwd up to the Git worktree root,
+        // `<dir>/.zcode/skills` then `<dir>/.agents/skills`, plus enabled
+        // plugin caches, which stay ZCode's. Bundles only (`<id>/SKILL.md`).
+        // [`project_skill_bases`] walks the same project folders.
+        //
+        // The OS home is what Node's `os.homedir()` answers, which on Windows
+        // is `USERPROFILE`, not the profile folder `dirs::home_dir()` asks the
+        // OS for ([`inherited_node_home_dir`]). It is never `ZCODE_HOME`: no
+        // runtime caller passes a home directory to that function, and the
+        // bridge hands `ZCODE_HOME` to the runtime only as its data root
+        // (`ZCODE_DATA_BASE_DIR`, and only when the path ends in `.zcode`),
+        // which the skill roots do not use. The bridge's command list reads
+        // `$ZCODE_HOME/skills` instead, so with `ZCODE_HOME` pointing anywhere
+        // but `~/.zcode`, a skill installed there would be offered as a
+        // command that none of the runtime's default roots contains.
+        //
+        // `.zcode/skills` leads both pairs. It is where ZCode's own settings
+        // create skills, global and project alike; the runtime prefers it over
+        // `.agents/skills` in the same folder, so with a copy in each, the one
+        // listed and edited here is the one ZCode uses; and installing there
+        // leaves the shared store, which other agents read, alone. Of the
+        // project folders, the bridge's command list reads only the cwd's
+        // `.agents/skills`, so project skills created here are not offered as
+        // commands, though the runtime loads them. Codeg runs the agent in the
+        // session cwd, which is what both the bridge and the runtime scan from.
+        AgentType::ZCode => {
+            let home = inherited_node_home_dir();
+            Some(SkillStorageSpec {
+                kind: SkillStorageKind::SkillDirectoryOnly,
+                global_dirs: vec![
+                    home.join(".zcode").join("skills"),
+                    home.join(".agents").join("skills"),
+                ],
+                project_rel_dirs: vec![".zcode/skills", ".agents/skills"],
+            })
+        }
+        // MiniMax Code's native profile roots and external skill discovery are
+        // CLI-owned; do not install into a different profile than the launch
+        // env selects.
+        AgentType::MiniMaxCode => None,
         // codeg cannot detect where an arbitrary ACP agent loads skills from,
         // so custom agents are gated on the user's own declaration: that the
         // agent reads the shared `.agents/skills` store (the cross-agent
@@ -9732,7 +9917,6 @@ pub(crate) fn skill_storage_spec(agent_type: AgentType) -> Option<SkillStorageSp
         // this function). The dedicated path was normalized to absolute at
         // save time; a non-absolute value (a hand-edited database) is ignored
         // rather than resolved against an arbitrary working directory.
-        AgentType::ZCode => None,
         AgentType::Custom(id) => {
             let decl = crate::acp::custom_registry::skills_decl(id);
             let mut global_dirs = Vec::new();
@@ -9816,49 +10000,81 @@ pub(crate) fn scoped_skill_dirs(
                 .ok_or_else(|| {
                     AcpError::protocol("workspace_path is required for project scoped skills")
                 })?;
-            let base = project_skill_base(agent_type, workspace);
-            Ok(spec
-                .project_rel_dirs
-                .iter()
-                .map(|relative| base.join(relative))
-                .collect())
+            Ok(project_skill_dirs(agent_type, &spec, workspace))
         }
     }
 }
 
-/// The directory an agent's PROJECT-relative skill dirs hang off.
+/// Every directory an agent's PROJECT-scoped skills are read from, in the
+/// order it reads them: its `project_rel_dirs`, in their declared order, under
+/// each base [`project_skill_bases`] names, nearest base first. The first one
+/// is where a new project skill goes.
+fn project_skill_dirs(
+    agent_type: AgentType,
+    spec: &SkillStorageSpec,
+    workspace: &str,
+) -> Vec<PathBuf> {
+    project_skill_bases(agent_type, workspace)
+        .iter()
+        .flat_map(|base| {
+            spec.project_rel_dirs
+                .iter()
+                .map(move |relative| base.join(relative))
+        })
+        .collect()
+}
+
+/// The directories an agent's PROJECT-relative skill dirs hang off, nearest
+/// first.
 ///
-/// Normally the workspace itself. DeepSeek and Kimi Code are the exceptions:
-/// both walk up from the session cwd to the nearest ancestor containing `.git`
-/// before joining their project-relative skill dirs, falling back to the cwd
-/// when they reach the filesystem root — DeepSeek in `dsh-skill-filesystem`'s
-/// `findProjectRoot`, Kimi in `features/skill/catalog/skillRoots.ts`'s
-/// `projectRoots` → `findUpwardRoot(workDir, ".git", exists)`. Opening a
-/// subdirectory of a repo as the workspace would otherwise make codeg create
-/// and list `<subdir>/.dsh/skills` / `<subdir>/.kimi-code/skills` — a directory
-/// the agent never scans, so the skill would simply never load, with nothing on
-/// screen saying so.
+/// Normally just the workspace itself. DeepSeek and Kimi Code use one other
+/// directory instead: both walk up from the session cwd to the nearest ancestor
+/// containing `.git` before joining their project-relative skill dirs, falling
+/// back to the cwd when they reach the filesystem root — DeepSeek in
+/// `dsh-skill-filesystem`'s `findProjectRoot`, Kimi in
+/// `features/skill/catalog/skillRoots.ts`'s `projectRoots` →
+/// `findUpwardRoot(workDir, ".git", exists)`. Opening a subdirectory of a repo
+/// as the workspace would otherwise make codeg create and list
+/// `<subdir>/.dsh/skills` / `<subdir>/.kimi-code/skills` — a directory the agent
+/// never scans, so the skill would simply never load, with nothing on screen
+/// saying so.
 ///
 /// Kimi's half was confirmed live: `kimi acp` launched with `cwd` at
 /// `<repo>/sub` advertised the skills under `<repo>/.kimi-code/skills` and
 /// `<repo>/.agents/skills` and ignored the ones under `<repo>/sub/...`.
 ///
+/// ZCode scans every directory on that walk: `resolveProjectSkillDirectories`
+/// in its runtime's `skills/roots.ts` returns each one from the cwd up to the
+/// nearest ancestor containing `.git`, the cwd first, and the cwd alone when no
+/// ancestor has one. A skill it loads from a parent folder is then listed and
+/// edited where it is, and the copy listed for an id is the one the runtime
+/// ranks first among its project folders. It loads a skill by its declared
+/// `name`, though, and ranks user skills above project ones.
+///
 /// `.git` is matched as a plain path, file or directory: in a linked worktree
-/// (which codeg creates routinely) it is a FILE, and both upstreams' existence
-/// probes (`pathExists` / `stat`) accept that too.
-fn project_skill_base(agent_type: AgentType, workspace: &str) -> PathBuf {
+/// (which codeg creates routinely) it is a FILE, and all three upstreams'
+/// existence probes (`pathExists` / `stat`) accept that too.
+fn project_skill_bases(agent_type: AgentType, workspace: &str) -> Vec<PathBuf> {
     let workspace = PathBuf::from(workspace);
-    if !matches!(agent_type, AgentType::DeepSeek | AgentType::KimiCode) {
-        return workspace;
-    }
+    let every_level = match agent_type {
+        AgentType::DeepSeek | AgentType::KimiCode => false,
+        AgentType::ZCode => true,
+        _ => return vec![workspace],
+    };
+    let mut walked = Vec::new();
     let mut current = workspace.as_path();
     loop {
+        walked.push(current.to_path_buf());
         if current.join(".git").exists() {
-            return current.to_path_buf();
+            return if every_level {
+                walked
+            } else {
+                vec![current.to_path_buf()]
+            };
         }
         match current.parent() {
             Some(parent) if parent != current => current = parent,
-            _ => return workspace.clone(),
+            _ => return vec![workspace.clone()],
         }
     }
 }
@@ -11073,6 +11289,13 @@ pub(crate) fn build_runtime_env_from_setting(
         heal_kimi_env_model_context_window(agent_type, &mut merged);
         return merged;
     };
+    // OpenCode's local config is its own `opencode.json(c)`, not codeg's
+    // runtime config: its top-level `model` is OpenCode's default model, which
+    // the generic projection below would export as `OPENAI_MODEL` into every
+    // command the agent runs.
+    if agent_type == AgentType::OpenCode {
+        return merged;
+    }
     let Ok(config) = serde_json::from_str::<AgentRuntimeConfig>(raw_config_json) else {
         heal_kimi_env_model_context_window(agent_type, &mut merged);
         return merged;
@@ -11084,6 +11307,13 @@ pub(crate) fn build_runtime_env_from_setting(
             continue;
         }
         merged.insert(key, trimmed.to_string());
+    }
+
+    // MiniMax Code uses its existing native login/provider configuration.
+    // Explicit env overrides remain available, but generic provider fields
+    // must not synthesize OPENAI_* or invented MiniMax variables.
+    if agent_type == AgentType::MiniMaxCode {
+        return merged;
     }
 
     let (api_base_url_key, api_key_key, model_key) = agent_env_keys(agent_type);
@@ -11141,6 +11371,16 @@ fn heal_kimi_env_model_context_window(agent_type: AgentType, env: &mut BTreeMap<
     }
 }
 
+/// Agents that keep their own provider configuration and take no codeg model
+/// provider: MiniMax Code (its own login and providers), and OpenCode, whose
+/// providers live in its config and credential store and whose `openai`
+/// integration would otherwise pick up the bound provider's key from the
+/// `OPENAI_*` env the generic binding writes. Binding one is refused, and a
+/// binding stored earlier is ignored at launch.
+fn keeps_own_providers(agent_type: AgentType) -> bool {
+    matches!(agent_type, AgentType::MiniMaxCode | AgentType::OpenCode)
+}
+
 /// Resolve model provider credentials into runtime env vars if `model_provider_id` is set.
 pub(crate) async fn apply_model_provider_env(
     agent_type: AgentType,
@@ -11148,6 +11388,9 @@ pub(crate) async fn apply_model_provider_env(
     runtime_env: &mut BTreeMap<String, String>,
     conn: &sea_orm::DatabaseConnection,
 ) {
+    if keeps_own_providers(agent_type) {
+        return;
+    }
     let provider_id = match setting.and_then(|s| s.model_provider_id) {
         Some(id) => id,
         None => return,
@@ -11162,6 +11405,42 @@ pub(crate) async fn apply_model_provider_env(
     }
     if !provider.api_key.trim().is_empty() {
         runtime_env.insert(key_key.to_string(), provider.api_key.clone());
+    }
+}
+
+/// The `/model` picker ids codeg adds to a Claude launch
+/// ([`crate::acp::claude_model_picker`]): the bound provider's, else the ones
+/// kept for the unbound panel — and only for a launch against a gateway
+/// (`ANTHROPIC_BASE_URL`), where Anthropic's own API would refuse them.
+/// Whatever the per-agent env put under the launch key is dropped first, so
+/// the stored ids are the only source.
+async fn apply_claude_model_picker_env(
+    setting: Option<&crate::db::entities::agent_setting::Model>,
+    runtime_env: &mut BTreeMap<String, String>,
+    conn: &sea_orm::DatabaseConnection,
+) {
+    use crate::acp::claude_model_picker as picker;
+    runtime_env.remove(picker::LAUNCH_KEY);
+    if runtime_env
+        .get("ANTHROPIC_BASE_URL")
+        .is_none_or(|url| url.trim().is_empty())
+    {
+        return;
+    }
+    let ids = match setting.and_then(|s| s.model_provider_id) {
+        Some(id) => match model_provider_service::get_by_id(conn, id).await {
+            Ok(Some(provider)) => picker::provider_ids(provider.model.as_deref()),
+            _ => Vec::new(),
+        },
+        None => crate::db::service::app_metadata_service::get_value(conn, picker::METADATA_KEY)
+            .await
+            .ok()
+            .flatten()
+            .map(|raw| picker::decode(&raw))
+            .unwrap_or_default(),
+    };
+    if let Some(encoded) = picker::encode(&ids) {
+        runtime_env.insert(picker::LAUNCH_KEY.to_string(), encoded);
     }
 }
 
@@ -11308,9 +11587,10 @@ fn cascade_update_agent_config(
     api_url: &str,
     api_key: &str,
     model_env: &BTreeMap<String, Option<String>>,
-    codex_model: &CodexModelAction,
-    codex_model_raw: Option<&str>,
 ) -> Result<(), AcpError> {
+    if keeps_own_providers(agent_type) {
+        return Ok(());
+    }
     let (url_key, key_key, _) = agent_env_keys(agent_type);
     match agent_type {
         AgentType::ClaudeCode | AgentType::Gemini => {
@@ -11351,141 +11631,12 @@ fn cascade_update_agent_config(
             // model-provider endpoint to cascade into.
         }
         AgentType::Codex => {
-            let auth_path = codex_auth_json_path();
-            let mut auth_obj = if auth_path.exists() {
-                fs::read_to_string(&auth_path)
-                    .ok()
-                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-                    .filter(|v| v.is_object())
-                    .unwrap_or_else(|| serde_json::json!({}))
-            } else {
-                serde_json::json!({})
-            };
-            if !api_key.trim().is_empty() {
-                auth_obj[key_key] = serde_json::Value::String(api_key.to_string());
-            }
-            let auth_str = serde_json::to_string_pretty(&auth_obj)
-                .map_err(|e| AcpError::protocol(e.to_string()))?;
-
-            let config_path = codex_config_toml_path();
-            let mut toml_value = if config_path.exists() {
-                fs::read_to_string(&config_path)
-                    .ok()
-                    .and_then(|raw| raw.parse::<toml::Value>().ok())
-                    .filter(|v| v.is_table())
-                    .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
-            } else {
-                toml::Value::Table(toml::map::Map::new())
-            };
-            let table = toml_value
-                .as_table_mut()
-                .ok_or_else(|| AcpError::protocol("codex config root must be a TOML table"))?;
-            table.remove("api_base_url");
-
-            let provider_name = table
-                .get("model_provider")
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .unwrap_or_else(|| "codeg".to_string());
-            table.insert(
-                "model_provider".to_string(),
-                toml::Value::String(provider_name.clone()),
-            );
-
-            let providers_item = table
-                .entry("model_providers".to_string())
-                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-            if !providers_item.is_table() {
-                *providers_item = toml::Value::Table(toml::map::Map::new());
-            }
-            let providers = providers_item
-                .as_table_mut()
-                .ok_or_else(|| AcpError::protocol("invalid model_providers table"))?;
-            let provider_item = providers
-                .entry(provider_name.clone())
-                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-            if !provider_item.is_table() {
-                *provider_item = toml::Value::Table(toml::map::Map::new());
-            }
-            let provider_table = provider_item
-                .as_table_mut()
-                .ok_or_else(|| AcpError::protocol("invalid model provider table"))?;
-            if api_url.trim().is_empty() {
-                provider_table.remove("base_url");
-            } else {
-                provider_table.insert(
-                    "base_url".to_string(),
-                    toml::Value::String(api_url.to_string()),
-                );
-            }
-            if provider_name == "codeg" {
-                provider_table.insert("name".to_string(), toml::Value::String("codeg".to_string()));
-                provider_table.insert(
-                    "wire_api".to_string(),
-                    toml::Value::String("responses".to_string()),
-                );
-                ensure_codex_provider_auth_default(provider_table);
-            }
-            match codex_model {
-                CodexModelAction::Set(model) => {
-                    table.insert("model".to_string(), toml::Value::String(model.to_string()));
-                }
-                CodexModelAction::Clear => {
-                    table.remove("model");
-                }
-                CodexModelAction::NoOp => {}
-            }
-            // Regenerate the model_catalog_json file from the provider's full
-            // structured model config and reference it (relative to CODEX_HOME).
-            // REPLACE semantics require rewriting the whole catalog every time.
-            let snapshot = crate::acp::codex_catalog_source::cached_or_bundled_snapshot();
-            match crate::acp::codex_model_catalog::write_catalog_files(
-                codex_model_raw.unwrap_or_default(),
-                &codex_home_dir(),
-                &snapshot,
-            ) {
-                Ok(Some(inj)) => {
-                    table.insert(
-                        "model_catalog_json".to_string(),
-                        toml::Value::String(inj.catalog_rel.to_string()),
-                    );
-                }
-                Ok(None) => {
-                    table.remove("model_catalog_json");
-                }
-                Err(e) => {
-                    tracing::warn!("[ModelProvider] write codex catalog failed: {e}");
-                }
-            }
-            let toml_str = toml::to_string_pretty(&toml_value)
-                .map_err(|e| AcpError::protocol(e.to_string()))?;
-
-            persist_codex_native_config_files(Some(&auth_str), Some(&toml_str))?;
+            // codex's files belong to the commit coordinator, which the
+            // caller runs with the provider's new row
+            // (`codex_catalog::commit_user_change`).
         }
         AgentType::OpenCode => {
-            let auth_path = opencode_auth_json_path();
-            let mut auth_obj = if auth_path.exists() {
-                fs::read_to_string(&auth_path)
-                    .ok()
-                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-                    .filter(|v| v.is_object())
-                    .unwrap_or_else(|| serde_json::json!({}))
-            } else {
-                serde_json::json!({})
-            };
-            if !api_key.trim().is_empty() {
-                auth_obj["api_key"] = serde_json::Value::String(api_key.to_string());
-            }
-            let auth_str = serde_json::to_string_pretty(&auth_obj)
-                .map_err(|e| AcpError::protocol(e.to_string()))?;
-            persist_opencode_auth_json(&auth_str)?;
-
-            let patch = serde_json::json!({ "apiBaseUrl": api_url });
-            let patch_str =
-                serde_json::to_string(&patch).map_err(|e| AcpError::protocol(e.to_string()))?;
-            persist_agent_local_config_json(agent_type, Some(&patch_str))?;
+            // Unreachable: OpenCode keeps its own providers (`keeps_own_providers`).
         }
         AgentType::Cline => {}
         AgentType::CodeBuddy => {
@@ -11546,8 +11697,8 @@ fn cascade_update_agent_config(
             // `KIRO_API_KEY` in the agent's env) and accepts no custom base
             // URL, so it stays off the model-provider credential cascade.
         }
-        AgentType::ZCode => {
-            // Authentication and providers belong to the official ZCode runtime.
+        AgentType::ZCode | AgentType::MiniMaxCode => {
+            // Authentication and providers belong to the official agent runtime.
         }
         AgentType::Trae => {
             // TRAE CLI signs in to TRAE's own service (`traecli login`, or a
@@ -11591,11 +11742,16 @@ pub(crate) async fn cascade_update_model_provider(
         .await
         .map_err(|e| AcpError::protocol(e.to_string()))?;
 
+    let mut codex_error = None;
     for setting in &dependents {
         let agent_type: AgentType = match serde_json::from_str(&setting.agent_type) {
             Ok(at) => at,
             Err(_) => continue,
         };
+
+        if keeps_own_providers(agent_type) {
+            continue;
+        }
 
         // 1. Update env_json in database (uses agent_env_keys for consistent key names)
         let (url_key, key_key, _) = agent_env_keys(agent_type);
@@ -11634,16 +11790,20 @@ pub(crate) async fn cascade_update_model_provider(
             .await
             .map_err(|e| AcpError::protocol(e.to_string()))?;
 
-        // 2. Update on-disk config files
-        let codex_action = provider_codex_model_action(agent_type, new_model);
-        if let Err(e) = cascade_update_agent_config(
-            agent_type,
-            new_api_url,
-            new_api_key,
-            &model_env,
-            &codex_action,
-            new_model,
-        ) {
+        // 2. Update on-disk config files. Codex's go through the commit
+        // coordinator, which reads the provider's new row (and fetches its
+        // list when that is the source); its failure is reported, after the
+        // other agents are done.
+        if agent_type == AgentType::Codex {
+            let change = crate::commands::codex_catalog::CodexUserChange::reapply(
+                crate::acp::codex_catalog_commit::FetchPolicy::IfNeeded,
+            );
+            if let Err(e) = crate::commands::codex_catalog::commit_user_change(db, &change).await {
+                codex_error = Some(e);
+            }
+        } else if let Err(e) =
+            cascade_update_agent_config(agent_type, new_api_url, new_api_key, &model_env)
+        {
             tracing::warn!(
                 "[ModelProvider] cascade_update_agent_config({agent_type}) failed: {e}, skipping config update"
             );
@@ -11651,7 +11811,10 @@ pub(crate) async fn cascade_update_model_provider(
 
         emit_acp_agents_updated(emitter, "env_updated", Some(agent_type));
     }
-    Ok(())
+    match codex_error {
+        Some(e) => Err(crate::commands::codex_catalog::to_acp_error(e)),
+        None => Ok(()),
+    }
 }
 
 pub async fn acp_preflight_core(
@@ -11925,6 +12088,37 @@ pub struct CatalogModelSelectionInput {
     pub model_id: String,
 }
 
+/// [`build_session_runtime_env`] with an optional conversation selection.
+/// Launch paths that already know the conversation pass its id so the shared
+/// provider selection is validated and projected into the launch environment;
+/// `selection_override` carries a choice the caller knows about but the
+/// database does not yet (a pre-bind draft pick).
+///
+/// `allow_disabled` bypasses only the connection permission gate — Settings
+/// may inspect Pi's local model catalog while the agent is disabled; this
+/// path starts no ACP session and sends no prompt.
+pub(crate) async fn build_session_runtime_env_with_conversation(
+    db: &AppDatabase,
+    agent_type: AgentType,
+    session_id: Option<&str>,
+    data_dir: &Path,
+    conversation_id: Option<i32>,
+    selection_override: Option<&CatalogModelSelectionInput>,
+    allow_disabled: bool,
+) -> Result<BTreeMap<String, String>, AcpError> {
+    build_runtime_env_for_agent(
+        db,
+        agent_type,
+        session_id,
+        data_dir,
+        conversation_id,
+        selection_override,
+        allow_disabled,
+    )
+    .await
+}
+
+
 pub(crate) async fn build_session_runtime_env(
     db: &AppDatabase,
     agent_type: AgentType,
@@ -11937,16 +12131,10 @@ pub(crate) async fn build_session_runtime_env(
     .await
 }
 
-/// [`build_session_runtime_env`] with an optional conversation selection.
-/// Launch paths that already know the conversation pass its id so the shared
-/// provider selection is validated and projected into the launch environment;
-/// `selection_override` carries a choice the caller knows about but the
-/// database does not yet (a pre-bind draft pick).
-///
-/// `allow_disabled` bypasses only the connection permission gate — Settings
-/// may inspect Pi's local model catalog while the agent is disabled; this
-/// path starts no ACP session and sends no prompt.
-pub(crate) async fn build_session_runtime_env_with_conversation(
+/// Settings may inspect Pi's local model catalog while the agent is disabled.
+/// Reuse the exact launch environment, bypassing only the connection permission
+/// gate; this path starts no ACP session and sends no prompt.
+pub(crate) async fn build_runtime_env_for_agent(
     db: &AppDatabase,
     agent_type: AgentType,
     session_id: Option<&str>,
@@ -11972,6 +12160,9 @@ pub(crate) async fn build_session_runtime_env_with_conversation(
     let mut runtime_env =
         build_runtime_env_from_setting(agent_type, setting.as_ref(), local_config_json.as_deref());
     apply_model_provider_env(agent_type, setting.as_ref(), &mut runtime_env, &db.conn).await;
+    if agent_type == AgentType::ClaudeCode {
+        apply_claude_model_picker_env(setting.as_ref(), &mut runtime_env, &db.conn).await;
+    }
     // `apply_model_provider_env` writes this agent's generic credential trio —
     // for cline that is `CLINE_BASE_URL`/`CLINE_API_KEY`/`CLINE_MODEL` — so a
     // model-provider binding left over from a BYO setup would put a key back
@@ -12137,6 +12328,17 @@ pub(crate) fn fingerprint_config(
     if let Some(native) = load_agent_local_config_json(agent_type) {
         hasher.update(native.as_bytes());
     }
+    // OpenCode 2 reads provider credentials from its database when a process
+    // starts, and a running `opencode acp` never sees one changed after that.
+    // codeg changes them only through its settings (see
+    // `commands::opencode_credentials`), which bumps this counter, so a
+    // session started before a change reads as restart-required.
+    if agent_type == AgentType::OpenCode {
+        hasher.update(b"\x01opencode_credentials\x01");
+        hasher.update(
+            crate::commands::opencode_credentials::credential_epoch().to_le_bytes(),
+        );
+    }
     // Grok's native config (~/.grok/config.toml) is not exposed via
     // `agent_local_config_path` — it's edited through the Grok settings panel
     // (model default, reasoning effort, mcp servers, …). Fold it into the
@@ -12275,7 +12477,6 @@ pub(crate) async fn acp_update_agent_preferences_and_refresh(
     enabled: bool,
     env: BTreeMap<String, String>,
     config_json: Option<String>,
-    opencode_auth_json: Option<String>,
     codex_auth_json: Option<String>,
     codex_config_toml: Option<String>,
     db: &AppDatabase,
@@ -12288,7 +12489,6 @@ pub(crate) async fn acp_update_agent_preferences_and_refresh(
         enabled,
         env,
         config_json,
-        opencode_auth_json,
         codex_auth_json,
         codex_config_toml,
         db,
@@ -12962,7 +13162,12 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
             .and_then(|s| serde_json::from_str::<BTreeMap<String, String>>(s).ok())
             .unwrap_or_default();
         let local_config_json = load_agent_local_config_json(agent_type);
-        if let Some(raw_local_config) = local_config_json.as_deref() {
+        // Not for OpenCode, whose local config is its own file (see
+        // `build_runtime_env_from_setting`).
+        if let Some(raw_local_config) = local_config_json
+            .as_deref()
+            .filter(|_| agent_type != AgentType::OpenCode)
+        {
             if let Ok(local_cfg) = serde_json::from_str::<AgentRuntimeConfig>(raw_local_config) {
                 for (key, value) in local_cfg.env {
                     let trimmed = value.trim();
@@ -12971,16 +13176,18 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
                     }
                     env.insert(key, trimmed.to_string());
                 }
-                let (api_base_url_key, api_key_key, model_key) = agent_env_keys(agent_type);
-                if let Some(value) = trim_non_empty(local_cfg.api_base_url) {
-                    env.insert(api_base_url_key.to_string(), value);
-                }
-                if let Some(value) = trim_non_empty(local_cfg.api_key) {
-                    env.insert(api_key_key.to_string(), value);
-                }
-                if agent_type != AgentType::ClaudeCode {
-                    if let Some(value) = trim_non_empty(local_cfg.model) {
-                        env.insert(model_key.to_string(), value);
+                if agent_type != AgentType::MiniMaxCode {
+                    let (api_base_url_key, api_key_key, model_key) = agent_env_keys(agent_type);
+                    if let Some(value) = trim_non_empty(local_cfg.api_base_url) {
+                        env.insert(api_base_url_key.to_string(), value);
+                    }
+                    if let Some(value) = trim_non_empty(local_cfg.api_key) {
+                        env.insert(api_key_key.to_string(), value);
+                    }
+                    if agent_type != AgentType::ClaudeCode {
+                        if let Some(value) = trim_non_empty(local_cfg.model) {
+                            env.insert(model_key.to_string(), value);
+                        }
                     }
                 }
             }
@@ -12999,11 +13206,6 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
         }
         let codex_auth_json = if agent_type == AgentType::Codex {
             load_codex_auth_json_raw()
-        } else {
-            None
-        };
-        let opencode_auth_json = if agent_type == AgentType::OpenCode {
-            load_opencode_auth_json_raw()
         } else {
             None
         };
@@ -13063,6 +13265,20 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
         // Parsed scalar settings backing the Cursor panel's structured controls
         // (approval mode / sandbox / permission rules); an absent config file
         // still yields defaults so the panel renders its editors.
+        // The `/model` picker ids kept for an unbound Claude panel; a bound
+        // provider's own are in its model JSON, which the page already has.
+        let claude_model_picker = if agent_type == AgentType::ClaudeCode {
+            crate::db::service::app_metadata_service::get_value(
+                &db.conn,
+                crate::acp::claude_model_picker::METADATA_KEY,
+            )
+            .await
+            .ok()
+            .flatten()
+            .map(|raw| crate::acp::claude_model_picker::decode(&raw))
+        } else {
+            None
+        };
         let cursor_settings = if agent_type == AgentType::Cursor {
             Some(parse_cursor_settings(
                 cursor_cli_config_json.as_deref().unwrap_or(""),
@@ -13106,7 +13322,6 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
             config_json,
             config_file_path: agent_local_config_path(agent_type)
                 .map(|path| path.display().to_string()),
-            opencode_auth_json,
             codex_auth_json,
             codex_config_toml,
             codex_sandbox_settings,
@@ -13117,7 +13332,8 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
             grok_settings,
             cursor_cli_config_json,
             cursor_settings,
-            model_provider_id: setting.as_ref().and_then(|m| m.model_provider_id),
+            claude_model_picker,
+            model_provider_id: setting.and_then(|m| m.model_provider_id),
             model_source: setting
                 .as_ref()
                 .map(|m| m.model_source.clone())
@@ -13249,7 +13465,6 @@ pub(crate) async fn acp_update_agent_preferences_core(
     enabled: bool,
     env: BTreeMap<String, String>,
     config_json: Option<String>,
-    opencode_auth_json: Option<String>,
     codex_auth_json: Option<String>,
     codex_config_toml: Option<String>,
     db: &AppDatabase,
@@ -13274,7 +13489,12 @@ pub(crate) async fn acp_update_agent_preferences_core(
             Some(trimmed.to_string())
         }
     });
-    if let Some(raw) = config_json.as_deref() {
+    // OpenCode's file may carry comments and trailing commas; its own branch
+    // below validates it the way OpenCode parses it.
+    if let Some(raw) = config_json
+        .as_deref()
+        .filter(|_| agent_type != AgentType::OpenCode)
+    {
         let parsed = serde_json::from_str::<serde_json::Value>(raw)
             .map_err(|e| AcpError::protocol(format!("invalid config_json: {e}")))?;
         if !parsed.is_object() {
@@ -13284,34 +13504,36 @@ pub(crate) async fn acp_update_agent_preferences_core(
         }
     }
 
-    let current = agent_setting_service::get_by_agent_type(&db.conn, agent_type)
-        .await
-        .map_err(|e| AcpError::protocol(e.to_string()))?;
-    let patch = agent_setting_service::AgentSettingsUpdate {
-        enabled,
-        env_json,
-        model_provider_id: None,
-        model_source: current
-            .map(|m| m.model_source)
-            .unwrap_or_else(|| "native".to_string()),
-    };
-    agent_setting_service::update(&db.conn, agent_type, patch)
+    // Preferences are not a binding: the model provider column is left alone
+    // (binding and unbinding go through `acp_update_agent_env_core`).
+    agent_setting_service::update_preferences(&db.conn, agent_type, enabled, env_json)
         .await
         .map_err(|e| AcpError::protocol(e.to_string()))?;
 
     if agent_type == AgentType::Codex {
+        // Through the coordinator like every codex write, so the keys codeg
+        // manages are recomputed rather than taken from the submitted text.
         if codex_auth_json.is_some() || codex_config_toml.is_some() {
-            persist_codex_native_config_files(
-                codex_auth_json.as_deref(),
-                codex_config_toml.as_deref(),
-            )?;
+            let change = crate::commands::codex_catalog::CodexUserChange {
+                panel_intent: None,
+                toml_base: codex_config_toml,
+                toml_baseline: None,
+                sandbox: None,
+                auth_text: codex_auth_json,
+                fetch: crate::acp::codex_catalog_commit::FetchPolicy::IfNeeded,
+            };
+            crate::commands::codex_catalog::commit_user_change(db, &change)
+                .await
+                .map_err(crate::commands::codex_catalog::to_acp_error)?;
         }
         emit_acp_agents_updated(emitter, "preferences_updated", Some(agent_type));
         return Ok(());
     }
 
     if agent_type == AgentType::OpenCode {
-        persist_opencode_native_config(opencode_auth_json.as_deref(), config_json.as_deref())?;
+        if let Some(raw) = config_json.as_deref() {
+            persist_opencode_config_text(raw)?;
+        }
         emit_acp_agents_updated(emitter, "preferences_updated", Some(agent_type));
         return Ok(());
     }
@@ -13351,7 +13573,6 @@ pub async fn acp_update_agent_preferences(
     enabled: bool,
     env: BTreeMap<String, String>,
     config_json: Option<String>,
-    opencode_auth_json: Option<String>,
     codex_auth_json: Option<String>,
     codex_config_toml: Option<String>,
     manager: State<'_, ConnectionManager>,
@@ -13369,7 +13590,6 @@ pub async fn acp_update_agent_preferences(
         enabled,
         env,
         config_json,
-        opencode_auth_json,
         codex_auth_json,
         codex_config_toml,
         &db,
@@ -13400,15 +13620,8 @@ pub(crate) async fn acp_update_agent_env_core(
 
     // If a provider is selected, the provider's model field is authoritative:
     // each relevant env key is set when the provider has a value and cleared
-    // (removed) when empty. Codex's root `model` in config.toml is handled the
-    // same way.
+    // (removed) when empty. Codex's own files follow the binding below.
     let mut merged_env = env;
-    let mut codex_action = CodexModelAction::NoOp;
-    // When a Codex provider is bound, capture its structured model list so we can
-    // regenerate the `model_catalog_json` catalog + root `model` after the DB
-    // write. `Some(_)` means "codex provider bound"; the inner option is the
-    // provider's stored model value.
-    let mut codex_bound_model: Option<Option<String>> = None;
     // When a Claude provider is bound, capture the inputs to also rewrite the
     // on-disk config.env below. Claude's model fields live in config.env, which
     // the runtime overlays OVER db env_json (see `build_runtime_env_from_setting`),
@@ -13418,6 +13631,16 @@ pub(crate) async fn acp_update_agent_env_core(
     // provider-edit cascade.
     let mut claude_local_cascade: Option<(String, String, BTreeMap<String, Option<String>>)> = None;
     if let Some(pid) = model_provider_id {
+        // MiniMax Code keeps its own login and providers, and launches with
+        // nothing but its explicit env (see `build_runtime_env_from_setting`).
+        // A bound provider's model would reach it anyway, as the OPENAI_MODEL
+        // that `parse_provider_model` falls back to. OpenCode keeps its
+        // providers in its own config and credential store.
+        if keeps_own_providers(agent_type) {
+            return Err(AcpError::protocol(format!(
+                "{agent_type} uses its own provider configuration; model provider {pid} cannot be bound to it"
+            )));
+        }
         let provider = crate::db::service::model_provider_service::get_by_id(&db.conn, pid)
             .await
             .map_err(|e| AcpError::protocol(e.to_string()))?
@@ -13452,14 +13675,9 @@ pub(crate) async fn acp_update_agent_env_core(
                 }
             }
         }
-        codex_action = provider_codex_model_action(agent_type, provider.model.as_deref());
-        // Codex's on-disk config (catalog + root model) is regenerated from the
-        // provider's structured model list by `apply_codex_catalog_and_model`
+        // Codex's files follow the binding through the commit coordinator
         // below; Gemini's analogous config.env gap is pre-existing and out of
         // scope here. Only Claude needs the local-config cascade on bind.
-        if agent_type == AgentType::Codex {
-            codex_bound_model = Some(provider.model.clone());
-        }
         if agent_type == AgentType::ClaudeCode {
             claude_local_cascade = Some((
                 provider.api_url.clone(),
@@ -13488,124 +13706,26 @@ pub(crate) async fn acp_update_agent_env_core(
     // custom model option) cannot survive a bind/rebind via any save path. `None`
     // entries become JSON-null and are removed by `merge_json_values`.
     if let Some((api_url, api_key, model_env)) = claude_local_cascade {
-        if let Err(e) = cascade_update_agent_config(
-            agent_type,
-            &api_url,
-            &api_key,
-            &model_env,
-            &CodexModelAction::NoOp,
-            None,
-        ) {
+        if let Err(e) = cascade_update_agent_config(agent_type, &api_url, &api_key, &model_env) {
             eprintln!(
                 "[acp_update_agent_env] cascade_update_agent_config({agent_type}) failed: {e}"
             );
         }
     }
 
-    if let Some(model_raw) = codex_bound_model {
-        // Codex provider bound: regenerate the catalog + config.toml keys from
-        // the provider's full model list (REPLACE semantics require the whole
-        // list every time).
-        if let Err(e) = apply_codex_catalog_and_model(model_raw.as_deref()) {
-            tracing::error!("[acp_update_agent_env] apply_codex_catalog_and_model failed: {e}");
-        }
-    } else if let Err(e) = apply_codex_root_model_action(&codex_action) {
-        tracing::error!("[acp_update_agent_env] apply_codex_root_model_action failed: {e}");
+    // Codex bound to a provider: its endpoint, key and model list reach
+    // codex's files, the list fetched from the provider when it is the
+    // source. Unbinding leaves them to the panel save that follows.
+    if agent_type == AgentType::Codex && model_provider_id.is_some() {
+        let change = crate::commands::codex_catalog::CodexUserChange::reapply(
+            crate::acp::codex_catalog_commit::FetchPolicy::IfNeeded,
+        );
+        crate::commands::codex_catalog::commit_user_change(db, &change)
+            .await
+            .map_err(crate::commands::codex_catalog::to_acp_error)?;
     }
 
     emit_acp_agents_updated(emitter, "env_updated", Some(agent_type));
-    Ok(())
-}
-
-/// Apply a `CodexModelAction` to the `model` field at the root of
-/// `~/.codex/config.toml`, preserving everything else.
-fn apply_codex_root_model_action(action: &CodexModelAction) -> Result<(), AcpError> {
-    if matches!(action, CodexModelAction::NoOp) {
-        return Ok(());
-    }
-    let config_path = codex_config_toml_path();
-    let mut toml_value = if config_path.exists() {
-        fs::read_to_string(&config_path)
-            .ok()
-            .and_then(|raw| raw.parse::<toml::Value>().ok())
-            .filter(|v| v.is_table())
-            .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
-    } else {
-        toml::Value::Table(toml::map::Map::new())
-    };
-    let table = toml_value
-        .as_table_mut()
-        .ok_or_else(|| AcpError::protocol("codex config root must be a TOML table"))?;
-    match action {
-        CodexModelAction::Set(model) => {
-            table.insert("model".to_string(), toml::Value::String(model.clone()));
-        }
-        CodexModelAction::Clear => {
-            table.remove("model");
-        }
-        CodexModelAction::NoOp => unreachable!(),
-    }
-    let toml_str =
-        toml::to_string_pretty(&toml_value).map_err(|e| AcpError::protocol(e.to_string()))?;
-    persist_codex_native_config_files(None, Some(&toml_str))?;
-    Ok(())
-}
-
-/// Codex: generate the `model_catalog_json` catalog file from a structured
-/// model list and point `~/.codex/config.toml` at it (relative to `CODEX_HOME`),
-/// plus set the root `model` to the default slug. An empty/blank list removes
-/// both keys and the generated files (codex falls back to its default catalog).
-///
-/// This reflows config.toml through the `toml` crate — the same behavior the
-/// provider bind / cascade paths already have. The comment-preserving agent
-/// panel path instead patches the config.toml text on the frontend and only
-/// asks the backend to (re)write the catalog *files* (see
-/// `acp_update_agent_config_core`).
-fn apply_codex_catalog_and_model(raw: Option<&str>) -> Result<(), AcpError> {
-    let snapshot = crate::acp::codex_catalog_source::cached_or_bundled_snapshot();
-    let injection = crate::acp::codex_model_catalog::write_catalog_files(
-        raw.unwrap_or_default(),
-        &codex_home_dir(),
-        &snapshot,
-    )
-    .map_err(|e| AcpError::protocol(e.to_string()))?;
-
-    let config_path = codex_config_toml_path();
-    let mut toml_value = if config_path.exists() {
-        fs::read_to_string(&config_path)
-            .ok()
-            .and_then(|raw| raw.parse::<toml::Value>().ok())
-            .filter(|v| v.is_table())
-            .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
-    } else {
-        toml::Value::Table(toml::map::Map::new())
-    };
-    let table = toml_value
-        .as_table_mut()
-        .ok_or_else(|| AcpError::protocol("codex config root must be a TOML table"))?;
-    match &injection {
-        Some(inj) => {
-            table.insert(
-                "model_catalog_json".to_string(),
-                toml::Value::String(inj.catalog_rel.to_string()),
-            );
-            match &inj.default_model {
-                Some(model) => {
-                    table.insert("model".to_string(), toml::Value::String(model.clone()));
-                }
-                None => {
-                    table.remove("model");
-                }
-            }
-        }
-        None => {
-            table.remove("model_catalog_json");
-            table.remove("model");
-        }
-    }
-    let toml_str =
-        toml::to_string_pretty(&toml_value).map_err(|e| AcpError::protocol(e.to_string()))?;
-    persist_codex_native_config_files(None, Some(&toml_str))?;
     Ok(())
 }
 
@@ -13665,51 +13785,20 @@ pub async fn acp_update_agent_env(
     .await
 }
 
-/// Decide what to write to OpenCode's `auth.json`. `None` (caller passed no
-/// auth payload) leaves the file untouched. An explicitly empty payload becomes
-/// `{}` so clearing the last credential truncates the file instead of being
-/// skipped — otherwise a stale key would survive on disk and the disconnected
-/// provider would reappear after reload.
-fn opencode_auth_payload_to_write(raw: Option<&str>) -> Option<String> {
-    let trimmed = raw?.trim();
-    Some(if trimmed.is_empty() {
-        "{}".to_string()
-    } else {
-        trimmed.to_string()
-    })
-}
-
-/// Persist OpenCode's native files (`auth.json` + `opencode.json`) for a
-/// config/preferences save. Shared by both the config and preferences commands
-/// so the empty-auth handling can't drift between the two exposed paths. An
-/// explicitly empty auth payload truncates `auth.json` to `{}`; `None` leaves
-/// each file untouched.
-fn persist_opencode_native_config(
-    opencode_auth_json: Option<&str>,
-    config_json: Option<&str>,
-) -> Result<(), AcpError> {
-    if let Some(auth) = opencode_auth_payload_to_write(opencode_auth_json) {
-        persist_opencode_auth_json(&auth)?;
-    }
-    if let Some(raw) = config_json {
-        persist_agent_local_config_json(AgentType::OpenCode, Some(raw))?;
-    }
-    Ok(())
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn acp_update_agent_config_core(
     agent_type: AgentType,
     config_json: Option<String>,
-    opencode_auth_json: Option<String>,
     codex_auth_json: Option<String>,
     codex_config_toml: Option<String>,
+    codex_config_toml_baseline: Option<String>,
     codex_model_catalog: Option<String>,
     codex_sandbox: Option<CodexSandboxStructuredConfig>,
     grok_config_toml: Option<String>,
     grok_structured: Option<GrokStructuredConfig>,
     cursor_cli_config_json: Option<String>,
     cursor_structured: Option<crate::acp::types::CursorStructuredConfig>,
+    db: &AppDatabase,
     emitter: &EventEmitter,
 ) -> Result<(), AcpError> {
     let config_json = config_json.and_then(|raw| {
@@ -13720,7 +13809,12 @@ pub(crate) async fn acp_update_agent_config_core(
             Some(trimmed.to_string())
         }
     });
-    if let Some(raw) = config_json.as_deref() {
+    // OpenCode's file may carry comments and trailing commas; its own branch
+    // below validates it the way OpenCode parses it.
+    if let Some(raw) = config_json
+        .as_deref()
+        .filter(|_| agent_type != AgentType::OpenCode)
+    {
         let parsed = serde_json::from_str::<serde_json::Value>(raw)
             .map_err(|e| AcpError::protocol(format!("invalid config_json: {e}")))?;
         if !parsed.is_object() {
@@ -13731,47 +13825,29 @@ pub(crate) async fn acp_update_agent_config_core(
     }
 
     if agent_type == AgentType::Codex {
-        // Mirrors the Grok/Cursor flow. The advanced raw editor sends the whole
-        // file (`codex_config_toml = Some(text)`), so that text is the verbatim
-        // base; the sandbox/approval controls send only a patch, merged onto the
-        // CURRENT on-disk config (read fresh, failing loudly on a real read
-        // error) so a stale in-memory snapshot can't drop keys written by codex
-        // itself or another window since the panel opened.
-        if codex_auth_json.is_some() || codex_config_toml.is_some() || codex_sandbox.is_some() {
-            let merged_toml = match &codex_sandbox {
-                Some(sandbox) => {
-                    let base = match codex_config_toml {
-                        Some(text) => text,
-                        None => read_codex_config_or_empty()?,
-                    };
-                    Some(apply_codex_sandbox_config(&base, sandbox)?)
-                }
-                None => codex_config_toml,
+        // Every write to codex's files goes through the commit coordinator,
+        // which owns the keys codeg manages (`model_catalog_json`, and root
+        // `model` while it publishes a catalog) and, with a provider bound,
+        // the endpoint and key. The advanced raw editor sends the whole file,
+        // checked against the text it was loaded from (`…_baseline`) so a
+        // hand edit of a managed key is refused rather than lost; the sandbox
+        // / approval controls send only a patch, applied to the file on disk.
+        if codex_auth_json.is_some()
+            || codex_config_toml.is_some()
+            || codex_sandbox.is_some()
+            || codex_model_catalog.is_some()
+        {
+            let change = crate::commands::codex_catalog::CodexUserChange {
+                panel_intent: codex_model_catalog,
+                toml_base: codex_config_toml,
+                toml_baseline: codex_config_toml_baseline,
+                sandbox: codex_sandbox,
+                auth_text: codex_auth_json,
+                fetch: crate::acp::codex_catalog_commit::FetchPolicy::IfNeeded,
             };
-            persist_codex_native_config_files(codex_auth_json.as_deref(), merged_toml.as_deref())?;
-        }
-        // The frontend has already patched config.toml's `model_catalog_json` +
-        // root `model` into `codex_config_toml` (comment-preserving text patch);
-        // the backend only (re)writes the generated catalog *files* here.
-        if let Some(raw) = codex_model_catalog.as_deref() {
-            let snapshot = crate::acp::codex_catalog_source::cached_or_bundled_snapshot();
-            match crate::acp::codex_model_catalog::write_catalog_files(
-                raw,
-                &codex_home_dir(),
-                &snapshot,
-            ) {
-                // Catalog files gone (nothing deviates from codex's own list any
-                // more) — the reference must go with them, or codex fails to
-                // start on a `model_catalog_json` pointing at a missing file.
-                // The frontend only patches that key when the user *edits* the
-                // model editor, so a save that merely lets a stale removal
-                // dissolve would otherwise leave the two out of sync.
-                Ok(None) => drop_codex_catalog_reference()?,
-                Ok(Some(_)) => {}
-                Err(e) => {
-                    tracing::error!("[acp_update_agent_config] write codex catalog failed: {e}")
-                }
-            }
+            crate::commands::codex_catalog::commit_user_change(db, &change)
+                .await
+                .map_err(crate::commands::codex_catalog::to_acp_error)?;
         }
         emit_acp_agents_updated(emitter, "config_updated", Some(agent_type));
         return Ok(());
@@ -13839,7 +13915,9 @@ pub(crate) async fn acp_update_agent_config_core(
     }
 
     if agent_type == AgentType::OpenCode {
-        persist_opencode_native_config(opencode_auth_json.as_deref(), config_json.as_deref())?;
+        if let Some(raw) = config_json.as_deref() {
+            persist_opencode_config_text(raw)?;
+        }
         emit_acp_agents_updated(emitter, "config_updated", Some(agent_type));
         return Ok(());
     }
@@ -13872,9 +13950,9 @@ pub(crate) async fn acp_update_agent_config_core(
 pub(crate) async fn acp_update_agent_config_and_refresh(
     agent_type: AgentType,
     config_json: Option<String>,
-    opencode_auth_json: Option<String>,
     codex_auth_json: Option<String>,
     codex_config_toml: Option<String>,
+    codex_config_toml_baseline: Option<String>,
     codex_model_catalog: Option<String>,
     codex_sandbox: Option<CodexSandboxStructuredConfig>,
     grok_config_toml: Option<String>,
@@ -13889,15 +13967,16 @@ pub(crate) async fn acp_update_agent_config_and_refresh(
     acp_update_agent_config_core(
         agent_type,
         config_json,
-        opencode_auth_json,
         codex_auth_json,
         codex_config_toml,
+        codex_config_toml_baseline,
         codex_model_catalog,
         codex_sandbox,
         grok_config_toml,
         grok_structured,
         cursor_cli_config_json,
         cursor_structured,
+        db,
         emitter,
     )
     .await?;
@@ -13917,9 +13996,9 @@ pub(crate) async fn acp_update_agent_config_and_refresh(
 pub async fn acp_update_agent_config(
     agent_type: AgentType,
     config_json: Option<String>,
-    opencode_auth_json: Option<String>,
     codex_auth_json: Option<String>,
     codex_config_toml: Option<String>,
+    codex_config_toml_baseline: Option<String>,
     codex_model_catalog: Option<String>,
     codex_sandbox: Option<CodexSandboxStructuredConfig>,
     grok_config_toml: Option<String>,
@@ -13939,9 +14018,9 @@ pub async fn acp_update_agent_config(
     acp_update_agent_config_and_refresh(
         agent_type,
         config_json,
-        opencode_auth_json,
         codex_auth_json,
         codex_config_toml,
+        codex_config_toml_baseline,
         codex_model_catalog,
         codex_sandbox,
         grok_config_toml,
@@ -13977,6 +14056,24 @@ pub async fn acp_update_hermes_config(
         },
         &emitter,
     )
+}
+
+/// Keep the `/model` picker ids of an unbound Claude agent. Desktop command;
+/// the web handler calls `acp_update_claude_model_picker_core` directly.
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_update_claude_model_picker(
+    models: Vec<String>,
+    manager: State<'_, ConnectionManager>,
+    db: State<'_, AppDatabase>,
+    app: tauri::AppHandle,
+) -> Result<usize, AcpError> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    acp_update_claude_model_picker_core(models, &db, &manager, &app_data_dir).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -14032,18 +14129,6 @@ pub async fn acp_update_kimi_code_config(
     .await
 }
 
-/// List the models an API key + endpoint can access (validates the key and
-/// populates the Kimi settings model picker). Desktop command; the web handler
-/// calls `acp_fetch_kimi_models_core` directly.
-#[cfg(feature = "tauri-runtime")]
-#[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn acp_fetch_kimi_models(
-    base_url: String,
-    api_key: String,
-) -> Result<Vec<String>, AcpError> {
-    acp_fetch_kimi_models_core(&base_url, &api_key).await
-}
-
 /// Apply a structured Pi config update, writing pi's native `settings.json`
 /// (provider/model/thinking level) and `auth.json` (when an API key is given).
 /// Desktop command; the web handler calls `acp_update_pi_config_core` directly.
@@ -14058,6 +14143,7 @@ pub async fn acp_update_pi_config(
     custom_base_url: Option<String>,
     custom_api: Option<String>,
     model_reasoning: Option<PiModelReasoningSpec>,
+    custom_models: Option<Vec<String>>,
     db: State<'_, AppDatabase>,
     app: tauri::AppHandle,
 ) -> Result<(), AcpError> {
@@ -14071,6 +14157,7 @@ pub async fn acp_update_pi_config(
             custom_base_url,
             custom_api,
             model_reasoning,
+            custom_models,
         },
         &db,
         &emitter,
@@ -14723,6 +14810,14 @@ pub(crate) async fn acp_detect_agent_local_version_core(
         // wake `useAcpAgents()` so the composer stops claiming it's missing.
         if previous.as_deref() != Some(version.as_str()) {
             emit_acp_agents_updated(emitter, "local_version_detected", Some(agent_type));
+            // codex-acp changed outside codeg: the codex it drives may have
+            // too, and the provider may answer that version with another list.
+            if agent_type == AgentType::Codex && previous.is_some() {
+                crate::acp::codex_runtime::invalidate();
+                crate::acp::codex_catalog_refresh::kick(
+                    crate::acp::codex_catalog_refresh::Kick::AdapterChanged,
+                );
+            }
         }
         return Ok(Some(version));
     }
@@ -14795,6 +14890,36 @@ pub async fn acp_fetch_agent_latest_release(
     agent_type: AgentType,
 ) -> Result<Option<latest_release::AgentLatestRelease>, AcpError> {
     acp_fetch_agent_latest_release_core(agent_type).await
+}
+
+/// After codeg installed or upgraded codex-acp: a new codex-acp can drive a
+/// codex with another official model list, and a provider may answer its
+/// version with another list, so what codeg published must follow. Never
+/// fails the install: a refresh that fails is logged, and the scheduler
+/// tries again.
+async fn refresh_codex_catalog_after_install(
+    emitter: &EventEmitter,
+    task_id: &str,
+    refresh: impl std::future::Future<
+        Output = Result<
+            crate::acp::codex_catalog_refresh::RefreshReport,
+            crate::acp::codex_catalog_commit::CatalogError,
+        >,
+    >,
+) {
+    emit_agent_install_event(
+        emitter,
+        task_id,
+        AgentInstallEventKind::Log,
+        "Refreshing the Codex model catalog...",
+    );
+    match refresh.await {
+        Ok(report) => tracing::info!(
+            "[acp] codex model catalog after install: {:?}",
+            report.outcome
+        ),
+        Err(e) => tracing::warn!("[acp] codex model catalog refresh failed: {e}"),
+    }
 }
 
 pub(crate) async fn acp_prepare_npx_agent_core(
@@ -14926,16 +15051,13 @@ pub(crate) async fn acp_prepare_npx_agent_core(
             .await
             .map_err(|e| AcpError::protocol(e.to_string()))?;
 
-            // A new codex-acp can drive a codex with a different official
-            // model list; codeg's generated catalog must follow it.
             if agent_type == AgentType::Codex {
-                emit_agent_install_event(
+                refresh_codex_catalog_after_install(
                     emitter,
                     &task_id,
-                    AgentInstallEventKind::Log,
-                    "Refreshing the Codex model catalog...",
-                );
-                resync_codex_generated_catalog().await;
+                    crate::acp::codex_catalog_refresh::after_install(),
+                )
+                .await;
             }
             emit_acp_agents_updated(emitter, "npx_prepared", Some(agent_type));
             Ok(resolved)
@@ -15274,14 +15396,13 @@ pub async fn acp_list_agent_skills(
 
     if let Some(workspace) = workspace_path.as_deref().map(str::trim) {
         if !workspace.is_empty() {
-            // Same base the WRITE path resolves through `scoped_skill_dirs` —
-            // for DeepSeek and Kimi Code that is the repo root, not the
-            // workspace. Joining onto the workspace here instead would make a
-            // skill saved from a nested workspace vanish from the list that is
-            // meant to show it.
-            let base = project_skill_base(agent_type, workspace);
-            for relative in &spec.project_rel_dirs {
-                let project_dir = base.join(relative);
+            // The same directories, in the same order, that the WRITE path
+            // resolves through `scoped_skill_dirs` — for DeepSeek and Kimi Code
+            // under the repo root, not the workspace, and for ZCode under every
+            // folder up to it. Listing the workspace's own dirs instead would
+            // make a skill saved from a nested workspace vanish from the list
+            // that is meant to show it.
+            for project_dir in project_skill_dirs(agent_type, &spec, workspace) {
                 locations.push(AgentSkillLocation {
                     scope: AgentSkillScope::Project,
                     path: project_dir.to_string_lossy().to_string(),
@@ -15440,12 +15561,15 @@ pub async fn acp_delete_agent_skill(
     Ok(())
 }
 
-pub(crate) async fn opencode_list_plugins_core() -> Result<PluginCheckSummary, AcpError> {
-    opencode_plugins::check_opencode_plugins(None).map_err(AcpError::Protocol)
+/// The plugins OpenCode's global config declares (`plugins`, plus 1.x
+/// `plugin` entries). OpenCode 2 installs package plugins itself when a
+/// session starts, so this lists declarations; it checks no cache.
+pub(crate) async fn opencode_list_plugins_core() -> Result<PluginList, AcpError> {
+    opencode_plugins::list_plugins().map_err(AcpError::Protocol)
 }
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn opencode_list_plugins() -> Result<PluginCheckSummary, AcpError> {
+pub async fn opencode_list_plugins() -> Result<PluginList, AcpError> {
     opencode_list_plugins_core().await
 }
 
@@ -15486,38 +15610,25 @@ pub async fn codex_bundled_catalog(
     Ok(codex_bundled_catalog_core(force_refresh.unwrap_or(false)).await)
 }
 
-pub(crate) async fn opencode_install_plugins_core(
-    names: Option<Vec<String>>,
-    task_id: String,
-    emitter: &EventEmitter,
-) -> Result<(), AcpError> {
-    opencode_plugins::install_missing_plugins(names, task_id, emitter)
-        .await
-        .map_err(AcpError::Protocol)
-}
-
-#[cfg(feature = "tauri-runtime")]
-#[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn opencode_install_plugins(
-    names: Option<Vec<String>>,
-    task_id: String,
-    app: tauri::AppHandle,
-) -> Result<(), AcpError> {
-    let emitter = EventEmitter::Tauri(app);
-    opencode_install_plugins_core(names, task_id, &emitter).await
-}
-
-pub(crate) async fn opencode_uninstall_plugin_core(
-    name: String,
-) -> Result<PluginCheckSummary, AcpError> {
-    opencode_plugins::uninstall_plugin(name)
-        .await
-        .map_err(AcpError::Protocol)
+/// Declare `spec` in OpenCode's `plugins`; OpenCode installs a package plugin
+/// the next time a session starts.
+pub(crate) async fn opencode_add_plugin_core(spec: String) -> Result<PluginList, AcpError> {
+    opencode_plugins::add_plugin(&spec).map_err(AcpError::Protocol)
 }
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn opencode_uninstall_plugin(name: String) -> Result<PluginCheckSummary, AcpError> {
-    opencode_uninstall_plugin_core(name).await
+pub async fn opencode_add_plugin(spec: String) -> Result<PluginList, AcpError> {
+    opencode_add_plugin_core(spec).await
+}
+
+/// Remove every declaration of `spec` from OpenCode's plugin lists.
+pub(crate) async fn opencode_remove_plugin_core(spec: String) -> Result<PluginList, AcpError> {
+    opencode_plugins::remove_plugin(&spec).map_err(AcpError::Protocol)
+}
+
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn opencode_remove_plugin(spec: String) -> Result<PluginList, AcpError> {
+    opencode_remove_plugin_core(spec).await
 }
 
 // ─── Codex Device Code OAuth ───
@@ -15738,8 +15849,618 @@ pub(crate) async fn codex_poll_device_code_core(
 }
 
 #[cfg(test)]
+mod opencode_skills_tests {
+    use super::*;
+
+    fn write_skill(root: &Path, id: &str, body: &str) {
+        fs::create_dir_all(root.join(id)).unwrap();
+        fs::write(root.join(id).join("SKILL.md"), body).unwrap();
+    }
+
+    /// OpenCode 2 reads skills under its own config directory — which follows
+    /// `OPENCODE_CONFIG_DIR`, then `XDG_CONFIG_HOME` — from both `skills/` and
+    /// `skill/`, besides the shared `~/.agents/skills`; in a project from
+    /// `.opencode/skills`, `.opencode/skill` and `.agents/skills`.
+    #[test]
+    fn opencode_skill_roots_follow_its_config_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (xdg, own) = (tmp.path().join("xdg"), tmp.path().join("own"));
+        let shared = home_dir_or_default().join(".agents").join("skills");
+        temp_env::with_vars(
+            [
+                ("OPENCODE_CONFIG_DIR", None::<&Path>),
+                ("XDG_CONFIG_HOME", Some(xdg.as_path())),
+            ],
+            || {
+                let spec = skill_storage_spec(AgentType::OpenCode).expect("OpenCode has a store");
+                assert_eq!(spec.kind, SkillStorageKind::SkillDirectoryOrMarkdownFile);
+                assert_eq!(
+                    spec.global_dirs,
+                    vec![
+                        xdg.join("opencode").join("skills"),
+                        xdg.join("opencode").join("skill"),
+                        shared.clone(),
+                    ]
+                );
+                assert_eq!(
+                    spec.project_rel_dirs,
+                    vec![".opencode/skills", ".opencode/skill", ".agents/skills"]
+                );
+            },
+        );
+        temp_env::with_vars(
+            [
+                ("OPENCODE_CONFIG_DIR", Some(own.as_path())),
+                ("XDG_CONFIG_HOME", Some(xdg.as_path())),
+            ],
+            || {
+                let spec = skill_storage_spec(AgentType::OpenCode).expect("OpenCode has a store");
+                assert_eq!(
+                    spec.global_dirs,
+                    vec![own.join("skills"), own.join("skill"), shared.clone()]
+                );
+            },
+        );
+    }
+
+    /// Project skills: bundles and flat `<id>.md` files from every directory
+    /// OpenCode reads, and new skills as bundles in `.opencode/skills`.
+    #[tokio::test]
+    async fn opencode_project_skills_take_bundles_and_flat_files_from_each_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().join("repo");
+        let config = tmp.path().join("config");
+        temp_env::async_with_vars([("OPENCODE_CONFIG_DIR", Some(config.as_path()))], async {
+            write_skill(&workspace.join(".opencode/skills"), "bundle", "a bundle");
+            fs::create_dir_all(workspace.join(".opencode/skill")).unwrap();
+            fs::write(workspace.join(".opencode/skill/flat.md"), "a flat file").unwrap();
+            write_skill(&workspace.join(".agents/skills"), "shared", "shared");
+            let ws = workspace.to_string_lossy().into_owned();
+
+            let dirs = scoped_skill_dirs(AgentType::OpenCode, AgentSkillScope::Project, Some(&ws))
+                .unwrap();
+            assert_eq!(
+                dirs,
+                vec![
+                    workspace.join(".opencode/skills"),
+                    workspace.join(".opencode/skill"),
+                    workspace.join(".agents/skills"),
+                ]
+            );
+            let kind = SkillStorageKind::SkillDirectoryOrMarkdownFile;
+            let mut found: Vec<(String, AgentSkillLayout)> = dirs
+                .iter()
+                .flat_map(|dir| list_skills_from_dir(AgentSkillScope::Project, dir, kind).unwrap())
+                .map(|skill| (skill.id, skill.layout))
+                .collect();
+            found.sort_by(|a, b| a.0.cmp(&b.0));
+            assert_eq!(
+                found,
+                vec![
+                    ("bundle".to_string(), AgentSkillLayout::SkillDirectory),
+                    ("flat".to_string(), AgentSkillLayout::MarkdownFile),
+                    ("shared".to_string(), AgentSkillLayout::SkillDirectory),
+                ]
+            );
+
+            let saved = acp_save_agent_skill(
+                AgentType::OpenCode,
+                AgentSkillScope::Project,
+                "new-skill".into(),
+                "---\nname: new-skill\ndescription: Test\n---\nbody".into(),
+                Some(ws.clone()),
+                Some(AgentSkillLayout::SkillDirectory),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                Path::new(&saved.path),
+                workspace.join(".opencode/skills/new-skill")
+            );
+            assert!(workspace
+                .join(".opencode/skills/new-skill/SKILL.md")
+                .is_file());
+
+            // A flat skill is found where it lives and edited in place.
+            let edited = acp_save_agent_skill(
+                AgentType::OpenCode,
+                AgentSkillScope::Project,
+                "flat".into(),
+                "edited".into(),
+                Some(ws),
+                None,
+            )
+            .await
+            .unwrap();
+            assert_eq!(edited.layout, AgentSkillLayout::MarkdownFile);
+            assert_eq!(
+                fs::read_to_string(workspace.join(".opencode/skill/flat.md")).unwrap(),
+                "edited"
+            );
+            assert!(
+                !config.exists(),
+                "project skills never touch the config dir"
+            );
+        })
+        .await;
+    }
+}
+
+#[cfg(test)]
+mod zcode_skills_tests {
+    use super::*;
+
+    fn write_skill(root: &Path, id: &str, body: &str) {
+        fs::create_dir_all(root.join(id)).unwrap();
+        fs::write(root.join(id).join("SKILL.md"), body).unwrap();
+    }
+
+    /// The ZCode runtime reads user skills from the home Node's `os.homedir()`
+    /// names, `HOME` or on Windows `USERPROFILE`, and ignores `ZCODE_HOME`, so
+    /// the managed stores follow that variable and not `ZCODE_HOME`. On
+    /// Windows this also proves `USERPROFILE` wins over the profile folder
+    /// `dirs::home_dir()` would have named.
+    #[test]
+    fn zcode_skill_roots_hang_off_the_os_home_not_zcode_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (home, relocated) = (tmp.path().join("home"), tmp.path().join("relocated"));
+        temp_env::with_vars(
+            [
+                (CHILD_HOME_KEY, Some(&home)),
+                ("ZCODE_HOME", Some(&relocated)),
+            ],
+            || {
+                let spec = skill_storage_spec(AgentType::ZCode).expect("ZCode declares a store");
+                assert_eq!(spec.kind, SkillStorageKind::SkillDirectoryOnly);
+                assert_eq!(
+                    spec.global_dirs,
+                    vec![
+                        home.join(".zcode").join("skills"),
+                        home.join(".agents").join("skills"),
+                    ]
+                );
+                assert_eq!(
+                    spec.project_rel_dirs,
+                    vec![".zcode/skills", ".agents/skills"]
+                );
+            },
+        );
+    }
+
+    /// Node falls back to the account's home only when the variable is unset;
+    /// an empty one is treated the same, since it names no folder to manage.
+    #[test]
+    fn zcode_home_is_the_home_variable_or_the_account_home() {
+        let account = account_home_dir().unwrap_or_else(home_dir_or_default);
+        assert_eq!(node_home_from(None), account);
+        assert_eq!(node_home_from(Some("".into())), account);
+        let pinned = std::env::temp_dir().join("codeg-zcode-home");
+        assert_eq!(node_home_from(Some(pinned.clone().into())), pinned);
+    }
+
+    #[tokio::test]
+    async fn zcode_skills_manage_directory_bundles_in_native_then_shared_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        let native = tmp.path().join(".zcode");
+        let relocated = tmp.path().join("relocated");
+        temp_env::async_with_vars(
+            [
+                (CHILD_HOME_KEY, Some(tmp.path())),
+                ("ZCODE_HOME", Some(relocated.as_path())),
+            ],
+            async {
+                let shared = tmp.path().join(".agents/skills");
+                let native_skills = native.join("skills");
+                write_skill(&native_skills, "duplicate", "native");
+                write_skill(&shared, "duplicate", "shared");
+                write_skill(&shared, "shared-only", "shared only");
+                write_skill(&relocated.join("skills"), "relocated-only", "menu only");
+                fs::write(native_skills.join("flat.md"), "not a directory bundle").unwrap();
+                fs::create_dir_all(native.join("cli")).unwrap();
+                let config = r#"{"skills":{"disabled":{"enable":false}},"other":"preserve"}"#;
+                fs::write(native.join("cli/config.json"), config).unwrap();
+                let plugin = native.join("cli/plugins/cache/market/plugin/1.0.0/skills");
+                write_skill(&plugin, "plugin-owned", "plugin bytes");
+
+                let listed = acp_list_agent_skills(AgentType::ZCode, None).await.unwrap();
+                assert!(listed.supported);
+                assert_eq!(listed.locations[0].path, native_skills.to_string_lossy());
+                let mut ids: Vec<_> = listed.skills.iter().map(|s| s.id.as_str()).collect();
+                ids.sort_unstable();
+                assert_eq!(
+                    ids,
+                    vec!["duplicate", "shared-only"],
+                    "flat files, plugin caches and $ZCODE_HOME/skills stay out"
+                );
+                let duplicate = listed.skills.iter().find(|s| s.id == "duplicate").unwrap();
+                assert_eq!(Path::new(&duplicate.path), native_skills.join("duplicate"));
+
+                let saved = acp_save_agent_skill(
+                    AgentType::ZCode,
+                    AgentSkillScope::Global,
+                    "new-skill".into(),
+                    "---\nname: new-skill\ndescription: Test\n---\nbody".into(),
+                    None,
+                    Some(AgentSkillLayout::MarkdownFile),
+                )
+                .await
+                .unwrap();
+                assert_eq!(saved.layout, AgentSkillLayout::SkillDirectory);
+                assert_eq!(Path::new(&saved.path), native_skills.join("new-skill"));
+                assert!(native_skills.join("new-skill/SKILL.md").is_file());
+                assert!(
+                    !shared.join("new-skill").exists(),
+                    "installs use the native store"
+                );
+                assert!(
+                    !relocated.join("skills/new-skill").exists(),
+                    "installs never follow ZCODE_HOME"
+                );
+                let read = acp_read_agent_skill(
+                    AgentType::ZCode,
+                    AgentSkillScope::Global,
+                    "new-skill".into(),
+                    None,
+                )
+                .await
+                .unwrap();
+                assert!(read.content.ends_with("body"));
+                acp_save_agent_skill(
+                    AgentType::ZCode,
+                    AgentSkillScope::Global,
+                    "new-skill".into(),
+                    "edited".into(),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+                assert_eq!(
+                    fs::read_to_string(native_skills.join("new-skill/SKILL.md")).unwrap(),
+                    "edited"
+                );
+                acp_delete_agent_skill(
+                    AgentType::ZCode,
+                    AgentSkillScope::Global,
+                    "new-skill".into(),
+                    None,
+                )
+                .await
+                .unwrap();
+                assert!(!native_skills.join("new-skill").exists());
+                assert_eq!(
+                    fs::read_to_string(shared.join("duplicate/SKILL.md")).unwrap(),
+                    "shared"
+                );
+                assert_eq!(
+                    fs::read_to_string(native.join("cli/config.json")).unwrap(),
+                    config
+                );
+                assert_eq!(
+                    fs::read_to_string(plugin.join("plugin-owned/SKILL.md")).unwrap(),
+                    "plugin bytes"
+                );
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn zcode_native_skill_crud_does_not_rewrite_cli_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let native = tmp.path().join(".zcode");
+        fs::create_dir_all(native.join("cli")).unwrap();
+        let config = r#"{"skills":{"keep-disabled":{"enable":false}}}"#;
+        fs::write(native.join("cli/config.json"), config).unwrap();
+        temp_env::async_with_vars([(CHILD_HOME_KEY, Some(tmp.path()))], async {
+            let id = "codeg-zcode-crud-fixture";
+            // An existing bundle is saved in place, whatever layout is asked for.
+            write_skill(&native.join("skills"), id, "before");
+            let skill = acp_save_agent_skill(
+                AgentType::ZCode,
+                AgentSkillScope::Global,
+                id.into(),
+                "body".into(),
+                None,
+                Some(AgentSkillLayout::MarkdownFile),
+            )
+            .await
+            .unwrap();
+            assert_eq!(skill.layout, AgentSkillLayout::SkillDirectory);
+            assert_eq!(Path::new(&skill.path), native.join("skills").join(id));
+            let listed = acp_list_agent_skills(AgentType::ZCode, None).await.unwrap();
+            assert!(listed.skills.iter().any(|s| s.id == id));
+            let content =
+                acp_read_agent_skill(AgentType::ZCode, AgentSkillScope::Global, id.into(), None)
+                    .await
+                    .unwrap();
+            assert_eq!(content.content, "body");
+            acp_save_agent_skill(
+                AgentType::ZCode,
+                AgentSkillScope::Global,
+                id.into(),
+                "edited".into(),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                fs::read_to_string(native.join("skills").join(id).join("SKILL.md")).unwrap(),
+                "edited"
+            );
+            acp_delete_agent_skill(AgentType::ZCode, AgentSkillScope::Global, id.into(), None)
+                .await
+                .unwrap();
+            assert!(!native.join("skills").join(id).exists());
+            assert_eq!(
+                fs::read_to_string(native.join("cli/config.json")).unwrap(),
+                config
+            );
+        })
+        .await;
+    }
+
+    /// Project skills are created in the session cwd's `.zcode/skills`, never
+    /// at the Git root. A skill only in `.agents/skills` is edited where it is,
+    /// and with a copy in each folder the `.zcode` one, which the runtime
+    /// loads, is the one listed and edited.
+    #[tokio::test]
+    async fn zcode_project_skills_live_in_the_session_cwd_with_the_runtimes_precedence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().join("repo/nested");
+        let native = workspace.join(".zcode/skills");
+        let shared = workspace.join(".agents/skills");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(tmp.path().join("repo/.git")).unwrap();
+        write_skill(&shared, "shared-only", "shared");
+        write_skill(&native, "both", "native copy");
+        write_skill(&shared, "both", "shared copy");
+        temp_env::async_with_vars([(CHILD_HOME_KEY, Some(tmp.path().join("home")))], async {
+            let workspace_arg = Some(workspace.to_string_lossy().into_owned());
+            let save = |id: &'static str, body: &'static str| {
+                acp_save_agent_skill(
+                    AgentType::ZCode,
+                    AgentSkillScope::Project,
+                    id.into(),
+                    body.into(),
+                    workspace_arg.clone(),
+                    None,
+                )
+            };
+            let saved = save("project-test", "project").await.unwrap();
+            assert_eq!(Path::new(&saved.path), native.join("project-test"));
+            assert!(!tmp.path().join("repo/.zcode/skills/project-test").exists());
+            assert!(!shared.join("project-test").exists());
+
+            let listed = acp_list_agent_skills(AgentType::ZCode, workspace_arg.clone())
+                .await
+                .unwrap();
+            let project_path = |id: &str| {
+                listed
+                    .skills
+                    .iter()
+                    .find(|s| s.scope == AgentSkillScope::Project && s.id == id)
+                    .map(|s| PathBuf::from(&s.path))
+            };
+            assert_eq!(
+                project_path("project-test"),
+                Some(native.join("project-test"))
+            );
+            assert_eq!(
+                project_path("shared-only"),
+                Some(shared.join("shared-only"))
+            );
+            assert_eq!(project_path("both"), Some(native.join("both")));
+
+            save("shared-only", "edited shared").await.unwrap();
+            assert_eq!(
+                fs::read_to_string(shared.join("shared-only/SKILL.md")).unwrap(),
+                "edited shared"
+            );
+            assert!(!native.join("shared-only").exists());
+            save("both", "edited native").await.unwrap();
+            assert_eq!(
+                fs::read_to_string(native.join("both/SKILL.md")).unwrap(),
+                "edited native"
+            );
+            assert_eq!(
+                fs::read_to_string(shared.join("both/SKILL.md")).unwrap(),
+                "shared copy"
+            );
+
+            assert!(acp_save_agent_skill(
+                AgentType::ZCode,
+                AgentSkillScope::Project,
+                "bad".into(),
+                "body".into(),
+                None,
+                None,
+            )
+            .await
+            .is_err());
+            assert!(acp_save_agent_skill(
+                AgentType::ZCode,
+                AgentSkillScope::Global,
+                "../escape".into(),
+                "body".into(),
+                None,
+                None,
+            )
+            .await
+            .is_err());
+            acp_delete_agent_skill(
+                AgentType::ZCode,
+                AgentSkillScope::Project,
+                "project-test".into(),
+                workspace_arg,
+            )
+            .await
+            .unwrap();
+            assert!(!native.join("project-test").exists());
+        })
+        .await;
+    }
+
+    /// The runtime scans `.zcode/skills` then `.agents/skills` in every folder
+    /// from the cwd up to the nearest `.git`, nearest first, and in the cwd
+    /// alone without one. A parent folder's skill is listed and edited where
+    /// it is, an id lists its nearest copy, and new skills still go to the cwd.
+    #[tokio::test]
+    async fn zcode_project_skills_reach_every_folder_up_to_the_git_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        let pkg = repo.join("pkg");
+        let workspace = pkg.join("app");
+        fs::create_dir_all(&workspace).unwrap();
+        // A linked worktree's `.git` is a file, which the runtime's `stat`
+        // accepts too.
+        fs::write(repo.join(".git"), "gitdir: /elsewhere\n").unwrap();
+        write_skill(&tmp.path().join(".zcode/skills"), "above-root", "outside");
+        write_skill(&repo.join(".agents/skills"), "root-shared", "root");
+        write_skill(&repo.join(".zcode/skills"), "near", "root copy");
+        write_skill(&pkg.join(".zcode/skills"), "level", "pkg native");
+        write_skill(&pkg.join(".agents/skills"), "level", "pkg shared");
+        write_skill(&pkg.join(".agents/skills"), "near", "pkg copy");
+        write_skill(&workspace.join(".agents/skills"), "near", "cwd copy");
+        temp_env::async_with_vars([(CHILD_HOME_KEY, Some(tmp.path().join("home")))], async {
+            let workspace_arg = Some(workspace.to_string_lossy().into_owned());
+            let expected: Vec<PathBuf> = [&workspace, &pkg, &repo]
+                .iter()
+                .flat_map(|base| [base.join(".zcode/skills"), base.join(".agents/skills")])
+                .collect();
+            let dirs = scoped_skill_dirs(
+                AgentType::ZCode,
+                AgentSkillScope::Project,
+                workspace_arg.as_deref(),
+            )
+            .unwrap();
+            assert_eq!(dirs, expected);
+
+            let listed = acp_list_agent_skills(AgentType::ZCode, workspace_arg.clone())
+                .await
+                .unwrap();
+            let locations: Vec<PathBuf> = listed
+                .locations
+                .iter()
+                .filter(|l| l.scope == AgentSkillScope::Project)
+                .map(|l| PathBuf::from(&l.path))
+                .collect();
+            assert_eq!(locations, expected);
+            let project: BTreeMap<&str, PathBuf> = listed
+                .skills
+                .iter()
+                .filter(|s| s.scope == AgentSkillScope::Project)
+                .map(|s| (s.id.as_str(), PathBuf::from(&s.path)))
+                .collect();
+            assert_eq!(
+                project,
+                BTreeMap::from([
+                    ("level", pkg.join(".zcode/skills/level")),
+                    ("near", workspace.join(".agents/skills/near")),
+                    ("root-shared", repo.join(".agents/skills/root-shared")),
+                ]),
+                "nearest folder first, `.zcode` before `.agents`, nothing above the repo"
+            );
+
+            let save = |id: &'static str, body: &'static str| {
+                acp_save_agent_skill(
+                    AgentType::ZCode,
+                    AgentSkillScope::Project,
+                    id.into(),
+                    body.into(),
+                    workspace_arg.clone(),
+                    None,
+                )
+            };
+            save("root-shared", "edited").await.unwrap();
+            assert_eq!(
+                fs::read_to_string(repo.join(".agents/skills/root-shared/SKILL.md")).unwrap(),
+                "edited"
+            );
+            assert!(!workspace.join(".zcode/skills/root-shared").exists());
+            let created = save("fresh", "new").await.unwrap();
+            assert_eq!(
+                Path::new(&created.path),
+                workspace.join(".zcode/skills/fresh")
+            );
+
+            // Deleting the copy in use uncovers the next one, as in the runtime.
+            acp_delete_agent_skill(
+                AgentType::ZCode,
+                AgentSkillScope::Project,
+                "level".into(),
+                workspace_arg.clone(),
+            )
+            .await
+            .unwrap();
+            assert!(!pkg.join(".zcode/skills/level").exists());
+            let read = acp_read_agent_skill(
+                AgentType::ZCode,
+                AgentSkillScope::Project,
+                "level".into(),
+                workspace_arg.clone(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                Path::new(&read.skill.path),
+                pkg.join(".agents/skills/level")
+            );
+            assert_eq!(read.content, "pkg shared");
+
+            let bare = tmp.path().join("bare/ws");
+            fs::create_dir_all(&bare).unwrap();
+            write_skill(&tmp.path().join("bare/.zcode/skills"), "parent", "no repo");
+            let dirs = scoped_skill_dirs(AgentType::ZCode, AgentSkillScope::Project, bare.to_str())
+                .unwrap();
+            assert_eq!(
+                dirs,
+                vec![bare.join(".zcode/skills"), bare.join(".agents/skills")],
+                "without a `.git` above, only the cwd counts"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn zcode_has_authoritative_rows_in_every_bundled_skill_matrix() {
+        let tmp = tempfile::tempdir().unwrap();
+        temp_env::async_with_vars([(CHILD_HOME_KEY, Some(tmp.path()))], async {
+            let rows = crate::commands::experts::experts_list_all_install_statuses()
+                .await
+                .unwrap();
+            assert!(rows.iter().any(|r| r.agent_type == AgentType::ZCode));
+            let rows = crate::commands::science::science_list_all_install_statuses()
+                .await
+                .unwrap();
+            assert!(rows.iter().any(|r| r.agent_type == AgentType::ZCode));
+            let rows = crate::commands::office_tools::officecli_skill_list_all_install_statuses()
+                .await
+                .unwrap();
+            assert!(rows.iter().any(|r| r.agent_type == AgentType::ZCode));
+        })
+        .await;
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Codex model catalog refresh that fails after an install is logged
+    /// and leaves the install as it went: the install path awaits nothing it
+    /// could fail with.
+    #[tokio::test]
+    async fn a_failed_catalog_refresh_does_not_fail_a_codex_install() {
+        let failing = async {
+            Err(crate::acp::provider_models::EndpointError::new(
+                "repair_needed",
+                "the Codex configuration needs repair",
+            ))
+        };
+        let () = refresh_codex_catalog_after_install(&EventEmitter::Noop, "t1", failing).await;
+    }
 
     #[test]
     fn extract_version_token_finds_the_version_in_common_banners() {
@@ -16405,6 +17126,57 @@ mod tests {
         Some(Some(value))
     }
 
+    /// codex refuses to load a config.toml holding `approval_policy =
+    /// "untrusted"` (0.160.1 and 0.164.0, measured: "is no longer supported;
+    /// remove this setting"), so no Codex session starts with it. The panel
+    /// still reads it, to show what is there and that it has to go, but codeg
+    /// never writes it; replacing or clearing it works as for any value.
+    #[test]
+    fn the_retired_untrusted_policy_is_read_but_never_written() {
+        let base = "approval_policy = \"untrusted\"\nmodel = \"gpt-5\"\n";
+        assert_eq!(
+            parse_codex_sandbox_settings(base)
+                .approval_policy
+                .as_deref(),
+            Some("untrusted")
+        );
+
+        let refused = apply_codex_sandbox_config(
+            "model = \"gpt-5\"\n",
+            &CodexSandboxStructuredConfig {
+                approval_policy: set("untrusted".into()),
+                ..Default::default()
+            },
+        )
+        .expect_err("codeg must not write a policy codex refuses");
+        assert!(
+            refused.to_string().contains("no longer accepts"),
+            "{refused}"
+        );
+
+        for (patch, want) in [
+            (set("on-request".to_string()), Some("on-request")),
+            (Some(None), None),
+        ] {
+            let merged = apply_codex_sandbox_config(
+                base,
+                &CodexSandboxStructuredConfig {
+                    approval_policy: patch,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert!(!merged.contains("untrusted"), "{merged}");
+            assert_eq!(
+                parse_codex_sandbox_settings(&merged)
+                    .approval_policy
+                    .as_deref(),
+                want
+            );
+            assert!(merged.contains("model = \"gpt-5\""));
+        }
+    }
+
     #[test]
     fn apply_codex_sandbox_config_writes_and_preserves_unmanaged_keys() {
         let base = "# keep me\nmodel = \"gpt-5\"\n\n[features]\nskills = true\n";
@@ -16526,256 +17298,6 @@ mod tests {
         assert!(back.granular.is_some());
         assert_eq!(back.sandbox_mode.as_deref(), Some("workspace-write"));
         assert!(back.workspace_write.network_access);
-    }
-
-    fn config_with_catalog_ref(value: &str) -> String {
-        format!(
-            "\
-# my codex config
-model = \"gw/x\"           # the model
-model_catalog_json = \"{value}\"
-model_provider = \"codeg\"
-
-[model_providers.codeg]
-base_url = \"https://example.test/v1\"
-"
-        )
-    }
-
-    #[test]
-    fn remove_codex_catalog_key_is_format_preserving_and_no_op_when_absent() {
-        let home = Path::new("/tmp/codeg-test-codex-home");
-        let base = config_with_catalog_ref("codeg-model-catalog.json");
-        let next = remove_codex_catalog_key(&base, home)
-            .unwrap()
-            .expect("codeg-owned key was present");
-        assert!(!next.contains("model_catalog_json"));
-        // Comments and every unmanaged key survive verbatim.
-        assert!(next.contains("# my codex config"));
-        assert!(next.contains("model = \"gw/x\"           # the model"));
-        assert!(next.contains("[model_providers.codeg]"));
-        assert!(next.contains("base_url = \"https://example.test/v1\""));
-        // No key → no rewrite at all (callers skip the disk write).
-        assert!(remove_codex_catalog_key(&next, home).unwrap().is_none());
-        assert!(remove_codex_catalog_key("", home).unwrap().is_none());
-    }
-
-    /// The cleanup must only ever reclaim codeg's OWN generated file. A catalog
-    /// the user wrote by hand (or typed into the advanced config.toml editor)
-    /// reaches this path on every panel save — deleting its reference would
-    /// silently orphan the user's models.
-    #[test]
-    fn remove_codex_catalog_key_preserves_user_owned_references() {
-        let home = Path::new("/tmp/codeg-test-codex-home");
-        for foreign in [
-            "manual.json",
-            "/abs/path/to/manual.json",
-            "~/my-catalog.json",
-            "nested/codeg-model-catalog.json",
-            "  ",
-        ] {
-            let base = config_with_catalog_ref(foreign);
-            assert!(
-                remove_codex_catalog_key(&base, home).unwrap().is_none(),
-                "must not touch a user-owned reference: {foreign}"
-            );
-        }
-        // An absolute path naming codeg's own file IS codeg-owned.
-        let abs = home
-            .join(crate::acp::codex_model_catalog::CATALOG_REL)
-            .to_string_lossy()
-            .into_owned();
-        assert!(is_codeg_owned_catalog_ref(&abs, home));
-        assert!(is_codeg_owned_catalog_ref(
-            crate::acp::codex_model_catalog::CATALOG_REL,
-            home
-        ));
-        assert!(!is_codeg_owned_catalog_ref("manual.json", home));
-    }
-
-    fn catalog_slugs(home: &Path) -> Vec<String> {
-        let text = fs::read_to_string(home.join(crate::acp::codex_model_catalog::CATALOG_REL))
-            .expect("generated catalog");
-        serde_json::from_str::<serde_json::Value>(&text).expect("catalog json")["models"]
-            .as_array()
-            .expect("models")
-            .iter()
-            .filter_map(|m| m["slug"].as_str().map(str::to_owned))
-            .collect()
-    }
-
-    /// The official list before codex 0.159.1: today's minus GPT-6.1 Sol.
-    fn catalog_without_gpt_6_1_sol() -> Vec<serde_json::Value> {
-        crate::acp::codex_model_catalog::bundled_snapshot_models()
-            .into_iter()
-            .filter(|m| m["slug"] != "gpt-6.1-sol")
-            .collect()
-    }
-
-    /// A catalog codeg generated before an upgrade is re-expanded from its
-    /// stored intent, so the new official model shows up — in codex's own
-    /// rank, behind the custom — without the user re-saving anything.
-    #[test]
-    fn resync_rewrites_codegs_catalog_against_the_new_official_list() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let home = dir.path();
-        let config = config_with_catalog_ref(crate::acp::codex_model_catalog::CATALOG_REL);
-        fs::write(home.join("config.toml"), &config).unwrap();
-        let intent = r#"{"customs":[{"slug":"gw/x","base":"gpt-5.6-sol"}],"default":"gw/x"}"#;
-        crate::acp::codex_model_catalog::write_catalog_files(
-            intent,
-            home,
-            &catalog_without_gpt_6_1_sol(),
-        )
-        .unwrap()
-        .expect("customs → generated catalog");
-        assert!(!catalog_slugs(home).iter().any(|s| s == "gpt-6.1-sol"));
-
-        // Today's list plus one model no compiled-in snapshot has, so only
-        // the list passed in can put it in the table.
-        let mut new = crate::acp::codex_model_catalog::bundled_snapshot_models();
-        let mut unshipped = new
-            .iter()
-            .find(|m| m["slug"] == "gpt-5.5")
-            .cloned()
-            .expect("gpt-5.5 in snapshot");
-        unshipped["slug"] = serde_json::Value::String("gpt-test-unshipped".into());
-        new.push(unshipped);
-        assert_eq!(
-            resync_codex_generated_catalog_at(home, &new).unwrap(),
-            CodexCatalogResync::Rewritten
-        );
-        let slugs = catalog_slugs(home);
-        assert_eq!(slugs[..3], ["gw/x", "gpt-6.1-sol", "gpt-6-astra"]);
-        assert!(slugs.iter().any(|s| s == "gpt-test-unshipped"));
-        assert_eq!(slugs.len(), new.len() + 1);
-        // The intent and config.toml are untouched: same bytes as before.
-        assert_eq!(
-            fs::read_to_string(home.join(crate::acp::codex_model_catalog::SOURCE_REL)).unwrap(),
-            intent
-        );
-        assert_eq!(
-            fs::read_to_string(home.join("config.toml")).unwrap(),
-            config
-        );
-    }
-
-    /// Nothing that codeg cannot regenerate is touched: the user's own catalog,
-    /// a config with no catalog at all, and a codeg catalog whose intent sidecar
-    /// is gone (re-importing it against the NEW list would read every newly
-    /// shipped official as one the user removed).
-    #[test]
-    fn resync_leaves_catalogs_codeg_cannot_regenerate_alone() {
-        let new = crate::acp::codex_model_catalog::bundled_snapshot_models();
-        let intent = r#"{"customs":[{"slug":"gw/x","base":"gpt-5.6-sol"}]}"#;
-        let catalog_path = |home: &Path| home.join(crate::acp::codex_model_catalog::CATALOG_REL);
-
-        // No config.toml at all.
-        let dir = tempfile::tempdir().expect("tempdir");
-        assert_eq!(
-            resync_codex_generated_catalog_at(dir.path(), &new).unwrap(),
-            CodexCatalogResync::NotOwned
-        );
-
-        // The user's own catalog, even with a codeg sidecar lying around.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let home = dir.path();
-        fs::write(
-            home.join("config.toml"),
-            config_with_catalog_ref("manual.json"),
-        )
-        .unwrap();
-        fs::write(
-            home.join(crate::acp::codex_model_catalog::SOURCE_REL),
-            intent,
-        )
-        .unwrap();
-        assert_eq!(
-            resync_codex_generated_catalog_at(home, &new).unwrap(),
-            CodexCatalogResync::NotOwned
-        );
-        assert!(!catalog_path(home).exists(), "no catalog was generated");
-        assert_eq!(
-            fs::read_to_string(home.join("config.toml")).unwrap(),
-            config_with_catalog_ref("manual.json"),
-            "the user's reference is left byte-identical"
-        );
-
-        // No `model_catalog_json` key.
-        fs::write(home.join("config.toml"), "model = \"gpt-5.5\"\n").unwrap();
-        assert_eq!(
-            resync_codex_generated_catalog_at(home, &new).unwrap(),
-            CodexCatalogResync::NotOwned
-        );
-        assert!(!catalog_path(home).exists(), "no catalog was generated");
-
-        // codeg's reference, but no sidecar: the old table stays as it is.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let home = dir.path();
-        fs::write(
-            home.join("config.toml"),
-            config_with_catalog_ref(crate::acp::codex_model_catalog::CATALOG_REL),
-        )
-        .unwrap();
-        crate::acp::codex_model_catalog::write_catalog_files(
-            intent,
-            home,
-            &catalog_without_gpt_6_1_sol(),
-        )
-        .unwrap()
-        .expect("seeded");
-        fs::remove_file(home.join(crate::acp::codex_model_catalog::SOURCE_REL)).unwrap();
-        let before = fs::read_to_string(catalog_path(home)).unwrap();
-        assert_eq!(
-            resync_codex_generated_catalog_at(home, &new).unwrap(),
-            CodexCatalogResync::NotOwned
-        );
-        assert_eq!(fs::read_to_string(catalog_path(home)).unwrap(), before);
-    }
-
-    /// When the new list makes the takeover moot (the only removal names a model
-    /// codex has since retired), control goes back to codex: the reference is
-    /// dropped — format-preservingly — and the generated files with it, so
-    /// config.toml never points at a file that is gone.
-    #[test]
-    fn resync_releases_a_takeover_the_new_list_makes_moot() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let home = dir.path();
-        fs::write(
-            home.join("config.toml"),
-            config_with_catalog_ref(crate::acp::codex_model_catalog::CATALOG_REL),
-        )
-        .unwrap();
-        // The old list still LISTED a model the user removed; the new one no
-        // longer ships it at all.
-        let mut old = crate::acp::codex_model_catalog::bundled_snapshot_models();
-        let mut retired = old
-            .iter()
-            .find(|m| m["slug"] == "gpt-5.5")
-            .cloned()
-            .expect("gpt-5.5 in snapshot");
-        retired["slug"] = serde_json::Value::String("gpt-5.4-retired".into());
-        old.push(retired);
-        let intent = r#"{"customs":[],"excludedOfficials":["gpt-5.4-retired"]}"#;
-        crate::acp::codex_model_catalog::write_catalog_files(intent, home, &old)
-            .unwrap()
-            .expect("a live removal → generated catalog");
-
-        let new = crate::acp::codex_model_catalog::bundled_snapshot_models();
-        assert_eq!(
-            resync_codex_generated_catalog_at(home, &new).unwrap(),
-            CodexCatalogResync::Released
-        );
-        let config = fs::read_to_string(home.join("config.toml")).unwrap();
-        assert!(!config.contains("model_catalog_json"), "{config}");
-        assert!(config.contains("# my codex config"));
-        assert!(config.contains("model = \"gw/x\"           # the model"));
-        assert!(!home
-            .join(crate::acp::codex_model_catalog::CATALOG_REL)
-            .exists());
-        assert!(!home
-            .join(crate::acp::codex_model_catalog::SOURCE_REL)
-            .exists());
     }
 
     #[test]
@@ -17011,6 +17533,141 @@ base_url = \"https://example.test/v1\"
         assert_eq!(s.auto_compact_threshold_percent, Some(90));
     }
 
+    /// The endpoint's other models ride codeg's own provider, which follows
+    /// the managed endpoint; codeg removes only tables naming that provider.
+    #[test]
+    fn grok_extra_models_ride_codegs_provider_and_only_codegs_go() {
+        let custom = |extras: Option<Vec<&str>>, base: &str| GrokStructuredConfig {
+            custom_model_id: Some("main".into()),
+            custom_base_url: Some(base.into()),
+            custom_api_key: Some("sk-gw".into()),
+            custom_api_backend: Some("chat_completions".into()),
+            custom_extra_models: extras.map(|ids| ids.into_iter().map(String::from).collect()),
+            ..Default::default()
+        };
+        let user_own = "[model.mine]\nmodel = \"mine\"\nbase_url = \"https://own/v1\"\n";
+        let merged = apply_grok_structured_config(
+            user_own,
+            &custom(Some(vec!["glm-5.2", "main", "mine", "kimi-k3"]), "https://gw/v1"),
+        )
+        .unwrap();
+        let back = parse_grok_settings(&merged);
+        assert_eq!(back.custom_model_id.as_deref(), Some("main"));
+        // Not the managed model, and not a table of the user's own.
+        assert_eq!(back.custom_extra_models, ["glm-5.2", "kimi-k3"]);
+        let doc: toml::Table = toml::from_str(&merged).unwrap();
+        assert_eq!(doc["model"]["glm-5.2"]["model"].as_str(), Some("glm-5.2"));
+        assert_eq!(doc["model"]["mine"]["base_url"].as_str(), Some("https://own/v1"));
+        assert!(doc["model"]["mine"].get("model_provider").is_none());
+        let provider = &doc["model_providers"]["codeg"];
+        assert_eq!(provider["base_url"].as_str(), Some("https://gw/v1"));
+        assert_eq!(provider["api_key"].as_str(), Some("sk-gw"));
+        assert_eq!(provider["api_backend"].as_str(), Some("chat_completions"));
+
+        // An untouched list keeps the extras and follows the endpoint.
+        let moved = apply_grok_structured_config(&merged, &custom(None, "https://gw2/v1")).unwrap();
+        let back = parse_grok_settings(&moved);
+        assert_eq!(back.custom_extra_models, ["glm-5.2", "kimi-k3"]);
+        let doc: toml::Table = toml::from_str(&moved).unwrap();
+        assert_eq!(doc["model_providers"]["codeg"]["base_url"].as_str(), Some("https://gw2/v1"));
+
+        // Unpicked ones go; an emptied list takes the provider with it.
+        let fewer = apply_grok_structured_config(&moved, &custom(Some(vec!["kimi-k3"]), "https://gw2/v1"))
+            .unwrap();
+        assert_eq!(parse_grok_settings(&fewer).custom_extra_models, ["kimi-k3"]);
+        let none = apply_grok_structured_config(&fewer, &custom(Some(vec![]), "https://gw2/v1")).unwrap();
+        let doc: toml::Table = toml::from_str(&none).unwrap();
+        assert!(doc.get("model_providers").is_none(), "{none}");
+        assert!(doc["model"].get("kimi-k3").is_none());
+        assert_eq!(doc["model"]["mine"]["base_url"].as_str(), Some("https://own/v1"));
+
+        // Clearing the managed model clears codeg's extras too.
+        let cleared = apply_grok_structured_config(&fewer, &GrokStructuredConfig::default()).unwrap();
+        let doc: toml::Table = toml::from_str(&cleared).unwrap();
+        assert!(doc.get("model_providers").is_none(), "{cleared}");
+        assert!(doc["model"].get("kimi-k3").is_none());
+        assert!(doc["model"].get("mine").is_some());
+    }
+
+    /// A key the user added to `[model_providers.codeg]` is theirs to keep:
+    /// emptying the extras or clearing the model takes back only codeg's
+    /// endpoint and key, and the next extras ride the user's key again.
+    #[test]
+    fn a_grok_codeg_provider_with_a_key_of_the_users_own_stays() {
+        let own = "[model_providers.codeg]\nbase_url = \"https://gw/v1\"\nmax_request_bytes = 25000000\n";
+        let settings = |extras: Vec<&str>| GrokStructuredConfig {
+            custom_model_id: Some("main".into()),
+            custom_base_url: Some("https://gw2/v1".into()),
+            custom_api_key: Some("sk-gw".into()),
+            custom_extra_models: Some(extras.into_iter().map(String::from).collect()),
+            ..Default::default()
+        };
+        let with = apply_grok_structured_config(own, &settings(vec!["x"])).unwrap();
+        let doc: toml::Table = toml::from_str(&with).unwrap();
+        // The endpoint codeg's extras ride follows the panel; the user's key stays.
+        assert_eq!(doc["model_providers"]["codeg"]["base_url"].as_str(), Some("https://gw2/v1"));
+        assert_eq!(doc["model_providers"]["codeg"]["max_request_bytes"].as_integer(), Some(25000000));
+        for after in [
+            apply_grok_structured_config(&with, &settings(vec![])).unwrap(),
+            apply_grok_structured_config(&with, &GrokStructuredConfig::default()).unwrap(),
+        ] {
+            let doc: toml::Table = toml::from_str(&after).unwrap();
+            let provider = doc["model_providers"]["codeg"].as_table().unwrap();
+            assert_eq!(
+                provider.keys().collect::<Vec<_>>(),
+                ["max_request_bytes"],
+                "{after}"
+            );
+            assert!(
+                doc.get("model").and_then(|m| m.get("x")).is_none(),
+                "{after}"
+            );
+
+            let again = apply_grok_structured_config(&after, &settings(vec!["y"])).unwrap();
+            let doc: toml::Table = toml::from_str(&again).unwrap();
+            let provider = &doc["model_providers"]["codeg"];
+            assert_eq!(
+                provider["base_url"].as_str(),
+                Some("https://gw2/v1"),
+                "{again}"
+            );
+            assert_eq!(provider["api_key"].as_str(), Some("sk-gw"), "{again}");
+            assert_eq!(
+                provider["max_request_bytes"].as_integer(),
+                Some(25000000),
+                "{again}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_grok_extra_made_the_managed_model_carries_its_own_endpoint() {
+        let first = apply_grok_structured_config(
+            "",
+            &GrokStructuredConfig {
+                custom_model_id: Some("main".into()),
+                custom_base_url: Some("https://gw/v1".into()),
+                custom_extra_models: Some(vec!["next".into()]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let renamed = apply_grok_structured_config(
+            &first,
+            &GrokStructuredConfig {
+                custom_model_id: Some("next".into()),
+                custom_base_url: Some("https://gw/v1".into()),
+                custom_extra_models: Some(vec![]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let doc: toml::Table = toml::from_str(&renamed).unwrap();
+        assert!(doc["model"]["next"].get("model_provider").is_none(), "{renamed}");
+        assert_eq!(doc["model"]["next"]["base_url"].as_str(), Some("https://gw/v1"));
+        assert!(parse_grok_settings(&renamed).custom_extra_models.is_empty());
+    }
+
     #[test]
     fn parse_grok_settings_untracks_default_without_model_block() {
         // `[models].default` naming a stock model (no `[model.*]` block) is not a
@@ -17194,8 +17851,9 @@ base_url = \"https://example.test/v1\"
             },
         )
         .unwrap();
-        // The shape verified against grok 1.0.62: bare levels make it advertise
-        // `supportsReasoningEffort` with exactly these `reasoningEfforts`.
+        // The shape verified against grok 1.0.62 and 1.0.70: bare levels make
+        // it advertise `supportsReasoningEffort` with exactly these
+        // `reasoningEfforts`.
         assert_eq!(
             grok_efforts_text(&merged, "grok-4.7").as_deref(),
             Some("[\"low\", \"medium\", \"high\", \"xhigh\"]")
@@ -18157,6 +18815,7 @@ base_url = \"https://example.test/v1\"
             custom_base_url: None,
             custom_api: None,
             model_reasoning: None,
+            custom_models: None,
         };
         lookup_failed(
             acp_update_pi_config_core(update, &db, &EventEmitter::Noop)
@@ -18552,6 +19211,55 @@ echo {"id":"codeg-models","type":"response","command":"get_available_models","su
         assert_eq!(models[0]["id"], "other", "untouched sibling stays put");
     }
 
+    /// The panel's list is the provider's list: a kept model stays as the user
+    /// tuned it, a new one gets exactly what pi's schema asks for, a dropped
+    /// one goes, and the chosen model is always there.
+    #[test]
+    fn pi_custom_models_take_the_panels_whole_list() {
+        let mut entry = serde_json::Map::new();
+        entry.insert(
+            "models".to_string(),
+            serde_json::json!([
+                { "id": "kept", "name": "Kept", "contextWindow": 400000 },
+                { "id": "dropped", "name": "Dropped" },
+                { "name": "no id: pi would reject the whole file" },
+            ]),
+        );
+        set_pi_custom_models(
+            &mut entry,
+            &[" kept ".to_string(), "fresh".to_string(), "kept".to_string()],
+            "chosen",
+        );
+        assert_eq!(
+            pi_models_of(&entry),
+            vec![
+                serde_json::json!({ "id": "kept", "name": "Kept", "contextWindow": 400000 }),
+                serde_json::json!({ "id": "fresh", "name": "fresh" }),
+                serde_json::json!({ "id": "chosen", "name": "chosen" }),
+            ]
+        );
+    }
+
+    #[test]
+    fn pi_stored_api_key_reads_only_an_api_key_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("auth.json"),
+            serde_json::json!({
+                "relay": { "type": "api_key", "key": " sk-relay " },
+                "oauthed": { "type": "oauth", "access": "token" },
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            pi_stored_api_key_at(dir.path(), "relay").as_deref(),
+            Some("sk-relay")
+        );
+        assert_eq!(pi_stored_api_key_at(dir.path(), "oauthed"), None);
+        assert_eq!(pi_stored_api_key_at(dir.path(), "missing"), None);
+    }
+
     /// Turning the switch off only flips the flag: the level selection stays on
     /// disk so re-enabling restores it instead of making the user re-pick.
     #[test]
@@ -18851,115 +19559,110 @@ echo {"id":"codeg-models","type":"response","command":"get_available_models","su
     }
 
     #[test]
-    fn opencode_auth_empty_payload_truncates_to_empty_object() {
-        // Clearing the last credential sends "" — it must persist `{}` (clearing
-        // the file), not be skipped (which would strand a stale key on disk).
-        assert_eq!(
-            opencode_auth_payload_to_write(Some("")),
-            Some("{}".to_string())
-        );
-        assert_eq!(
-            opencode_auth_payload_to_write(Some("   \n")),
-            Some("{}".to_string())
-        );
-    }
-
-    #[test]
-    fn opencode_auth_payload_preserves_non_empty_and_skips_none() {
-        let json = r#"{"openai":{"type":"api","key":"k"}}"#;
-        assert_eq!(
-            opencode_auth_payload_to_write(Some(json)),
-            Some(json.to_string())
-        );
-        // No payload supplied → leave auth.json untouched.
-        assert_eq!(opencode_auth_payload_to_write(None), None);
-    }
-
-    // Call-site guard: both acp_update_agent_config_core and
-    // acp_update_agent_preferences_core route OpenCode persistence through
-    // persist_opencode_native_config, so testing it covers both exposed paths.
-    #[test]
-    fn persist_opencode_native_config_empty_auth_clears_file() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        // Pin HOME and clear XDG_DATA_HOME so the auth path resolves under the
-        // temp dir regardless of the developer's environment.
-        temp_env::with_vars(
-            [
-                ("HOME", Some(tmp.path())),
-                ("XDG_DATA_HOME", None::<&std::path::Path>),
-            ],
-            || {
-                let auth_path = opencode_auth_json_path();
-                fs::create_dir_all(auth_path.parent().unwrap()).expect("mkdir");
-                fs::write(&auth_path, r#"{"openai":{"type":"api","key":"k"}}"#).expect("seed");
-
-                // Disconnecting the last provider sends an empty auth payload: it
-                // must truncate auth.json to {}, not strand the stale credential.
-                persist_opencode_native_config(Some(""), None).expect("persist");
-
-                assert_eq!(fs::read_to_string(&auth_path).unwrap().trim(), "{}");
-            },
-        );
-    }
-
-    #[test]
-    fn persist_opencode_native_config_none_auth_leaves_file() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        temp_env::with_vars(
-            [
-                ("HOME", Some(tmp.path())),
-                ("XDG_DATA_HOME", None::<&std::path::Path>),
-            ],
-            || {
-                let auth_path = opencode_auth_json_path();
-                fs::create_dir_all(auth_path.parent().unwrap()).expect("mkdir");
-                let original = "{\"openai\":{\"type\":\"api\",\"key\":\"k\"}}\n";
-                fs::write(&auth_path, original).expect("seed");
-
-                // No auth payload supplied → file untouched.
-                persist_opencode_native_config(None, None).expect("persist");
-
-                assert_eq!(fs::read_to_string(&auth_path).unwrap(), original);
-            },
-        );
-    }
-
-    #[test]
-    fn opencode_config_path_falls_back_when_xdg_config_home_empty() {
+    fn opencode_config_dir_falls_back_when_xdg_config_home_empty() {
         // An empty XDG_CONFIG_HOME must fall back to <home>/.config, not resolve
-        // to a relative "opencode/opencode.json". `dirs::home_dir()` ignores the
-        // HOME env var on Windows, so derive the expected base from the same
+        // to a relative "opencode/…" path. `dirs::home_dir()` ignores the HOME
+        // env var on Windows, so derive the expected base from the same
         // resolution production uses instead of pinning HOME.
-        temp_env::with_var("XDG_CONFIG_HOME", Some(""), || {
-            assert_eq!(
-                opencode_primary_config_path(),
-                home_dir_or_default()
-                    .join(".config")
-                    .join("opencode")
-                    .join("opencode.json")
-            );
-        });
+        temp_env::with_vars(
+            [
+                ("XDG_CONFIG_HOME", Some("")),
+                ("OPENCODE_CONFIG_DIR", None::<&str>),
+            ],
+            || {
+                assert_eq!(
+                    crate::acp::opencode_config::config_dir(),
+                    Some(home_dir_or_default().join(".config").join("opencode"))
+                );
+            },
+        );
     }
 
     #[test]
-    fn opencode_paths_follow_xdg_when_set() {
+    fn opencode_paths_follow_xdg_and_opencode_config_dir() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let cfg = tmp.path().join("xdg-config");
-        let data = tmp.path().join("xdg-data");
+        let own = tmp.path().join("own-config");
         temp_env::with_vars(
             [
                 ("HOME", Some(tmp.path())),
                 ("XDG_CONFIG_HOME", Some(cfg.as_path())),
-                ("XDG_DATA_HOME", Some(data.as_path())),
+                ("OPENCODE_CONFIG_DIR", None::<&std::path::Path>),
             ],
             || {
                 assert_eq!(
-                    opencode_primary_config_path(),
+                    resolve_opencode_config_path(),
                     cfg.join("opencode").join("opencode.json")
                 );
+                // OpenCode 2 loads opencode.jsonc after opencode.json, so the
+                // .jsonc file is the one whose keys take effect.
+                fs::create_dir_all(cfg.join("opencode")).expect("mkdir");
+                fs::write(cfg.join("opencode").join("opencode.json"), "{}").expect("json");
+                fs::write(cfg.join("opencode").join("opencode.jsonc"), "{}").expect("jsonc");
                 assert_eq!(
-                    opencode_auth_json_path(),
-                    data.join("opencode").join("auth.json")
+                    resolve_opencode_config_path(),
+                    cfg.join("opencode").join("opencode.jsonc")
+                );
+            },
+        );
+        // OPENCODE_CONFIG_DIR replaces the XDG directory in OpenCode 2.
+        temp_env::with_vars(
+            [
+                ("XDG_CONFIG_HOME", Some(cfg.as_path())),
+                ("OPENCODE_CONFIG_DIR", Some(own.as_path())),
+            ],
+            || {
+                assert_eq!(resolve_opencode_config_path(), own.join("opencode.json"));
+            },
+        );
+    }
+
+    #[test]
+    fn opencode_config_text_round_trips_with_comments() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cfg = tmp.path().join("xdg-config");
+        temp_env::with_vars(
+            [
+                ("XDG_CONFIG_HOME", Some(cfg.as_path())),
+                ("OPENCODE_CONFIG_DIR", None::<&std::path::Path>),
+            ],
+            || {
+                let dir = cfg.join("opencode");
+                fs::create_dir_all(&dir).expect("mkdir");
+                let text = "{\n  // my model\n  \"model\": \"a/b\",\n}\n";
+                fs::write(dir.join("opencode.jsonc"), format!("\u{feff}{text}")).expect("seed");
+                // Loaded as written (BOM aside): comments and trailing commas
+                // reach the panel instead of a re-serialized copy.
+                assert_eq!(
+                    load_agent_local_config_json(AgentType::OpenCode).as_deref(),
+                    Some(text)
+                );
+
+                let edited = "{\n  // my model\n  \"model\": \"c/d\",\n}";
+                persist_agent_local_config_json(AgentType::OpenCode, Some(edited))
+                    .expect("persist");
+                assert_eq!(
+                    fs::read_to_string(dir.join("opencode.jsonc")).expect("read"),
+                    format!("{edited}\n")
+                );
+                // No stray opencode.json next to it.
+                assert!(!dir.join("opencode.json").exists());
+
+                // Text OpenCode could not load is refused, and the file kept.
+                let err = persist_agent_local_config_json(AgentType::OpenCode, Some("{'a': 1}"))
+                    .expect_err("single quotes are not JSONC");
+                assert!(err.to_string().contains("invalid OpenCode config"), "{err}");
+                assert_eq!(
+                    fs::read_to_string(dir.join("opencode.jsonc")).expect("read"),
+                    format!("{edited}\n")
+                );
+
+                // Invalid text on disk still reaches the panel, so a save
+                // cannot silently replace it with an empty config.
+                fs::write(dir.join("opencode.jsonc"), "{ \"model\": ").expect("broken");
+                assert_eq!(
+                    load_agent_local_config_json(AgentType::OpenCode).as_deref(),
+                    Some("{ \"model\": ")
                 );
             },
         );
@@ -19600,217 +20303,6 @@ wire_api = "chat"
             assert_ne!(
                 low_fp, high_fp,
                 "changing default_reasoning_effort must change the fingerprint"
-            );
-        });
-    }
-
-    /// Parse a provider table out of a TOML fragment so the auth-default tests
-    /// read like the config.toml a user would actually write.
-    fn provider_table_of(raw: &str) -> toml::map::Map<String, toml::Value> {
-        raw.parse::<toml::Value>()
-            .expect("fragment must parse")
-            .get("model_providers")
-            .and_then(toml::Value::as_table)
-            .and_then(|providers| providers.get("codeg"))
-            .and_then(toml::Value::as_table)
-            .cloned()
-            .expect("fragment must define model_providers.codeg")
-    }
-
-    fn auth_flag_of(table: &toml::map::Map<String, toml::Value>) -> Option<bool> {
-        table
-            .get("requires_openai_auth")
-            .and_then(toml::Value::as_bool)
-    }
-
-    #[test]
-    fn codex_auth_default_is_supplied_only_when_absent() {
-        // codeg provisions its provider with the key in auth.json and no
-        // `env_key`, so a provider WE create needs requires_openai_auth = true.
-        let mut fresh = provider_table_of("[model_providers.codeg]\nbase_url = \"https://x/v1\"\n");
-        ensure_codex_provider_auth_default(&mut fresh);
-        assert_eq!(auth_flag_of(&fresh), Some(true));
-
-        // An explicit false is the user's call and must survive every path —
-        // this is the regression the whole change exists for.
-        let mut explicit_false = provider_table_of(
-            "[model_providers.codeg]\nbase_url = \"https://x/v1\"\nrequires_openai_auth = false\n",
-        );
-        ensure_codex_provider_auth_default(&mut explicit_false);
-        assert_eq!(auth_flag_of(&explicit_false), Some(false));
-
-        // An explicit true is left alone rather than rewritten.
-        let mut explicit_true =
-            provider_table_of("[model_providers.codeg]\nrequires_openai_auth = true\n");
-        ensure_codex_provider_auth_default(&mut explicit_true);
-        assert_eq!(auth_flag_of(&explicit_true), Some(true));
-    }
-
-    #[test]
-    fn codex_auth_default_yields_to_actor_authorization() {
-        // codex's uses_openai_actor_authorization() is
-        // `!requires_openai_auth && <non-empty x-openai-actor-authorization>`,
-        // so writing the default here would silently disable that auth path.
-        let mut header_present = provider_table_of(
-            "[model_providers.codeg]\nbase_url = \"https://x/v1\"\n\n\
-             [model_providers.codeg.http_headers]\n\
-             x-openai-actor-authorization = \"local-image-extension\"\n",
-        );
-        ensure_codex_provider_auth_default(&mut header_present);
-        assert_eq!(auth_flag_of(&header_present), None);
-
-        // Header matching is case-insensitive, mirroring eq_ignore_ascii_case.
-        let mut mixed_case = provider_table_of(
-            "[model_providers.codeg.http_headers]\n\
-             X-OpenAI-Actor-Authorization = \"local-image-extension\"\n",
-        );
-        ensure_codex_provider_auth_default(&mut mixed_case);
-        assert_eq!(auth_flag_of(&mixed_case), None);
-
-        // An inline table is the same table to the parser.
-        let mut inline = provider_table_of(
-            "[model_providers.codeg]\n\
-             http_headers = { \"x-openai-actor-authorization\" = \"local-image-extension\" }\n",
-        );
-        ensure_codex_provider_auth_default(&mut inline);
-        assert_eq!(auth_flag_of(&inline), None);
-
-        // An empty header value does not enable the path upstream
-        // (`!value.trim().is_empty()`), so the default still applies.
-        let mut empty_value = provider_table_of(
-            "[model_providers.codeg.http_headers]\nx-openai-actor-authorization = \"  \"\n",
-        );
-        ensure_codex_provider_auth_default(&mut empty_value);
-        assert_eq!(auth_flag_of(&empty_value), Some(true));
-
-        // A header plus an explicit true is a contradictory config, but it is
-        // the user's: never rewrite or remove it.
-        let mut header_and_true = provider_table_of(
-            "[model_providers.codeg]\nrequires_openai_auth = true\n\n\
-             [model_providers.codeg.http_headers]\n\
-             x-openai-actor-authorization = \"local-image-extension\"\n",
-        );
-        ensure_codex_provider_auth_default(&mut header_and_true);
-        assert_eq!(auth_flag_of(&header_and_true), Some(true));
-
-        // A quoted key containing dots is ONE literal key, not an http_headers
-        // sub-table, so it must not suppress the default.
-        let mut literal_dotted_key = provider_table_of(
-            "[model_providers.codeg]\n\
-             \"http_headers.x-openai-actor-authorization\" = \"local-image-extension\"\n",
-        );
-        ensure_codex_provider_auth_default(&mut literal_dotted_key);
-        assert_eq!(auth_flag_of(&literal_dotted_key), Some(true));
-    }
-
-    #[test]
-    fn codex_cascade_preserves_explicit_auth_flag_and_headers() {
-        // Repro path 2 from issue #406: editing a bound model provider's URL /
-        // key / model cascades into ~/.codex/config.toml, which used to
-        // overwrite requires_openai_auth on the way through.
-        let dir = tempfile::tempdir().expect("tempdir");
-        temp_env::with_var("CODEX_HOME", Some(dir.path()), || {
-            let config_path = dir.path().join("config.toml");
-            std::fs::write(
-                &config_path,
-                "model_provider = \"codeg\"\n\n\
-                 [model_providers.codeg]\n\
-                 base_url = \"https://old.example/v1\"\n\
-                 name = \"codeg\"\n\
-                 wire_api = \"responses\"\n\
-                 requires_openai_auth = false\n\n\
-                 [model_providers.codeg.http_headers]\n\
-                 x-openai-actor-authorization = \"local-image-extension\"\n",
-            )
-            .expect("seed config.toml");
-
-            cascade_update_agent_config(
-                AgentType::Codex,
-                "https://new.example/v1",
-                "sk-test",
-                &BTreeMap::new(),
-                &CodexModelAction::Set("gpt-5-codex".to_string()),
-                None,
-            )
-            .expect("cascade must succeed");
-
-            let written = std::fs::read_to_string(&config_path).expect("read back");
-            let table = provider_table_of(&written);
-            assert_eq!(
-                auth_flag_of(&table),
-                Some(false),
-                "an explicit requires_openai_auth = false must survive the cascade"
-            );
-            assert!(
-                codex_provider_uses_actor_authorization(&table),
-                "the actor-authorization header must survive the cascade"
-            );
-            assert_eq!(
-                table.get("base_url").and_then(toml::Value::as_str),
-                Some("https://new.example/v1"),
-                "the cascade must still apply the new base_url"
-            );
-        });
-    }
-
-    #[test]
-    fn codex_cascade_seeds_auth_flag_for_a_fresh_provider() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        temp_env::with_var("CODEX_HOME", Some(dir.path()), || {
-            cascade_update_agent_config(
-                AgentType::Codex,
-                "https://new.example/v1",
-                "sk-test",
-                &BTreeMap::new(),
-                &CodexModelAction::NoOp,
-                None,
-            )
-            .expect("cascade must succeed");
-
-            let written =
-                std::fs::read_to_string(dir.path().join("config.toml")).expect("read back");
-            assert_eq!(
-                auth_flag_of(&provider_table_of(&written)),
-                Some(true),
-                "a provider codeg creates still gets the default"
-            );
-        });
-    }
-
-    #[test]
-    fn codex_cascade_leaves_a_non_codeg_provider_alone() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        temp_env::with_var("CODEX_HOME", Some(dir.path()), || {
-            let config_path = dir.path().join("config.toml");
-            std::fs::write(
-                &config_path,
-                "model_provider = \"custom\"\n\n\
-                 [model_providers.custom]\n\
-                 base_url = \"https://old.example/v1\"\n",
-            )
-            .expect("seed config.toml");
-
-            cascade_update_agent_config(
-                AgentType::Codex,
-                "https://new.example/v1",
-                "sk-test",
-                &BTreeMap::new(),
-                &CodexModelAction::NoOp,
-                None,
-            )
-            .expect("cascade must succeed");
-
-            let written = std::fs::read_to_string(&config_path).expect("read back");
-            let parsed = written.parse::<toml::Value>().expect("must parse");
-            let custom = parsed
-                .get("model_providers")
-                .and_then(toml::Value::as_table)
-                .and_then(|providers| providers.get("custom"))
-                .and_then(toml::Value::as_table)
-                .expect("custom provider must survive");
-            assert!(
-                !custom.contains_key("requires_openai_auth"),
-                "only the codeg provider is codeg-managed"
             );
         });
     }
@@ -20890,6 +21382,110 @@ wire_api = "chat"
         assert_eq!(models[1].label, "");
     }
 
+    /// A Claude launch carries the `/model` picker ids of whoever owns the
+    /// model list: the bound provider, else the unbound panel; never an id the
+    /// per-agent env slipped under the launch key.
+    #[tokio::test]
+    async fn a_claude_launch_carries_the_picker_of_whoever_owns_the_models() {
+        use crate::acp::claude_model_picker::{decode, LAUNCH_KEY};
+        use crate::db::entities::agent_setting;
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let setting = |provider: Option<i32>| agent_setting::Model {
+            id: 1,
+            agent_type: "claude_code".to_string(),
+            registry_id: "claude-code".to_string(),
+            enabled: true,
+            sort_order: 0,
+            installed_version: None,
+            env_json: None,
+            model_provider_id: provider,
+            model_source: if provider.is_some() {
+                "provider".to_string()
+            } else {
+                "native".to_string()
+            },
+            catalog_provider_id: None,
+            catalog_model_id: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let picked = |env: &BTreeMap<String, String>| env.get(LAUNCH_KEY).map(|raw| decode(raw));
+        let gateway = || {
+            BTreeMap::from([(
+                "ANTHROPIC_BASE_URL".to_string(),
+                "https://relay.example".to_string(),
+            )])
+        };
+
+        store_claude_model_picker(
+            &[
+                " glm-5.2 ".to_string(),
+                "kimi-k3".to_string(),
+                "glm-5.2".to_string(),
+            ],
+            &db.conn,
+        )
+        .await
+        .unwrap();
+        let mut env = gateway();
+        env.insert(LAUNCH_KEY.to_string(), "[\"slipped\"]".to_string());
+        apply_claude_model_picker_env(Some(&setting(None)), &mut env, &db.conn).await;
+        assert_eq!(
+            picked(&env),
+            Some(vec!["glm-5.2".to_string(), "kimi-k3".to_string()])
+        );
+
+        let provider = model_provider_service::create(
+            &db.conn,
+            "Relay".to_string(),
+            "https://relay.example".to_string(),
+            "sk".to_string(),
+            "claude_code".to_string(),
+            Some(r#"{"main":"qwen-4","pickerModels":["qwen-4"]}"#.to_string()),
+        )
+        .await
+        .unwrap();
+        let mut env = gateway();
+        apply_claude_model_picker_env(Some(&setting(Some(provider.id))), &mut env, &db.conn).await;
+        assert_eq!(picked(&env), Some(vec!["qwen-4".to_string()]));
+
+        // A bound provider without picker ids adds none, the panel's included.
+        let bare = model_provider_service::create(
+            &db.conn,
+            "Bare".to_string(),
+            "https://relay.example".to_string(),
+            "sk".to_string(),
+            "claude_code".to_string(),
+            Some(r#"{"main":"qwen-4"}"#.to_string()),
+        )
+        .await
+        .unwrap();
+        let mut env = gateway();
+        env.insert(LAUNCH_KEY.to_string(), "[\"slipped\"]".to_string());
+        apply_claude_model_picker_env(Some(&setting(Some(bare.id))), &mut env, &db.conn).await;
+        assert_eq!(picked(&env), None);
+
+        // Against Anthropic's own API (no gateway), none are added.
+        store_claude_model_picker(&["glm-5.2".to_string()], &db.conn)
+            .await
+            .unwrap();
+        let mut env = BTreeMap::new();
+        apply_claude_model_picker_env(Some(&setting(None)), &mut env, &db.conn).await;
+        assert_eq!(picked(&env), None);
+
+        // Storing none clears the panel's.
+        store_claude_model_picker(&[], &db.conn).await.unwrap();
+        let mut env = gateway();
+        apply_claude_model_picker_env(Some(&setting(None)), &mut env, &db.conn).await;
+        assert_eq!(picked(&env), None);
+        let too_many: Vec<String> = (0..=crate::acp::claude_model_picker::MAX_MODELS)
+            .map(|i| format!("m{i}"))
+            .collect();
+        assert!(store_claude_model_picker(&too_many, &db.conn)
+            .await
+            .is_err());
+    }
+
     #[tokio::test]
     async fn find_connection_for_conversation_core_returns_info_when_bound() {
         // A live connection bound to the conversation → discovery returns its
@@ -21659,9 +22255,115 @@ wire_api = "chat"
         );
     }
 
+    /// A key the user added to `providers.codeg` is theirs to keep when the
+    /// panel moves to another provider, which takes back only codeg's
+    /// endpoint and key and switches the entry off; moving back to custom
+    /// writes them in beside it and switches it on again.
     #[test]
-    fn merge_hermes_model_config_custom_writes_and_clears_inline_key() {
-        // custom writes the key inline in `model.api_key` (+ keeps base_url).
+    fn a_hermes_codeg_provider_with_a_key_of_the_users_own_stays() {
+        let own = "model:\n  provider: custom:codeg\n  default: m\nproviders:\n  codeg:\n    base_url: https://gw/v1\n    api_key: sk\n    api_mode: chat_completions\n    extra_headers:\n      X-Team: a\n    models:\n      kimi-k3: {}\n";
+        let switched = merge_hermes_model_config(
+            Some(own),
+            "anthropic",
+            "claude",
+            BaseUrlWrite::Set(""),
+            InlineApiKeyWrite::Clear,
+        )
+        .unwrap();
+        let entry = hermes_codeg_entry(&switched);
+        let keys: Vec<_> = entry
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .filter_map(|k| k.as_str())
+            .collect();
+        assert_eq!(keys, ["extra_headers", "models", "enabled"], "{switched}");
+        assert_eq!(entry.get("enabled"), Some(&serde_yaml::Value::Bool(false)));
+        // Saving another provider again leaves it as it is.
+        let again = merge_hermes_model_config(
+            Some(&switched),
+            "openrouter",
+            "m",
+            BaseUrlWrite::Preserve,
+            InlineApiKeyWrite::Clear,
+        )
+        .unwrap();
+        assert_eq!(hermes_codeg_entry(&again), entry);
+
+        let back = merge_hermes_model_config(
+            Some(&switched),
+            "custom",
+            "m",
+            BaseUrlWrite::Set("https://gw/v1"),
+            InlineApiKeyWrite::Set {
+                key: "sk",
+                scrub_mode: true,
+            },
+        )
+        .unwrap();
+        let entry = hermes_codeg_entry(&back);
+        assert_eq!(
+            entry.get("base_url").and_then(|v| v.as_str()),
+            Some("https://gw/v1")
+        );
+        assert_eq!(entry.get("api_key").and_then(|v| v.as_str()), Some("sk"));
+        assert!(entry.get("enabled").is_none(), "{back}");
+        assert_eq!(
+            entry
+                .get("extra_headers")
+                .and_then(|h| h.get("X-Team"))
+                .and_then(|v| v.as_str()),
+            Some("a"),
+            "{back}"
+        );
+    }
+
+    #[test]
+    fn the_panel_reads_codegs_named_provider_back_as_custom() {
+        let written = merge_hermes_model_config(
+            None,
+            "custom",
+            "glm-5.2",
+            BaseUrlWrite::Set("https://gw/v1"),
+            InlineApiKeyWrite::Set {
+                key: "sk-gw",
+                scrub_mode: true,
+            },
+        )
+        .unwrap();
+        let expected = HermesModelProjection {
+            provider: Some("custom".into()),
+            model: Some("glm-5.2".into()),
+            base_url: Some("https://gw/v1".into()),
+            api_key: Some("sk-gw".into()),
+        };
+        assert_eq!(hermes_model_projection(&written), expected);
+        // An inline custom config from before reads the same.
+        let inline = "model:\n  provider: custom\n  default: glm-5.2\n  base_url: https://gw/v1\n  api_key: sk-gw\n";
+        assert_eq!(hermes_model_projection(inline), expected);
+        // Another provider's endpoint is its own model section's.
+        let other = hermes_model_projection(
+            "model:\n  provider: openrouter\n  default: m\nproviders:\n  codeg:\n    base_url: https://stale/v1\n",
+        );
+        assert_eq!(other.provider.as_deref(), Some("openrouter"));
+        assert_eq!(other.base_url, None);
+        assert_eq!(hermes_model_projection("not: [valid"), HermesModelProjection::default());
+    }
+
+    /// `providers.codeg` of a written config.
+    fn hermes_codeg_entry(yaml: &str) -> serde_yaml::Value {
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml).expect("parse");
+        value
+            .get("providers")
+            .and_then(|p| p.get(HERMES_CODEG_PROVIDER))
+            .cloned()
+            .unwrap_or(serde_yaml::Value::Null)
+    }
+
+    #[test]
+    fn merge_hermes_model_config_custom_writes_codegs_named_provider() {
+        // custom is codeg's named provider: endpoint + key in providers.codeg,
+        // picked with `custom:codeg`, none of them inline any more.
         let with_key = merge_hermes_model_config(
             None,
             "custom",
@@ -21677,18 +22379,23 @@ wire_api = "chat"
         let model = value.get("model").expect("model section");
         assert_eq!(
             model.get("provider").and_then(|v| v.as_str()),
-            Some("custom")
+            Some("custom:codeg")
         );
+        assert_eq!(model.get("default").and_then(|v| v.as_str()), Some("gpt-5.5"));
+        assert!(model.get("api_key").is_none() && model.get("base_url").is_none());
+        let entry = hermes_codeg_entry(&with_key);
+        assert_eq!(entry.get("api_key").and_then(|v| v.as_str()), Some("sk-abc"));
         assert_eq!(
-            model.get("api_key").and_then(|v| v.as_str()),
-            Some("sk-abc")
-        );
-        assert_eq!(
-            model.get("base_url").and_then(|v| v.as_str()),
+            entry.get("base_url").and_then(|v| v.as_str()),
             Some("https://endpoint.test/v1")
         );
+        // The panel still reads it as `custom`.
+        assert_eq!(
+            existing_hermes_model_provider(Some(&with_key)).as_deref(),
+            Some("custom")
+        );
 
-        // A blank inline key drops the field (keyless local server).
+        // A blank key drops it (keyless local server).
         let keyless = merge_hermes_model_config(
             Some(&with_key),
             "custom",
@@ -21700,15 +22407,13 @@ wire_api = "chat"
             },
         )
         .expect("merge keyless");
-        let value: serde_yaml::Value = serde_yaml::from_str(&keyless).expect("parse");
-        assert!(value.get("model").and_then(|m| m.get("api_key")).is_none());
+        assert!(hermes_codeg_entry(&keyless).get("api_key").is_none());
 
-        // custom→custom re-save with scrub_mode=false preserves a raw-editor
-        // `api_mode`; switching in with scrub_mode=true drops it.
-        let with_mode =
-            "model:\n  provider: custom\n  default: m\n  api_mode: anthropic_messages\n";
+        // An inline config from before moves over, keeping a raw-editor
+        // `api_mode` on a custom→custom re-save; switching in scrubs it.
+        let inline = "model:\n  provider: custom\n  default: m\n  base_url: https://old/v1\n  api_key: sk-old\n  api_mode: anthropic_messages\nproviders:\n  mine:\n    base_url: https://mine/v1\n";
         let resaved = merge_hermes_model_config(
-            Some(with_mode),
+            Some(inline),
             "custom",
             "m",
             BaseUrlWrite::Set("https://e/v1"),
@@ -21718,17 +22423,30 @@ wire_api = "chat"
             },
         )
         .expect("merge resave");
-        let value: serde_yaml::Value = serde_yaml::from_str(&resaved).expect("parse");
+        let entry = hermes_codeg_entry(&resaved);
         assert_eq!(
-            value
-                .get("model")
-                .and_then(|m| m.get("api_mode"))
-                .and_then(|v| v.as_str()),
+            entry.get("api_mode").and_then(|v| v.as_str()),
             Some("anthropic_messages"),
             "custom→custom re-save preserves api_mode"
         );
+        assert_eq!(entry.get("base_url").and_then(|v| v.as_str()), Some("https://e/v1"));
+        assert_eq!(entry.get("api_key").and_then(|v| v.as_str()), Some("sk-1"));
+        let value: serde_yaml::Value = serde_yaml::from_str(&resaved).expect("parse");
+        let model = value.get("model").expect("model section");
+        for field in ["base_url", "api_key", "api_mode"] {
+            assert!(model.get(field).is_none(), "{field} moved to providers.codeg");
+        }
+        assert_eq!(
+            value
+                .get("providers")
+                .and_then(|p| p.get("mine"))
+                .and_then(|m| m.get("base_url"))
+                .and_then(|v| v.as_str()),
+            Some("https://mine/v1"),
+            "the user's own providers stay"
+        );
         let switched_in = merge_hermes_model_config(
-            Some(with_mode),
+            Some(inline),
             "custom",
             "m",
             BaseUrlWrite::Set("https://e/v1"),
@@ -21738,32 +22456,29 @@ wire_api = "chat"
             },
         )
         .expect("merge switch-in");
-        let value: serde_yaml::Value = serde_yaml::from_str(&switched_in).expect("parse");
         assert!(
-            value.get("model").and_then(|m| m.get("api_mode")).is_none(),
+            hermes_codeg_entry(&switched_in).get("api_mode").is_none(),
             "switching TO custom scrubs a stale api_mode"
         );
 
-        // Switching to a keyed provider scrubs the stale inline key + api_mode.
+        // Switching to a keyed provider drops codeg's provider, and any stale
+        // inline key + mode.
         let stale = "model:\n  provider: custom\n  default: gpt-5.5\n  api_key: sk-old\n  api_mode: chat_completions\n";
-        let switched = merge_hermes_model_config(
-            Some(stale),
-            "anthropic",
-            "claude",
-            BaseUrlWrite::Set(""),
-            InlineApiKeyWrite::Clear,
-        )
-        .expect("merge switch");
-        let value: serde_yaml::Value = serde_yaml::from_str(&switched).expect("parse");
-        let model = value.get("model").expect("model section");
-        assert!(
-            model.get("api_key").is_none(),
-            "stale inline key must be scrubbed"
-        );
-        assert!(
-            model.get("api_mode").is_none(),
-            "stale api_mode must be scrubbed"
-        );
+        for before in [stale, resaved.as_str()] {
+            let switched = merge_hermes_model_config(
+                Some(before),
+                "anthropic",
+                "claude",
+                BaseUrlWrite::Set(""),
+                InlineApiKeyWrite::Clear,
+            )
+            .expect("merge switch");
+            let value: serde_yaml::Value = serde_yaml::from_str(&switched).expect("parse");
+            let model = value.get("model").expect("model section");
+            assert!(model.get("api_key").is_none(), "stale inline key must be scrubbed");
+            assert!(model.get("api_mode").is_none(), "stale api_mode must be scrubbed");
+            assert!(hermes_codeg_entry(&switched).is_null(), "{switched}");
+        }
     }
 
     #[test]
@@ -22617,24 +23332,20 @@ wire_api = "chat"
             None,
         )
         .expect("plan custom");
-        // custom NEVER writes `.env` — key + endpoint live inline in config.yaml.
+        // custom NEVER writes `.env` — key + endpoint live in config.yaml, on
+        // codeg's named provider.
         assert!(env.is_empty(), "custom must not write any .env var");
         let value: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("yaml");
         let model = value.get("model").expect("model section");
         assert_eq!(
             model.get("provider").and_then(|v| v.as_str()),
-            Some("custom")
+            Some("custom:codeg")
         );
+        assert_eq!(model.get("default").and_then(|v| v.as_str()), Some("gpt-5.5"));
+        let entry = hermes_codeg_entry(&yaml);
+        assert_eq!(entry.get("api_key").and_then(|v| v.as_str()), Some("sk-custom-1"));
         assert_eq!(
-            model.get("default").and_then(|v| v.as_str()),
-            Some("gpt-5.5")
-        );
-        assert_eq!(
-            model.get("api_key").and_then(|v| v.as_str()),
-            Some("sk-custom-1")
-        );
-        assert_eq!(
-            model.get("base_url").and_then(|v| v.as_str()),
+            entry.get("base_url").and_then(|v| v.as_str()),
             Some("https://endpoint.test/v1")
         );
         // A newline in the inline key is rejected (same guard as the `.env` path).
@@ -22666,6 +23377,7 @@ wire_api = "chat"
             value.get("model").and_then(|m| m.get("api_mode")).is_none(),
             "stale api_mode must be scrubbed when switching to custom"
         );
+        assert!(hermes_codeg_entry(&yaml).get("api_mode").is_none());
     }
 
     #[test]
@@ -22856,6 +23568,42 @@ wire_api = "chat"
             assert_eq!(shell_quote_arg_for("3.13", windows), "3.13");
             assert_eq!(shell_quote_arg_for("hermes-acp", windows), "hermes-acp");
         }
+    }
+
+    /// The script flags reach exactly the packages whose install is their
+    /// scripts, and name the package, which npm 12 needs before it runs a
+    /// script of a global install or an `npx` run.
+    #[test]
+    fn hermes_installs_name_the_package_whose_scripts_npm_must_run() {
+        for spec in ["hermes-agent@0.22.2", "hermes-agent@0.23.0", "hermes-agent"] {
+            assert_eq!(
+                npm_run_scripts_args(spec),
+                ["--ignore-scripts=false", "--allow-scripts=hermes-agent"],
+                "{spec}"
+            );
+        }
+        // Every other agent keeps the user's own script policy.
+        for spec in [
+            "cline@3.0.74",
+            "@xai-official/grok@1.0.70",
+            "hermes-agent-npm@1.0.0",
+        ] {
+            assert!(npm_run_scripts_args(spec).is_empty(), "{spec}");
+        }
+        assert_eq!(
+            hermes_npx_argv("hermes-agent@0.22.2", &["acp", "--setup"]),
+            [
+                "npx",
+                "-y",
+                "--ignore-scripts=false",
+                "--allow-scripts=hermes-agent",
+                "--package",
+                "hermes-agent@0.22.2",
+                "hermes",
+                "acp",
+                "--setup",
+            ]
+        );
     }
 
     #[tokio::test]
@@ -23673,6 +24421,21 @@ model = "gpt"
                 api_key,
                 model,
                 base_url,
+                None,
+            )
+        }
+
+        /// A save from the panel, which sends its whole `models.json` table.
+        fn save_table(&self, model: &str, table: &[&str]) -> Result<(), AcpError> {
+            let table: Vec<String> = table.iter().map(|id| id.to_string()).collect();
+            persist_cline_provider_settings_at(
+                &self.providers,
+                &self.models,
+                "openai-compatible",
+                Some("sk"),
+                Some(model),
+                Some("https://relay.example/v1"),
+                Some(&table),
             )
         }
     }
@@ -23906,6 +24669,57 @@ model = "gpt"
             "earlier model stays selectable"
         );
         assert!(entry["models"]["second"].is_object());
+    }
+
+    /// The panel's table is the table: picked ids stay with what they had,
+    /// new ones are registered, unpicked ones go — the chosen model always
+    /// stays selectable.
+    #[test]
+    fn cline_models_catalog_takes_the_panels_whole_table() {
+        let store = ClineStore::new();
+        std::fs::create_dir_all(store.models.parent().unwrap()).expect("settings dir");
+        std::fs::write(
+            &store.models,
+            serde_json::json!({
+                "version": 1,
+                "providers": {"openai-compatible": {
+                    "provider": {"name": "My relay", "baseUrl": "https://old/v1",
+                                 "protocol": "openai-chat", "modelsSourceUrl": "https://old/v1/models"},
+                    "models": {
+                        "glm-5.2": {"id": "glm-5.2", "name": "GLM", "contextWindow": 200000},
+                        "stale": {"id": "stale"}
+                    },
+                    "discoveredModelIds": ["stale", "glm-5.2"],
+                    "extra": true
+                }}
+            })
+            .to_string(),
+        )
+        .expect("seed");
+
+        store
+            .save_table("kimi-k3", &["glm-5.2", "qwen-4"])
+            .expect("save");
+        let entry = read_cline_json(&store.models)["providers"]["openai-compatible"].clone();
+        let ids: Vec<&String> = entry["models"].as_object().unwrap().keys().collect();
+        assert_eq!(ids, ["glm-5.2", "qwen-4", "kimi-k3"]);
+        assert_eq!(entry["models"]["glm-5.2"]["contextWindow"], 200000, "kept as it was");
+        assert_eq!(entry["models"]["qwen-4"]["name"], "qwen-4");
+        // What cline itself owns stays; discovery keeps only the ids still there.
+        assert_eq!(entry["provider"]["name"], "My relay");
+        assert_eq!(entry["provider"]["protocol"], "openai-chat");
+        assert_eq!(entry["provider"]["modelsSourceUrl"], "https://old/v1/models");
+        assert_eq!(entry["provider"]["baseUrl"], "https://relay.example/v1");
+        assert_eq!(entry["provider"]["defaultModelId"], "kimi-k3");
+        assert_eq!(entry["discoveredModelIds"], serde_json::json!(["glm-5.2"]));
+        assert_eq!(entry["extra"], true);
+
+        // The projection hands the table back to the panel.
+        let projected = load_cline_provider_settings_at(&store.providers).expect("projection");
+        assert_eq!(
+            projected["models"],
+            serde_json::json!(["glm-5.2", "qwen-4", "kimi-k3"])
+        );
     }
 
     #[test]
@@ -24203,6 +25017,7 @@ model = "gpt"
             None,
             Some("claude-sonnet-5"),
             None,
+            None,
         )
         .expect("save");
 
@@ -24232,6 +25047,98 @@ model = "gpt"
         assert_eq!(
             env.get("CLINE_PROVIDER").map(String::as_str),
             Some("ollama")
+        );
+    }
+
+    #[test]
+    fn minimax_code_installer_discovery_finds_only_an_existing_launcher() {
+        let home = tempfile::tempdir().unwrap();
+        assert!(resolve_system_agent_installer_binary(
+            AgentType::MiniMaxCode,
+            "mcode",
+            home.path()
+        )
+        .is_none());
+        #[cfg(not(windows))]
+        let relative = ".minimax-code/bin/mcode";
+        #[cfg(windows)]
+        let relative = ".minimax-code/mcode.cmd";
+        let launcher = home.path().join(relative);
+        std::fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+        std::fs::write(&launcher, "not executed").unwrap();
+        assert_eq!(
+            resolve_system_agent_installer_binary(AgentType::MiniMaxCode, "mcode", home.path()),
+            Some(launcher)
+        );
+    }
+
+    #[test]
+    fn minimax_code_keeps_explicit_env_without_inventing_provider_overrides() {
+        let config = serde_json::json!({
+            "apiBaseUrl": "https://example.test", "apiKey": "not-used",
+            "model": "not-used",
+            "env": {"MINIMAX_DATA_DIR": "/profiles/selected", "EXPLICIT": "value"}
+        });
+        let env =
+            build_runtime_env_from_setting(AgentType::MiniMaxCode, None, Some(&config.to_string()));
+        assert_eq!(env.len(), 2);
+        assert_eq!(
+            env.get("MINIMAX_DATA_DIR").map(String::as_str),
+            Some("/profiles/selected")
+        );
+        assert_eq!(env.get("EXPLICIT").map(String::as_str), Some("value"));
+        assert!(skill_storage_spec(AgentType::MiniMaxCode).is_none());
+    }
+
+    // OpenCode's local config is its own opencode.json: its `model` is
+    // OpenCode's default model and must not turn into `OPENAI_MODEL` (nor
+    // anything else) in the launch env.
+    #[test]
+    fn opencode_config_never_reaches_the_launch_env() {
+        let config = "{\n  // comment\n  \"model\": \"anthropic/claude-x\",\n  \"env\": {\"X\": \"y\"},\n}";
+        let env = build_runtime_env_from_setting(AgentType::OpenCode, None, Some(config));
+        assert!(env.is_empty(), "{env:?}");
+    }
+
+    // Model providers are not offered for MiniMax Code, but the API accepts one
+    // for any agent type; binding it would persist OPENAI_MODEL.
+    #[tokio::test]
+    async fn minimax_code_refuses_a_model_provider_binding() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let provider = crate::db::service::model_provider_service::create(
+            &db.conn,
+            "p".to_string(),
+            "https://example.test/v1".to_string(),
+            "k".to_string(),
+            "minimax_code".to_string(),
+            Some("unexpected-model".to_string()),
+        )
+        .await
+        .unwrap();
+        let err = acp_update_agent_env_core(
+            AgentType::MiniMaxCode,
+            true,
+            BTreeMap::new(),
+            Some(provider.id),
+            &db,
+            &EventEmitter::Noop,
+        )
+        .await
+        .expect_err("the bind is refused");
+        assert!(err.to_string().contains("cannot be bound"), "{err}");
+        let setting = agent_setting_service::get_by_agent_type(&db.conn, AgentType::MiniMaxCode)
+            .await
+            .unwrap()
+            .expect("the defaults row exists");
+        assert_eq!(setting.model_provider_id, None);
+        assert!(
+            !setting
+                .env_json
+                .as_deref()
+                .unwrap_or_default()
+                .contains("OPENAI_MODEL"),
+            "{:?}",
+            setting.env_json
         );
     }
 

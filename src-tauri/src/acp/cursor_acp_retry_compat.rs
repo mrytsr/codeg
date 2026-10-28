@@ -78,6 +78,11 @@
 //! the darwin/x64 archive and `F` in the other five, and is otherwise the same.
 //! `2026.10.19-6bbf2c4` still ships the options statement byte for byte in all
 //! six, and its closure is `F` in all six and otherwise the same.
+//! `2026.10.22-27dcf5f` renames locals the statement reads: the headers module
+//! is `M` where it was `P` in all six archives, and on darwin/x64 the spread
+//! helper's module is `y` and `onErrorNotRetried`'s is `S`, the reverse of the
+//! other five. Its closure is `q` in all six, passing its tools as `P`, and is
+//! otherwise the same.
 //!
 //! So nothing about the splice is transcribed by hand any more:
 //!
@@ -133,6 +138,7 @@ const TRIAGED_AFFECTED_VERSIONS: &[&str] = &[
     "2026.10.16-e3cb207",
     "2026.10.18-ea085cb",
     "2026.10.19-6bbf2c4",
+    "2026.10.22-27dcf5f",
 ];
 
 /// Cursor agent-cli versions whose bundle was inspected and found to already
@@ -188,9 +194,9 @@ const RUN_OPTIONS_DECL: &str = r"(\w+)=(?:Object\.assign\()*\{conversationId:";
 /// e,…,w)` in `2026.10.01-14929f9` and both `2026.10.14` builds (darwin/arm64
 /// names it `E` and the other archives `F`; windows passes its tools as `M`),
 /// `F` in every archive of `2026.10.16-e3cb207`, `E` on darwin/x64 but `F`
-/// elsewhere in `2026.10.18-ea085cb`, and `F` in every archive of
-/// `2026.10.19-6bbf2c4`. The drain reuses it for follow-ups, run options and
-/// all.
+/// elsewhere in `2026.10.18-ea085cb`, `F` in every archive of
+/// `2026.10.19-6bbf2c4`, and `q` in every archive of `2026.10.22-27dcf5f`.
+/// The drain reuses it for follow-ups, run options and all.
 ///
 /// Captures the parameter, the follow-up splice when one is already there, and
 /// the argument list. Every argument in those builds is a local, a member or an
@@ -1090,7 +1096,11 @@ mod tests {
     /// (`4791` darwin/arm64, `3059` darwin/x64, `6136` both linux, `8014`
     /// windows/arm64, `4188` windows/x64) and `2026.10.19-6bbf2c4` (`9152`
     /// darwin/arm64, `7534` darwin/x64, `6136` both linux, `5266`
-    /// windows/arm64, `9544` windows/x64).
+    /// windows/arm64, `9544` windows/x64). `2026.10.22-27dcf5f` (`7096`
+    /// darwin/arm64, `8868` darwin/x64, `6136` both linux, `5389`
+    /// windows/arm64, `3635` windows/x64) ships it with the headers module
+    /// named `M` instead of `P`, and on darwin/x64 the spread helper's module
+    /// is `y` and `onErrorNotRetried`'s is `S`, the reverse of this fixture.
     const REAL_ES2020_RUN_OPTIONS: &str = concat!(
         r#"f=new d.ConversationAction({action:{case:"userMessageAction",value:l}}),"#,
         r#"w={conversationId:this.agentStore.getId(),headers:(0,P.o)(this.agentStore),"#,
@@ -1111,7 +1121,8 @@ mod tests {
     /// `2026.10.18-ea085cb` ships it byte for byte on darwin/x64, and the other
     /// archives differ the same way as before. `2026.10.19-6bbf2c4` names it
     /// `F` in all six archives and is otherwise identical, windows still naming
-    /// the tools local `M`.
+    /// the tools local `M`. `2026.10.22-27dcf5f` names it `q` and the tools
+    /// local `P` in all six archives, and is otherwise identical.
     const REAL_ES2020_RUN_CLOSURE: &str = concat!(
         r#";(0,v.sx)("cli.request.create",{length:n.length,model:h?.modelId??"#,
         r#"this.currentModel.modelId??"unknown",mode:a,conversationId:this.agentStore.getId()});"#,

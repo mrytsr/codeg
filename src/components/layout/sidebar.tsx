@@ -11,6 +11,7 @@ import {
 import {
   Crosshair,
   Eye,
+  FolderSync,
   ListChevronsDownUp,
   ListChevronsUpDown,
   LayoutTemplate,
@@ -29,6 +30,7 @@ import { useTabActions } from "@/contexts/tab-context"
 import { useAutomationsView } from "@/contexts/automations-view-context"
 import { useTasksView } from "@/contexts/tasks-view-context"
 import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
+import { useFolderTabsStore } from "@/stores/folder-tabs-store"
 import {
   SidebarConversationList,
   type SidebarConversationListHandle,
@@ -202,6 +204,11 @@ export function Sidebar() {
     DEFAULT_SECTION_ORDER
   )
   const [allExpanded, setAllExpanded] = useState(true)
+  // Not a list preference like the rows above: it decides which conversation
+  // and file tabs the window shows. Its store owns the stored value (hydrated
+  // with the tab set, see `TabProvider`), so this reads it live.
+  const tabsFollowFolder = useFolderTabsStore((s) => s.enabled)
+  const setTabsFollowFolder = useFolderTabsStore((s) => s.setEnabled)
   // Controlled only so the tag filter's "Manage tags…" can close the menu on
   // its way to the dialog: that entry is a plain button in a panel, not a menu
   // item, so it does not close the menu by itself.
@@ -429,20 +436,22 @@ export function Sidebar() {
                 clips overflow-x — 48 would start truncating longer localized
                 section names. */}
             <DropdownMenuContent align="end" className="min-w-56">
-              {/* Four groups: what the list shows → which nav rows exist → how
-                  the list is sorted → how its sections are stacked. The first
-                  group is the tag filter plus the list toggles, and those and
-                  the nav rows are hover-opened submenus rather than inline
-                  blocks. The two inventories are set-and-forget on/off sets,
-                  six checkboxes between them, and inlining all six left a
-                  fifteen-row menu with Sort by / Section order — the two
-                  settings people actually come back for — stranded at the
-                  bottom of it. The tag filter, which people come back for too,
-                  leads the menu instead: it is a whole panel (search, match
-                  mode, tag list) that only a submenu has room for. Sort by and
-                  Section order stay inline: a pair of radios and a ranked list
-                  read wrong behind another hop, and the order rows need this
-                  menu's width.
+              {/* Five groups: what the list shows → which nav rows exist →
+                  which tabs the window shows → how the list is sorted → how its
+                  sections are stacked. The first group is the tag filter plus
+                  the list toggles, and those and the nav rows are hover-opened
+                  submenus rather than inline blocks. The two inventories are
+                  set-and-forget on/off sets, six checkboxes between them, and
+                  inlining all six left a fifteen-row menu with Sort by /
+                  Section order — the two settings people actually come back for
+                  — stranded at the bottom of it. The tag filter, which people
+                  come back for too, leads the menu instead: it is a whole panel
+                  (search, match mode, tag list) that only a submenu has room
+                  for. Sort by and Section order stay inline: a pair of radios
+                  and a ranked list read wrong behind another hop, and the order
+                  rows need this menu's width. Tabs-follow-folder is one inline
+                  checkbox: a single switch, and the sidebar is where it is used
+                  (clicking a folder header then selects that folder's tabs).
                   Every option keeps the menu open on select (the default is to
                   close): this menu is a settings panel, not a command list, and
                   flipping two of them used to cost two round trips through the
@@ -513,6 +522,16 @@ export function Sidebar() {
                   })}
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem
+                checked={tabsFollowFolder}
+                onCheckedChange={setTabsFollowFolder}
+                onSelect={(event) => event.preventDefault()}
+                title={t("tabsFollowFolderHint")}
+              >
+                <FolderSync className="text-muted-foreground" />
+                {t("tabsFollowFolder")}
+              </DropdownMenuCheckboxItem>
               <DropdownMenuSeparator />
               <DropdownMenuLabel>{t("sortBy")}</DropdownMenuLabel>
               <DropdownMenuRadioGroup

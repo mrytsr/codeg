@@ -288,7 +288,9 @@ pub struct ImportResult {
 pub enum ScanSessionStatus {
     /// Not in the DB — importable.
     New,
-    /// At least one live (non-deleted) row exists — already imported.
+    /// At least one live (non-deleted) row exists — already imported. Also a
+    /// Claude Code session whose usage a live conversation of a custom agent
+    /// on the official Claude adapter counts: the import skips it.
     Imported,
     /// Only soft-deleted rows exist. Deletion is a soft delete, so the row (and
     /// its whole history) is still there: the picker offers such a session for

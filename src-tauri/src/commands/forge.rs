@@ -527,8 +527,18 @@ pub async fn folder_forge_remote_core(
     folder_id: i32,
 ) -> Result<Option<ForgeRemote>, AppCommandError> {
     let folder = get_folder_core(db, folder_id).await?;
+    forge_remote_at(&db.conn, &folder.path).await
+}
+
+/// [`folder_forge_remote_core`] for a checkout named by its path — what the
+/// task engine asks when a task without forge provenance is delivered to the
+/// repository its project lives in.
+pub async fn forge_remote_at(
+    conn: &sea_orm::DatabaseConnection,
+    path: &str,
+) -> Result<Option<ForgeRemote>, AppCommandError> {
     let output = crate::process::tokio_command("git")
-        .args(["-C", &folder.path, "remote", "get-url", "origin"])
+        .args(["-C", path, "remote", "get-url", "origin"])
         .output()
         .await
         .map_err(|e| AppCommandError::io_error("failed to run git").with_detail(e.to_string()))?;
@@ -539,7 +549,7 @@ pub async fn folder_forge_remote_core(
     let Some((server_host, owner_repo)) = forge::parse_remote_url(&url) else {
         return Ok(None);
     };
-    let profile = forge::host_profile(&db.conn, &server_host).await;
+    let profile = forge::host_profile(conn, &server_host).await;
     Ok(Some(ForgeRemote {
         server_host,
         // A GitLab mounted under a relative URL root puts that mount path in
@@ -1069,6 +1079,7 @@ pub async fn create_forge_task(
         head_sha: pull.as_ref().map(|p| p.head_sha.clone()),
         head_repo: pull.as_ref().map(|p| p.head_repo.clone()),
         result_pr: None,
+        result_pr_number: None,
         pushed_onto: None,
         // Always stamped explicitly, both answers: the engine reads it as the
         // user's decision, and an absent field there means "an older row that
@@ -2084,6 +2095,7 @@ mod tests {
                 head_sha: None,
                 head_repo: None,
                 result_pr: None,
+                result_pr_number: None,
                 pushed_onto: None,
                 writeback: stored,
             };

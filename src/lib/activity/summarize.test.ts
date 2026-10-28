@@ -57,6 +57,63 @@ describe("summarizeActivity", () => {
     })
   })
 
+  it("counts a monitor and a network request as steps, not commands", () => {
+    const summary = summarizeActivity([
+      tool("Monitor", { command: "tail -f log", description: "log errors" }),
+      tool("SandboxNetworkAccess", { host: "example.com" }),
+      tool("Bash", { command: "curl example.com" }),
+    ])
+    expect(summary.steps).toBe(3)
+    expect(summary.counts.commands).toBe(1)
+    expect(summary.counts.web).toBe(0)
+  })
+
+  it("calls a monitor or a network request recovered when the same one later succeeds", () => {
+    const monitor = { command: "tail -f log", description: "log errors" }
+    const failedMonitor = tool("Monitor", monitor, failed)
+    const declined = tool("SandboxNetworkAccess", { host: "a.dev" }, failed)
+    const summary = summarizeActivity([
+      failedMonitor,
+      declined,
+      tool("Monitor", monitor),
+      tool("SandboxNetworkAccess", { host: "a.dev" }),
+    ])
+    expect(summary.failed).toBe(2)
+    expect(summary.unrecovered).toBe(0)
+  })
+
+  it("does not call a monitor or a network request recovered by another one", () => {
+    const failedMonitor = tool(
+      "Monitor",
+      { command: "tail -f a.log", description: "a errors" },
+      failed
+    )
+    const summary = summarizeActivity([
+      failedMonitor,
+      tool("SandboxNetworkAccess", { host: "a.dev" }, failed),
+      tool("Monitor", { command: "tail -f b.log", description: "b errors" }),
+      tool("SandboxNetworkAccess", { host: "b.dev" }),
+    ])
+    expect(summary.failed).toBe(2)
+    expect(summary.unrecovered).toBe(2)
+    expect(summary.firstUnrecoveredKey).toBe(failedMonitor.key)
+  })
+
+  it("does not take a command of the same text for a monitor started again", () => {
+    const failedMonitor = tool(
+      "Monitor",
+      { command: "tail -f log", description: "log errors" },
+      failed
+    )
+    const summary = summarizeActivity([
+      failedMonitor,
+      tool("Bash", { command: "tail -f log" }),
+      tool("SandboxNetworkAccess", { host: "b.dev" }),
+    ])
+    expect(summary.unrecovered).toBe(1)
+    expect(summary.firstUnrecoveredKey).toBe(failedMonitor.key)
+  })
+
   it("calls a failure recovered when the same command later succeeds", () => {
     const first = tool("Bash", { command: "pnpm   test" }, failed)
     const summary = summarizeActivity([

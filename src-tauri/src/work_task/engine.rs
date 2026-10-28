@@ -43,13 +43,17 @@ use crate::commands::folders::{
 use crate::db::entities::conversation::{self, ConversationStatus};
 use crate::db::entities::work_task::WorkTaskStatus;
 use crate::db::entities::{folder, folder_command};
+use crate::db::service::work_task_service::DeliveryRecord;
 use crate::db::service::{conversation_service, tab_service, work_task_service};
 use crate::db::AppDatabase;
 use crate::forge::deliver::{
-    adopt_pull_request, pull_request_body, writeback_comment_body, DeliveryCtx, ForgeDeliveryApi,
-    ForgePr, NewPullRequest, PrAdoption, TaskOutcome,
+    adopt_pull_request, local_pull_request_body, pull_request_body, writeback_comment_body,
+    DeliveryCtx, ForgeDeliveryApi, ForgePr, NewPullRequest, PrAdoption, TaskOutcome,
 };
-use crate::forge::{ForgeItemKind, ForgeSourceMeta, SOURCE_KIND_ISSUE, SOURCE_KIND_PR};
+use crate::forge::{
+    DeliveryTarget, ForgeItemKind, ForgeProvider, ForgeSourceMeta, WorkTaskDelivery,
+    SOURCE_KIND_ISSUE, SOURCE_KIND_PR,
+};
 use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
 use crate::models::{
     AgentType, FollowUpIntent, WorkTaskConfig, WorkTaskFolderSettings, WorkTaskMergeOp,
@@ -4286,12 +4290,24 @@ impl TaskEngine {
 
     // ── deliver to the forge (push + pull request) ──────────────────────────
 
-    /// Accept a reviewed forge-sourced task by DELIVERING it: push the work
-    /// branch to the repository the work belongs in — the issue's own
-    /// repository, or for a pull-request task the repository its head branch
-    /// lives in (a fork, when it came from one) — then adopt or open the pull
-    /// request that carries it. The third way to `done`, alongside a local
-    /// merge and an acceptance with nothing to land.
+    /// Accept a reviewed task by DELIVERING it: push the work branch to the
+    /// repository the work belongs in, then adopt or open the pull request
+    /// that carries it — or push into the one it already has. What it is
+    /// delivered FROM decides where it goes (see [`DeliverySource`]):
+    ///
+    /// - an ISSUE's task publishes its own branch in the issue's repository and
+    ///   opens a pull request that closes the issue;
+    /// - a PULL REQUEST's task pushes back onto that pull request's head
+    ///   branch, in the repository it lives in (a fork, when it came from one);
+    /// - a task WITHOUT forge provenance publishes its own branch in the
+    ///   repository its project's `origin` names — when that lives on a forge
+    ///   codeg speaks — as the account that speaks for that host.
+    ///
+    /// The third way to `done`, alongside a local merge and an acceptance with
+    /// nothing to land — unless `mark_done` is off. Then the delivery settles
+    /// back to review with its pull request recorded and the worktree kept,
+    /// and the task's next delivery pushes INTO that pull request (see
+    /// [`PullTarget`]) instead of opening another.
     ///
     /// Unlike a merge this needs no agent — there are no conflicts to resolve,
     /// just a push and two REST calls — so the engine runs it itself and
@@ -4304,13 +4320,16 @@ impl TaskEngine {
     ///
     /// `delete_worktree` is the same offer the other two acceptances make, and
     /// it rides on the delivery rather than gating it — see
-    /// [`Self::remove_delivered_worktree`].
+    /// [`Self::remove_delivered_worktree`]. It only ever applies to a delivery
+    /// that finishes the task: one that keeps it in review keeps the checkout
+    /// its next round runs in, whatever the flag says.
     pub async fn deliver_pr(
         self: &Arc<Self>,
         task_id: i32,
         pr_title: Option<String>,
         draft: bool,
         delete_worktree: bool,
+        mark_done: bool,
     ) -> Result<String, String> {
         let task = work_task_service::get_model(&self.db.conn, task_id)
             .await
@@ -4320,47 +4339,44 @@ impl TaskEngine {
         }
         // The gate lives HERE, not in the UI: this command is reachable by id
         // from an old frontend or a direct web API call.
-        let from_pull = match task.source_kind.as_deref() {
-            Some(SOURCE_KIND_ISSUE) => false,
-            Some(SOURCE_KIND_PR) => true,
-            _ => {
-                return Err(
-                    "only tasks triggered from a forge issue or pull request can be delivered"
-                        .to_string(),
-                )
-            }
-        };
-        let meta = task
-            .source_meta
-            .as_deref()
-            .and_then(|s| serde_json::from_str::<ForgeSourceMeta>(s).ok())
-            .ok_or_else(|| "the task's source information is unreadable".to_string())?;
+        let source = self.delivery_source(&task).await?;
 
         let (_root, wt, base_branch, work_branch) = self.merge_coordinates(&task).await?;
-        // Where the push lands. An issue's task publishes its own branch; a
-        // pull request's task pushes back to the branch that pull request
-        // already tracks, so its author sees the work in the review they
-        // opened rather than in a second one.
-        let remote_branch = if from_pull {
-            let head_ref = meta
-                .head_ref
-                .clone()
-                .filter(|r| !r.trim().is_empty())
-                .ok_or_else(|| {
-                    "this pull request task does not know which branch to push back to — \
-                     trigger it again"
-                        .to_string()
-                })?;
-            // The push lands in the recorded HEAD repository — the fork, when
-            // the pull request comes from one. Resolvability is re-checked
-            // here, before the CAS, so a row whose fork codeg cannot name
-            // (written by an older build, or hydrated while the fork was
-            // already gone) is refused with the task left exactly as it was.
-            pull_push_repo(&meta)?;
-            head_ref
-        } else {
-            work_branch.clone()
+        // Whether the push goes INTO a pull request that already exists, and
+        // which one. A pull request's task pushes back to the branch that pull
+        // request tracks, so its author sees the work in the review they
+        // opened rather than in a second one. An issue's or a local task does
+        // the same once an earlier delivery of it opened one and it stayed in
+        // review. Anything else publishes its own branch and opens (or adopts,
+        // by that branch) the pull request that carries it.
+        let into = match &source {
+            DeliverySource::Pull(meta) => {
+                let head_ref = meta
+                    .head_ref
+                    .clone()
+                    .filter(|r| !r.trim().is_empty())
+                    .ok_or_else(|| {
+                        "this pull request task does not know which branch to push back to — \
+                         trigger it again"
+                            .to_string()
+                    })?;
+                // The push lands in the recorded HEAD repository — the fork,
+                // when the pull request comes from one. Resolvability is
+                // re-checked here, before the CAS, so a row whose fork codeg
+                // cannot name (written by an older build, or hydrated while the
+                // fork was already gone) is refused with the task left exactly
+                // as it was.
+                pull_push_repo(meta)?;
+                Some(PullTarget::own_pull_request(meta, &head_ref))
+            }
+            _ => source
+                .recorded_pull()
+                .map(|number| PullTarget::recorded(&source, number, &work_branch, &base_branch)),
         };
+        let from_pull = matches!(source, DeliverySource::Pull(_));
+        let remote_branch = into
+            .as_ref()
+            .map_or_else(|| work_branch.clone(), |target| target.head_ref.clone());
         // A FAILING clean check, deliberately not `worktree_holds_uncommitted`:
         // that one reads a git error as "clean" because its caller (worktree
         // removal) is tolerant of a worktree already off disk. Publishing a
@@ -4382,7 +4398,15 @@ impl TaskEngine {
         // records a delivery. Refuse before the CAS and point at the button that
         // actually applies — the likeliest task here is a review-only one,
         // whose worktree holds the pull request and nothing else.
-        if !self.has_landable_changes(&task, &wt.path).await? {
+        //
+        // Not asked of a delivery INTO the pull request an earlier round
+        // opened: that pull request already carries the work, and finishing
+        // the task on it is exactly what a delivery with nothing new is for —
+        // including once it merged and the local base took the same commits
+        // in, which leaves nothing "landable" here at all. Whether it still
+        // holds the work is what the settle checks.
+        let into_recorded = into.is_some() && !from_pull;
+        if !into_recorded && !self.has_landable_changes(&task, &wt.path).await? {
             return Err(if from_pull {
                 "this task added nothing to the pull request — complete it instead of pushing back"
             } else {
@@ -4402,14 +4426,7 @@ impl TaskEngine {
         // only the pull request that needs the base to exist), so nothing
         // downstream re-asks this question. Refusing costs a retry; guessing
         // costs published work nobody reviewed.
-        let ctx = DeliveryCtx {
-            conn: &self.db.conn,
-            data_dir: &self.data_dir,
-            provider: meta.provider,
-            server_host: &meta.server_host,
-            account_id: &meta.account_id,
-            owner_repo: &meta.owner_repo,
-        };
+        let ctx = source.ctx(&self.db.conn, &self.data_dir);
         if let Some(base_sha) = task.base_sha.as_deref() {
             let Some(remote_tip) = self
                 .forge
@@ -4448,6 +4465,17 @@ impl TaskEngine {
             expected_head: Some(expected_head.clone()),
             pr_title: Some(title.clone()),
             draft,
+            delete_worktree: delete_worktree && mark_done,
+            keep_in_review: !mark_done,
+            target: source.local_target().cloned(),
+            // A pull-request task's number is its own identity, which recovery
+            // already reads off the row; recorded only for a push into the
+            // pull request an earlier delivery opened.
+            pull_number: if into_recorded {
+                into.as_ref().map(|target| target.number)
+            } else {
+                None
+            },
             ..Default::default()
         };
 
@@ -4466,27 +4494,74 @@ impl TaskEngine {
         let outcome = self
             .deliver_guarded(
                 &task,
-                &meta,
+                &source,
+                into.as_ref(),
                 &wt.path,
                 &base_branch,
                 &work_branch,
-                &remote_branch,
-                from_pull,
                 &state,
             )
             .await;
-        // Only after the delivery SUCCEEDED: one that bounced back to review
-        // still needs its checkout for the retry. Still inside the claim, so a
+        // Only after the delivery SUCCEEDED and finished the task: one that
+        // bounced back to review still needs its checkout for the retry, and
+        // one kept in review for its next round. Still inside the claim, so a
         // second click cannot start a delivery on a task whose worktree is
         // half removed. `expected_head` is the OID the push published, and the
         // cleanup is allowed to destroy the branch only while it is still that.
-        if outcome.is_ok() && delete_worktree {
+        if outcome.is_ok() && state.delete_worktree {
             self.remove_delivered_worktree(task_id, task.folder_id, &expected_head)
                 .await;
         }
         self.release_in_flight(task_id, token).await;
         self.emit_upsert(task_id);
         outcome
+    }
+
+    /// What `task` is delivered from — the gate for delivering it at all. A
+    /// task triggered from a forge issue or pull request carries its own
+    /// coordinates; one without provenance delivers to its project's `origin`,
+    /// pinned on the row from its first delivery on (see [`DeliveryTarget`]).
+    async fn delivery_source(
+        &self,
+        task: &crate::db::entities::work_task::Model,
+    ) -> Result<DeliverySource, String> {
+        let forge_meta = || {
+            task.source_meta
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<ForgeSourceMeta>(s).ok())
+                .ok_or_else(|| "the task's source information is unreadable".to_string())
+        };
+        match task.source_kind.as_deref() {
+            Some(SOURCE_KIND_ISSUE) => Ok(DeliverySource::Issue(forge_meta()?)),
+            Some(SOURCE_KIND_PR) => Ok(DeliverySource::Pull(forge_meta()?)),
+            None => {
+                // Pinned once a delivery reached a pull request. An unreadable
+                // record is no pin at all: the checkout answers again, and the
+                // pull request is found by its branch, as on a first delivery.
+                if let Some(record) = task
+                    .delivery
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<WorkTaskDelivery>(s).ok())
+                {
+                    return Ok(DeliverySource::Local {
+                        target: record.target,
+                        recorded: Some(record.pr_number),
+                    });
+                }
+                let project = get_folder_core(&self.db, task.folder_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let target = self
+                    .forge
+                    .local_target(&self.db.conn, &project.path)
+                    .await?;
+                Ok(DeliverySource::Local {
+                    target,
+                    recorded: None,
+                })
+            }
+            Some(other) => Err(format!("a task from '{other}' cannot be delivered")),
+        }
     }
 
     /// Take a delivered task's worktree with it, the way the merge and the
@@ -4580,12 +4655,11 @@ impl TaskEngine {
     async fn deliver_guarded(
         self: &Arc<Self>,
         task: &crate::db::entities::work_task::Model,
-        meta: &ForgeSourceMeta,
+        source: &DeliverySource,
+        into: Option<&PullTarget>,
         wt_path: &str,
         base_branch: &str,
         work_branch: &str,
-        remote_branch: &str,
-        from_pull: bool,
         state: &WorkTaskMergeState,
     ) -> Result<String, String> {
         let task_id = task.id;
@@ -4599,34 +4673,58 @@ impl TaskEngine {
             };
         self.emit_upsert(task_id);
 
+        let ctx = source.ctx(&self.db.conn, &self.data_dir);
         let expected_head = state.expected_head.clone().unwrap_or_default();
         let title = state.pr_title.clone().unwrap_or_else(|| task.title.clone());
-        let attempt = if from_pull {
-            self.push_back_to_pull(
-                task_id,
-                run_seq,
-                meta,
-                wt_path,
-                work_branch,
-                remote_branch,
-                &expected_head,
-            )
-            .await
-        } else {
+        let open = || {
             self.push_and_open(
-                task_id,
-                meta,
+                &ctx,
                 wt_path,
                 base_branch,
                 work_branch,
                 &expected_head,
                 &title,
                 state.draft,
+                source.pull_request_body(task_id),
             )
-            .await
+        };
+        let attempt = match into {
+            None => open().await,
+            Some(target) => match self
+                .push_into_pull(task_id, run_seq, &ctx, target, wt_path, &expected_head)
+                .await
+            {
+                Ok(IntoPull::Delivered(pr)) => Ok(pr),
+                Ok(IntoPull::NoLongerOpen(pr)) => match source {
+                    DeliverySource::Pull(_) => Err(format!(
+                        "{} #{} is no longer open — reopen it, then deliver",
+                        target.provider.change_noun(),
+                        pr.number
+                    )),
+                    // The pull request an earlier round opened was closed or
+                    // merged since, and this round carries commits it does not
+                    // have. They go in a new one — exactly what a first
+                    // delivery of this branch would do, and with the same
+                    // guard against an empty one the first delivery had.
+                    _ => match self.has_landable_changes(task, wt_path).await {
+                        Ok(true) => open().await,
+                        Ok(false) => Err(format!(
+                            "{} #{} is no longer open, and this task has nothing of its own to \
+                             put in a new one — complete it instead",
+                            target.provider.change_noun(),
+                            pr.number
+                        )),
+                        Err(e) => Err(e),
+                    },
+                },
+                Err(e) => Err(e),
+            },
         };
         match attempt {
-            Ok(pr) => match self.settle_delivery(task_id, meta, run_seq, &pr).await {
+            Ok(pr) => match self
+                .settle_delivery(task_id, source, run_seq, &pr, state.keep_in_review)
+                .await
+            {
                 Ok(url) => Ok(url),
                 Err(e) => {
                     self.back_to_review(task_id, e.clone(), None).await;
@@ -4640,30 +4738,27 @@ impl TaskEngine {
         }
     }
 
+    /// Publish the task's own branch and adopt or open the pull request that
+    /// carries it, in `ctx`'s repository — an issue's task's first delivery,
+    /// a local task's, and either one's once the pull request an earlier
+    /// round opened is gone.
     #[allow(clippy::too_many_arguments)]
     async fn push_and_open(
         &self,
-        task_id: i32,
-        meta: &ForgeSourceMeta,
+        ctx: &DeliveryCtx<'_>,
         wt_path: &str,
         base_branch: &str,
         work_branch: &str,
         expected_head: &str,
         title: &str,
         draft: bool,
+        body: String,
     ) -> Result<ForgePr, String> {
-        let ctx = DeliveryCtx {
-            conn: &self.db.conn,
-            data_dir: &self.data_dir,
-            provider: meta.provider,
-            server_host: &meta.server_host,
-            account_id: &meta.account_id,
-            owner_repo: &meta.owner_repo,
-        };
         // Fast-forward push of the same commits is a no-op, so a retry after a
-        // later step failed costs nothing and changes nothing.
+        // later step failed costs nothing and changes nothing. What is pushed
+        // is the snapshot, not the branch (see `push_refspec`).
         self.forge
-            .push_branch(&ctx, wt_path, &meta.owner_repo, work_branch, work_branch)
+            .push_branch(ctx, wt_path, ctx.owner_repo, expected_head, work_branch)
             .await
             .map_err(|e| format!("could not push the task branch: {e}"))?;
 
@@ -4671,7 +4766,7 @@ impl TaskEngine {
         // request and died on the way to settling it.
         let existing = self
             .forge
-            .find_pulls(&ctx, work_branch)
+            .find_pulls(ctx, work_branch)
             .await
             .map_err(|e| format!("could not check for an existing pull request: {e}"))?;
         match adopt_pull_request(
@@ -4679,7 +4774,7 @@ impl TaskEngine {
             expected_head,
             work_branch,
             base_branch,
-            &meta.owner_repo,
+            ctx.owner_repo,
         ) {
             PrAdoption::Merged(pr) | PrAdoption::Open(pr) => Ok(pr),
             PrAdoption::ClosedUnmerged(pr) => Err(format!(
@@ -4697,10 +4792,10 @@ impl TaskEngine {
                 pr.number
             )),
             PrAdoption::NoMatch => {
-                let body = pull_request_body(&meta.url, meta.number, task_id);
-                self.forge
+                let pr = self
+                    .forge
                     .create_pull(
-                        &ctx,
+                        ctx,
                         &NewPullRequest {
                             title,
                             head: work_branch,
@@ -4710,93 +4805,135 @@ impl TaskEngine {
                         },
                     )
                     .await
-                    .map_err(|e| format!("could not open the pull request: {e}"))
+                    .map_err(|e| format!("could not open the pull request: {e}"))?;
+                // The push published exactly `expected_head`, so a pull request
+                // opened at anything else means someone pushed to the branch in
+                // the instant between — work this task must not claim. A forge
+                // that reports no head yet is taken at the push's word.
+                if !pr.head_sha.trim().is_empty()
+                    && !pr.head_sha.eq_ignore_ascii_case(expected_head)
+                {
+                    return Err(format!(
+                        "pull request #{} was opened, but at a commit this task did not push — \
+                         someone pushed to '{work_branch}' meanwhile. Check that branch before \
+                         delivering again",
+                        pr.number
+                    ));
+                }
+                Ok(pr)
             }
         }
     }
 
-    /// Deliver a task that IS a pull request: push the work back onto that
-    /// pull request's own branch. Nothing is created — the pull request the
-    /// task came from is the delivery.
+    /// Deliver INTO a pull request that exists — a pull-request task's own, or
+    /// the one an earlier delivery of an issue's or a local task opened: push
+    /// the work onto its head branch. Nothing is created.
     ///
     /// The push is fast-forward only (as everywhere here), and that is what
     /// makes the check afterwards a lookup rather than a race: a push that
     /// succeeded proves our commits are on that branch, so the pull request is
     /// re-read only to confirm it is still the open pull request for it. Its
     /// head OID is deliberately NOT required to equal ours — someone pushing
-    /// on top of our work a second later has not undone the delivery, and
-    /// demanding equality would bounce a task whose work is safely published.
+    /// on top of our work a second later has not undone the delivery, the
+    /// forge may still be catching up with our own push, and demanding
+    /// equality would bounce a task whose work is safely published.
     ///
-    /// A push also records what it learned: the head the pull request had
-    /// right before it — under ours, as the push was a fast-forward — as the
-    /// snapshot's `pushed_onto`, and what the push added on top of that head
-    /// over the row's counters. That is exact where the counters a run's
-    /// settle took can only measure from what is local: a pull request
-    /// force-pushed while the task was out, or grown commits of its author's,
-    /// leaves no local commit that says where it ends — until this one. It is
-    /// recorded as soon as the push lands, not at the settle: a settle that
-    /// fails after it leaves a retry that pushes nothing, and the comment that
-    /// retry posts should still say what was pushed; the counters measured
-    /// before that retry (the boot pass) measure from `pushed_onto` too.
-    /// `run_seq` is the delivery's own.
-    #[allow(clippy::too_many_arguments)]
-    async fn push_back_to_pull(
+    /// A pull request that is no longer open before anything was pushed comes
+    /// back as [`IntoPull::NoLongerOpen`], with nothing published: whether
+    /// that refuses the delivery or opens a new pull request is the caller's
+    /// to say. One that already sits at our commit settles without a push —
+    /// a retry whose push landed before something interrupted the settle, or
+    /// a task finished on the pull request after it merged.
+    ///
+    /// A push into a pull-request task's own pull request also records what it
+    /// learned: the head the pull request had right before it — under ours, as
+    /// the push was a fast-forward — as the snapshot's `pushed_onto`, and what
+    /// the push added on top of that head over the row's counters. That is
+    /// exact where the counters a run's settle took can only measure from what
+    /// is local: a pull request force-pushed while the task was out, or grown
+    /// commits of its author's, leaves no local commit that says where it ends
+    /// — until this one. It is recorded as soon as the push lands, not at the
+    /// settle: a settle that fails after it leaves a retry that pushes nothing,
+    /// and the comment that retry posts should still say what was pushed; the
+    /// counters measured before that retry (the boot pass) measure from
+    /// `pushed_onto` too. `run_seq` is the delivery's own.
+    async fn push_into_pull(
         &self,
         task_id: i32,
         run_seq: i32,
-        meta: &ForgeSourceMeta,
+        ctx: &DeliveryCtx<'_>,
+        target: &PullTarget,
         wt_path: &str,
-        work_branch: &str,
-        remote_branch: &str,
         expected_head: &str,
-    ) -> Result<ForgePr, String> {
-        let ctx = DeliveryCtx {
-            conn: &self.db.conn,
-            data_dir: &self.data_dir,
-            provider: meta.provider,
-            server_host: &meta.server_host,
-            account_id: &meta.account_id,
-            owner_repo: &meta.owner_repo,
-        };
+    ) -> Result<IntoPull, String> {
+        let noun = target.provider.change_noun();
         // Read BEFORE pushing: a pull request that is already closed or merged
         // must not receive commits nobody is going to look at.
         let before = self
             .forge
-            .get_pull(&ctx, meta.number)
+            .get_pull(ctx, target.number)
             .await
-            .map_err(|e| format!("could not read pull request #{}: {e}", meta.number))?;
-        self.check_pull_target(&before, meta, remote_branch)?;
+            .map_err(|e| format!("could not read {noun} #{}: {e}", target.number))?;
+        self.check_pull_target(&before, target)?;
 
-        let pushed = !before.head_sha.eq_ignore_ascii_case(expected_head);
+        let mut pushed = !before.head_sha.eq_ignore_ascii_case(expected_head);
+        // Merged at a different head: when that merge carries this task's
+        // commit — its author built on the work and merged that, after an
+        // earlier round of this task pushed it — the delivery already happened,
+        // and there is nothing to push. A merge without it is a pull request
+        // gone for this work, like a closed one.
+        if pushed
+            && before.merged
+            && self
+                .merge_carries_our_work(
+                    task_id,
+                    ctx,
+                    wt_path,
+                    target.number,
+                    expected_head,
+                    &before.head_sha,
+                )
+                .await
+        {
+            pushed = false;
+        }
         let after = if !pushed {
-            // The pull request already sits at the commit this task would
-            // push: a retry of a delivery whose push landed before something
-            // interrupted the settle. There is nothing left to publish, so
-            // nothing is pushed — which is also what lets such a retry finish
-            // on a fork the account cannot write to. A task with nothing of
-            // its own never reaches this branch; `has_landable_changes`
-            // refuses it in favour of completing. It is why the closed/merged
-            // refusal below does not run here, too: a merged pull request that
-            // carries this exact head IS the delivery, and `settle_pull_target`
-            // says so.
+            // The pull request already sits at — or merged past — the commit
+            // this task would push: a retry of a delivery whose push landed
+            // before something interrupted the settle, or a task finished on a
+            // pull request it already filled. There is nothing left to
+            // publish, so nothing is pushed — which is also what lets such a
+            // retry finish on a fork the account cannot write to. A
+            // pull-request task with nothing of its own never reaches this
+            // branch; `has_landable_changes` refuses it in favour of
+            // completing. It is why the closed/merged refusal below does not
+            // run here, too: a merged pull request that carries this task's
+            // commit IS the delivery, and `settle_pull_target` says so.
             before.clone()
         } else {
             if before.merged || before.state != "open" {
-                return Err(format!(
-                    "pull request #{} is no longer open — reopen it, then deliver",
-                    meta.number
-                ));
+                return Ok(IntoPull::NoLongerOpen(before));
             }
-            let push_repo = pull_push_repo(meta)?;
+            let remote_branch = &target.head_ref;
+            // The snapshot, not the branch (see `push_refspec`).
             self.forge
-                .push_branch(&ctx, wt_path, &push_repo, work_branch, remote_branch)
+                .push_branch(
+                    ctx,
+                    wt_path,
+                    &target.push_repo,
+                    expected_head,
+                    remote_branch,
+                )
                 .await
                 .map_err(|e| {
-                    let own_repo = crate::forge::same_repo(&push_repo, &meta.owner_repo);
+                    let own_repo = crate::forge::same_repo(&target.push_repo, &target.owner_repo);
                     let where_ = if own_repo {
                         format!("could not push back to '{remote_branch}'")
                     } else {
-                        format!("could not push back to '{remote_branch}' on {push_repo}")
+                        format!(
+                            "could not push back to '{remote_branch}' on {}",
+                            target.push_repo
+                        )
                     };
                     // A hint is only added when git actually said something we
                     // recognise. The fork case used to carry the permission
@@ -4807,8 +4944,7 @@ impl TaskEngine {
                     match classify_push_refusal(&e) {
                         PushRefusal::Permission if !own_repo => format!(
                             "{where_}: {e} — pushing to a fork needs its author to allow edits \
-                             from maintainers on the {}",
-                            meta.provider.change_noun()
+                             from maintainers on the {noun}"
                         ),
                         PushRefusal::BranchMoved => format!(
                             "{where_}: {e} — that branch has commits this task does not have, so \
@@ -4819,97 +4955,96 @@ impl TaskEngine {
                     }
                 })?;
 
-            if let Some(added) = stats_between(wt_path, &before.head_sha, expected_head).await {
-                let mut pushed = meta.clone();
-                pushed.pushed_onto = Some(before.head_sha.clone());
-                let recorded = match serde_json::to_string(&pushed) {
-                    Ok(meta_json) => work_task_service::record_push_back(
-                        &self.db.conn,
-                        task_id,
-                        run_seq,
-                        added,
-                        &meta_json,
-                    )
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| e.to_string()),
-                    Err(e) => Err(e.to_string()),
-                };
-                if let Err(e) = recorded {
-                    tracing::warn!(
-                        "[work_task] task {task_id}: could not record what the push added: {e}"
-                    );
+            if target.record_push {
+                if let Some(added) = stats_between(wt_path, &before.head_sha, expected_head).await {
+                    self.record_pushed_onto(task_id, run_seq, &before.head_sha, added)
+                        .await;
                 }
             }
 
             // Re-read so the settled row links the pull request as it is now
             // (and so a pull request closed during the push is not reported
             // as open).
-            self.forge.get_pull(&ctx, meta.number).await.map_err(|e| {
+            self.forge.get_pull(ctx, target.number).await.map_err(|e| {
                 format!(
-                    "the work was pushed to '{remote_branch}', but pull request #{} could not be \
-                     read back: {e}",
-                    meta.number
+                    "the work was pushed to '{remote_branch}', but {noun} #{} could not be read \
+                     back: {e}",
+                    target.number
                 )
             })?
         };
-        self.settle_pull_target(
-            task_id,
-            &ctx,
-            wt_path,
-            &after,
-            meta,
-            remote_branch,
-            expected_head,
-            pushed,
-        )
-        .await?;
-        Ok(after)
+        self.settle_pull_target(task_id, ctx, wt_path, &after, target, expected_head, pushed)
+            .await?;
+        Ok(IntoPull::Delivered(after))
     }
 
-    /// The pull request a push-back may push INTO: same repository, same head
-    /// branch as the task recorded. Anything else means the pull request was
-    /// retargeted under us, and the task goes back to a human.
-    fn check_pull_target(
+    /// Record, on a pull-request task, the head its push went onto and what
+    /// the push added (see [`Self::push_into_pull`]). Reads the provenance
+    /// snapshot as the row has it NOW rather than taking the one the delivery
+    /// started from — this delivery holds the task, so nothing else writes it
+    /// meanwhile, and the CAS binds the write to this delivery's generation.
+    /// Best-effort: a counter that cannot be written leaves the old one, which
+    /// is still a measurement, and the delivery itself is unaffected.
+    async fn record_pushed_onto(
         &self,
-        pr: &ForgePr,
-        meta: &ForgeSourceMeta,
-        remote_branch: &str,
-    ) -> Result<(), String> {
-        let noun = meta.provider.change_noun();
-        // Compared against the head repository RECORDED at trigger time (the
-        // fork, when the pull request comes from one — rows without one are
-        // same-repo by construction), not against the source repository: a
-        // fork's pull request legitimately lives elsewhere, and the thing
-        // being caught here is the head moving since the task was made.
-        let recorded_repo = meta
-            .head_repo
-            .as_deref()
-            .map(str::trim)
-            .filter(|r| !r.is_empty())
-            .unwrap_or(&meta.owner_repo);
-        if !crate::forge::same_repo(&pr.head_repo, recorded_repo) {
+        task_id: i32,
+        run_seq: i32,
+        pushed_onto: &str,
+        added: (i32, i32, i32),
+    ) {
+        let recorded = async {
+            let task = work_task_service::get_model(&self.db.conn, task_id)
+                .await
+                .map_err(|e| e.to_string())?;
+            let mut meta = task
+                .source_meta
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<ForgeSourceMeta>(s).ok())
+                .ok_or_else(|| "the task's source information is unreadable".to_string())?;
+            meta.pushed_onto = Some(pushed_onto.to_string());
+            let meta_json = serde_json::to_string(&meta).map_err(|e| e.to_string())?;
+            work_task_service::record_push_back(&self.db.conn, task_id, run_seq, added, &meta_json)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
+        .await;
+        if let Err(e) = recorded {
+            tracing::warn!("[work_task] task {task_id}: could not record what the push added: {e}");
+        }
+    }
+
+    /// The pull request a push INTO it may push into: same repository, same
+    /// head branch as the delivery expects. Anything else means the pull
+    /// request was retargeted under us, and the task goes back to a human.
+    fn check_pull_target(&self, pr: &ForgePr, target: &PullTarget) -> Result<(), String> {
+        let noun = target.provider.change_noun();
+        // Compared against the head repository the target RECORDS (the fork,
+        // when the pull request comes from one), not against the source
+        // repository: a fork's pull request legitimately lives elsewhere, and
+        // the thing being caught here is the head moving since the task last
+        // looked.
+        if !crate::forge::same_repo(&pr.head_repo, &target.head_repo) {
             return Err(format!(
-                "{noun} #{} now comes from {}, not {recorded_repo} — check it before delivering \
-                 again",
-                meta.number, pr.head_repo
+                "{noun} #{} now comes from {}, not {} — check it before delivering again",
+                target.number, pr.head_repo, target.head_repo
             ));
         }
-        if pr.head_ref != remote_branch {
+        if pr.head_ref != target.head_ref {
             return Err(format!(
-                "{noun} #{} now tracks branch '{}', not '{remote_branch}' — check it before \
-                 delivering again",
-                meta.number, pr.head_ref
+                "{noun} #{} now tracks branch '{}', not '{}' — check it before delivering again",
+                target.number, pr.head_ref, target.head_ref
             ));
         }
         Ok(())
     }
 
-    /// The pull request a push-back may SETTLE against — a stricter question
-    /// than where it may push, and asked after any pushing is behind us.
+    /// The pull request a push INTO it may SETTLE against — a stricter
+    /// question than where it may push, and asked after any pushing is behind
+    /// us.
     ///
-    /// Everything [`check_pull_target`] asks, plus two things that can change
-    /// underneath a push and would otherwise be recorded as a delivery:
+    /// Everything [`Self::check_pull_target`] asks, plus two things that can
+    /// change underneath a push and would otherwise be recorded as a delivery:
     ///
     /// - the BASE must still be the one the task was reviewed against. A
     ///   retargeted pull request shows a different diff than the one a human
@@ -4930,24 +5065,24 @@ impl TaskEngine {
         ctx: &DeliveryCtx<'_>,
         repo_path: &str,
         pr: &ForgePr,
-        meta: &ForgeSourceMeta,
-        remote_branch: &str,
+        target: &PullTarget,
         expected_head: &str,
         pushed: bool,
     ) -> Result<(), String> {
-        self.check_pull_target(pr, meta, remote_branch)?;
-        let noun = meta.provider.change_noun();
+        self.check_pull_target(pr, target)?;
+        let noun = target.provider.change_noun();
+        let remote_branch = &target.head_ref;
         let done = if pushed {
             format!("the work was pushed to '{remote_branch}'")
         } else {
             format!("'{remote_branch}' already holds this task's work")
         };
-        if let Some(base) = meta.base_ref.as_deref() {
+        if let Some(base) = target.base_ref.as_deref() {
             if pr.base_ref != base {
                 return Err(format!(
                     "{done}, but {noun} #{} now targets '{}' instead of '{base}' — it was \
                      retargeted, so check the diff there before delivering again",
-                    meta.number, pr.base_ref
+                    target.number, pr.base_ref
                 ));
             }
         }
@@ -4958,14 +5093,21 @@ impl TaskEngine {
             // fast-forwards on top of our commits and merges that (they are).
             // Equality answers only the second; git answers both.
             if !self
-                .merge_carries_our_work(task_id, ctx, repo_path, meta, expected_head, &pr.head_sha)
+                .merge_carries_our_work(
+                    task_id,
+                    ctx,
+                    repo_path,
+                    target.number,
+                    expected_head,
+                    &pr.head_sha,
+                )
                 .await
             {
                 return Err(format!(
                     "{done}, but {noun} #{} was merged at a commit that does not contain it — \
                      this task's work is on that branch and NOT in that merge, so it needs a \
                      new {noun}",
-                    meta.number
+                    target.number
                 ));
             }
             return Ok(());
@@ -4973,13 +5115,14 @@ impl TaskEngine {
         if pr.state != "open" {
             return Err(format!(
                 "{done}, but {noun} #{} was closed without merging — reopen it, then deliver",
-                meta.number
+                target.number
             ));
         }
         Ok(())
     }
 
-    /// Whether the merge that closed this change carries the commit we pushed.
+    /// Whether the merge that closed change `number` carries the commit we
+    /// pushed.
     ///
     /// Equality is the ordinary answer and costs nothing. When the heads
     /// differ, only git can tell "someone fast-forwarded on top of our work
@@ -4992,7 +5135,7 @@ impl TaskEngine {
         task_id: i32,
         ctx: &DeliveryCtx<'_>,
         repo_path: &str,
-        meta: &ForgeSourceMeta,
+        number: i64,
         expected_head: &str,
         merged_head: &str,
     ) -> bool {
@@ -5016,7 +5159,7 @@ impl TaskEngine {
             .fetch_ref(
                 ctx,
                 repo_path,
-                &meta.provider.change_head_ref(meta.number),
+                &ctx.provider.change_head_ref(number),
                 &probe,
             )
             .await;
@@ -5033,31 +5176,84 @@ impl TaskEngine {
         carried
     }
 
-    /// merging → done with the pull request recorded on the row. The worktree
-    /// is deliberately KEPT: the pull request is open against this task's
-    /// branch, and another review round on it is a normal next step. Cleanup
-    /// stays where it already is — the user's, on a finished card.
+    /// merging → done with the pull request recorded on the row — or, for a
+    /// delivery asked to keep the task in review, merging → review with the
+    /// same record. The worktree is KEPT either way: the pull request is open
+    /// against this task's branch, and another review round on it is a normal
+    /// next step. Cleanup stays where it already is — the user's, on a
+    /// finished card (or the delivery's own, for a box ticked in the dialog).
+    ///
+    /// A forge task's pull request goes into its provenance snapshot as the row
+    /// has it NOW, not as the delivery read it when it started: a push into a
+    /// pull-request task's own pull request records `pushed_onto` there as its
+    /// push lands, and writing the older snapshot back would erase it — which a
+    /// task that stays in review needs, because its next round measures its
+    /// own work from there. This delivery holds the task, so nothing else
+    /// writes the snapshot meanwhile; the CAS binds the write to its
+    /// generation.
     async fn settle_delivery(
         self: &Arc<Self>,
         task_id: i32,
-        meta: &ForgeSourceMeta,
+        source: &DeliverySource,
         run_seq: i32,
         pr: &ForgePr,
+        keep_in_review: bool,
     ) -> Result<String, String> {
-        let mut meta = meta.clone();
-        meta.result_pr = Some(pr.html_url.clone());
         // Serialized out here on purpose — see `complete_delivered`: its
         // transaction must open with a write.
-        let meta_json = serde_json::to_string(&meta)
-            .map_err(|e| format!("could not record the pull request: {e}"))?;
-        let settled = work_task_service::complete_delivered(
-            &self.db.conn,
-            task_id,
-            run_seq,
-            &pr.html_url,
-            &meta_json,
-        )
-        .await
+        let record_json = match source {
+            DeliverySource::Issue(_) | DeliverySource::Pull(_) => {
+                // No fallback to the snapshot this delivery started from: that
+                // is exactly the write that would erase a `pushed_onto` the
+                // push already recorded. A read that fails here bounces the
+                // delivery, and its retry finds the pull request already
+                // carrying the work.
+                let row = work_task_service::get_model(&self.db.conn, task_id)
+                    .await
+                    .map_err(|e| format!("could not record the pull request: {e}"))?;
+                let mut meta = row
+                    .source_meta
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<ForgeSourceMeta>(s).ok())
+                    .ok_or_else(|| {
+                        "could not record the pull request: the task's source information is \
+                         unreadable"
+                            .to_string()
+                    })?;
+                meta.result_pr = Some(pr.html_url.clone());
+                meta.result_pr_number = Some(pr.number);
+                serde_json::to_string(&meta)
+            }
+            DeliverySource::Local { target, .. } => serde_json::to_string(&WorkTaskDelivery {
+                target: target.clone(),
+                pr_url: pr.html_url.clone(),
+                pr_number: pr.number,
+            }),
+        }
+        .map_err(|e| format!("could not record the pull request: {e}"))?;
+        let record = match source {
+            DeliverySource::Local { .. } => DeliveryRecord::Delivery(&record_json),
+            _ => DeliveryRecord::SourceMeta(&record_json),
+        };
+        let settled = if keep_in_review {
+            work_task_service::delivered_to_review(
+                &self.db.conn,
+                task_id,
+                run_seq,
+                &pr.html_url,
+                record,
+            )
+            .await
+        } else {
+            work_task_service::complete_delivered(
+                &self.db.conn,
+                task_id,
+                run_seq,
+                &pr.html_url,
+                record,
+            )
+            .await
+        }
         .map_err(|e| e.to_string())?;
         if !settled {
             return Err(format!(
@@ -5068,8 +5264,13 @@ impl TaskEngine {
         }
         self.emit_upsert(task_id);
         // Behind the same CAS as the settle, so the retry of a delivery that
-        // already finished cannot comment twice.
-        self.spawn_forge_writeback(task_id, WritebackOutcome::Delivered(pr.html_url.clone()));
+        // already finished cannot comment twice. Only for a delivery that
+        // FINISHED the task: the comment reports how a task ended, and one
+        // kept in review has not — its thread hears once it does, whichever
+        // way that turns out.
+        if !keep_in_review {
+            self.spawn_forge_writeback(task_id, WritebackOutcome::Delivered(pr.html_url.clone()));
+        }
         Ok(pr.html_url.clone())
     }
 
@@ -5182,16 +5383,18 @@ impl TaskEngine {
     /// Every exit binds to the generation this pass READ, never just to
     /// "the row is merging": a recovery that spent seconds at the forge must
     /// not bounce a delivery someone started in the meantime.
+    ///
+    /// A recovered delivery settles the way the interrupted one was asked to —
+    /// `done`, or back to review with its pull request recorded — and takes
+    /// the worktree along when that was asked for and the task finished.
     async fn recover_delivery(
         self: &Arc<Self>,
         task: &crate::db::entities::work_task::Model,
         state: &WorkTaskMergeState,
     ) {
-        let task_id = task.id;
-        let (Some(remote_branch), Some(expected_head)) = (
-            state.remote_branch.as_deref(),
-            state.expected_head.as_deref(),
-        ) else {
+        let (Some(remote_branch), Some(expected_head)) =
+            (state.remote_branch.as_deref(), state.expected_head.as_deref())
+        else {
             self.bounce_delivery(
                 task,
                 "the delivery was interrupted and its state is incomplete — deliver again"
@@ -5200,12 +5403,9 @@ impl TaskEngine {
             .await;
             return;
         };
-        let (Some(meta), Some(base_branch)) = (
-            task.source_meta
-                .as_deref()
-                .and_then(|s| serde_json::from_str::<ForgeSourceMeta>(s).ok()),
-            task.base_branch.as_deref(),
-        ) else {
+        let (Ok(source), Some(base_branch)) =
+            (recovery_source(task, state), task.base_branch.as_deref())
+        else {
             self.bounce_delivery(
                 task,
                 "the delivery was interrupted and the task's source information is unreadable — \
@@ -5216,33 +5416,84 @@ impl TaskEngine {
             return;
         };
 
-        let ctx = DeliveryCtx {
-            conn: &self.db.conn,
-            data_dir: &self.data_dir,
-            provider: meta.provider,
-            server_host: &meta.server_host,
-            account_id: &meta.account_id,
-            owner_repo: &meta.owner_repo,
+        let ctx = source.ctx(&self.db.conn, &self.data_dir);
+        // A delivery INTO a pull request knows exactly which one — a
+        // pull-request task's number is part of its identity, and a push into
+        // the pull request an earlier round opened recorded that one's — so
+        // recovery looks it up instead of searching by head branch.
+        let into = match &source {
+            DeliverySource::Pull(meta) => Some(PullTarget::own_pull_request(meta, remote_branch)),
+            _ => state
+                .pull_number
+                .map(|number| PullTarget::recorded(&source, number, remote_branch, base_branch)),
         };
-        // A push-back knows exactly which pull request it was delivering into —
-        // the number is part of the task's identity — so recovery looks it up
-        // instead of searching by head branch.
-        if task.source_kind.as_deref() == Some(SOURCE_KIND_PR) {
-            self.recover_push_back(task, &ctx, &meta, remote_branch, expected_head)
-                .await;
-            return;
-        }
-        let found = match self.forge.find_pulls(&ctx, remote_branch).await {
-            Ok(prs) => prs,
-            Err(e) => {
-                self.bounce_delivery(
-                    task,
-                    format!("could not check the pull request after a restart: {e}"),
-                )
-                .await;
-                return;
+        let by_branch = || {
+            self.recover_by_branch(
+                task,
+                &ctx,
+                &source,
+                remote_branch,
+                base_branch,
+                expected_head,
+                state,
+            )
+        };
+        let outcome = match into {
+            None => by_branch().await,
+            Some(target) => {
+                match self
+                    .recover_into_pull(task, &ctx, &source, &target, expected_head, state)
+                    .await
+                {
+                    Ok(()) => Ok(()),
+                    // The pull request an earlier round opened does not show
+                    // this delivery — and for an issue's or a local task that
+                    // is not the end of it: a live attempt that found that one
+                    // closed opens a NEW pull request by branch, and may have
+                    // died right after. Whatever matches all four criteria by
+                    // branch carries exactly this commit on this branch, so it
+                    // is the delivery; only when nothing does is the reason
+                    // about the recorded one the one to tell. A pull-request
+                    // task never opens one, so its own is the only answer.
+                    Err(reason) if !matches!(source, DeliverySource::Pull(_)) => {
+                        by_branch().await.map_err(|_| reason)
+                    }
+                    Err(reason) => Err(reason),
+                }
             }
         };
+        match outcome {
+            // The cleanup the interrupted delivery would have run once it
+            // settled `done` (the flag is never set with `keep_in_review`).
+            Ok(()) => {
+                if state.delete_worktree {
+                    self.remove_delivered_worktree(task.id, task.folder_id, expected_head)
+                        .await;
+                }
+            }
+            Err(reason) => self.bounce_delivery(task, reason).await,
+        }
+    }
+
+    /// Recovery for a delivery that opened or adopted its pull request by
+    /// branch: whichever pull request matches all four criteria is the one it
+    /// reached. `Err` is why the task goes back to a human.
+    #[allow(clippy::too_many_arguments)]
+    async fn recover_by_branch(
+        self: &Arc<Self>,
+        task: &crate::db::entities::work_task::Model,
+        ctx: &DeliveryCtx<'_>,
+        source: &DeliverySource,
+        remote_branch: &str,
+        base_branch: &str,
+        expected_head: &str,
+        state: &WorkTaskMergeState,
+    ) -> Result<(), String> {
+        let found = self
+            .forge
+            .find_pulls(ctx, remote_branch)
+            .await
+            .map_err(|e| format!("could not check the pull request after a restart: {e}"))?;
         // Anything short of all four criteria goes back to a human. Adopting on
         // a partial match would settle the task against someone else's pull
         // request that merely reused the branch name.
@@ -5251,51 +5502,31 @@ impl TaskEngine {
             expected_head,
             remote_branch,
             base_branch,
-            &meta.owner_repo,
+            ctx.owner_repo,
         ) {
-            PrAdoption::Merged(pr) | PrAdoption::Open(pr) => {
-                if let Err(e) = self
-                    .settle_delivery(task_id, &meta, task.run_seq, &pr)
-                    .await
-                {
-                    self.bounce_delivery(task, e).await;
-                }
-            }
-            PrAdoption::ClosedUnmerged(pr) => {
-                self.bounce_delivery(
-                    task,
-                    format!(
-                        "the delivery was interrupted and pull request #{} was closed without \
-                         merging — deliver again if you still want it",
-                        pr.number
-                    ),
-                )
-                .await;
-            }
-            PrAdoption::StaleHead(pr) => {
-                self.bounce_delivery(
-                    task,
-                    format!(
-                        "the delivery was interrupted and pull request #{} now points at a \
-                         different commit — check that branch before delivering again",
-                        pr.number
-                    ),
-                )
-                .await;
-            }
-            PrAdoption::NoMatch => {
-                self.bounce_delivery(
-                    task,
-                    "the delivery was interrupted before its pull request existed — deliver again"
-                        .to_string(),
-                )
-                .await;
-            }
+            PrAdoption::Merged(pr) | PrAdoption::Open(pr) => self
+                .settle_delivery(task.id, source, task.run_seq, &pr, state.keep_in_review)
+                .await
+                .map(|_| ()),
+            PrAdoption::ClosedUnmerged(pr) => Err(format!(
+                "the delivery was interrupted and pull request #{} was closed without merging — \
+                 deliver again if you still want it",
+                pr.number
+            )),
+            PrAdoption::StaleHead(pr) => Err(format!(
+                "the delivery was interrupted and pull request #{} now points at a different \
+                 commit — check that branch before delivering again",
+                pr.number
+            )),
+            PrAdoption::NoMatch => Err(
+                "the delivery was interrupted before its pull request existed — deliver again"
+                    .to_string(),
+            ),
         }
     }
 
-    /// Crash recovery for a push-back: did the dead process get the commits
-    /// onto the pull request's branch?
+    /// Crash recovery for a delivery INTO a pull request that exists: did the
+    /// dead process get the commits onto its branch? `Err` is why not.
     ///
     /// Only one answer settles the task — the pull request's head IS the commit
     /// this delivery pushed. Deliberately stricter than the live path (which
@@ -5303,80 +5534,58 @@ impl TaskEngine {
     /// pushed after us" and "we never pushed" look identical from the outside.
     /// Bouncing costs one click, and the retry is a no-op push followed by the
     /// normal settle.
-    async fn recover_push_back(
+    async fn recover_into_pull(
         self: &Arc<Self>,
         task: &crate::db::entities::work_task::Model,
         ctx: &DeliveryCtx<'_>,
-        meta: &ForgeSourceMeta,
-        remote_branch: &str,
+        source: &DeliverySource,
+        target: &PullTarget,
         expected_head: &str,
-    ) {
-        let pr = match self.forge.get_pull(ctx, meta.number).await {
-            Ok(pr) => pr,
-            Err(e) => {
-                self.bounce_delivery(
-                    task,
-                    format!(
-                        "could not read pull request #{} after a restart: {e}",
-                        meta.number
-                    ),
-                )
-                .await;
-                return;
-            }
-        };
+        state: &WorkTaskMergeState,
+    ) -> Result<(), String> {
+        let pr = self.forge.get_pull(ctx, target.number).await.map_err(|e| {
+            format!(
+                "could not read pull request #{} after a restart: {e}",
+                target.number
+            )
+        })?;
         // The same question the live path asks after its push — with the head
         // OID added, because a crash left no "the push succeeded" evidence and
         // "someone else pushed" is indistinguishable from "we never did".
         // The task's own worktree may be gone after a crash; the project
         // folder's object store is the same one and always there.
-        let repo_path = match get_folder_core(&self.db, task.folder_id).await {
-            Ok(folder) => folder.path,
-            Err(e) => {
-                self.bounce_delivery(task, format!("the delivery was interrupted: {e}"))
-                    .await;
-                return;
-            }
-        };
-        if let Err(reason) = self
-            .settle_pull_target(
-                task.id,
-                ctx,
-                &repo_path,
-                &pr,
-                meta,
-                remote_branch,
-                expected_head,
-                // A recovery cannot know whether the interrupted attempt got
-                // its push out; claiming one is the conservative reading.
-                true,
-            )
+        let repo_path = get_folder_core(&self.db, task.folder_id)
             .await
-        {
-            self.bounce_delivery(task, format!("the delivery was interrupted: {reason}"))
-                .await;
-            return;
-        }
+            .map_err(|e| format!("the delivery was interrupted: {e}"))?
+            .path;
+        self.settle_pull_target(
+            task.id,
+            ctx,
+            &repo_path,
+            &pr,
+            target,
+            expected_head,
+            // A recovery cannot know whether the interrupted attempt got its
+            // push out; claiming one is the conservative reading.
+            true,
+        )
+        .await
+        .map_err(|reason| format!("the delivery was interrupted: {reason}"))?;
         // For a MERGED change the check above already PROVED the merge carries
         // this task's commit, which is strictly more than the head OID says —
         // asking again here would reject the very case that proof exists for
         // (someone fast-forwarded on top of our work and merged that).
         if !pr.merged && !pr.head_sha.eq_ignore_ascii_case(expected_head) {
-            self.bounce_delivery(
-                task,
-                format!(
-                    "the delivery was interrupted and {} #{} does not show this task's commit — \
-                     deliver again",
-                    meta.provider.change_noun(),
-                    meta.number
-                ),
-            )
-            .await;
-            return;
+            return Err(format!(
+                "the delivery was interrupted and {} #{} does not show this task's commit — \
+                 deliver again",
+                target.provider.change_noun(),
+                target.number
+            ));
         }
-        if let Err(e) = self.settle_delivery(task.id, meta, task.run_seq, &pr).await {
-            self.bounce_delivery(task, e).await;
-        }
+        self.settle_delivery(task.id, source, task.run_seq, &pr, state.keep_in_review)
+            .await
+            .map(|_| ())
     }
 
     // ── merge pump (the folder's one merge slot) ────────────────────────────
@@ -6476,6 +6685,13 @@ fn auto_merge_candidate(
     if task.source_kind.is_some() {
         return false;
     }
+    // Delivered to a pull request it stayed in review after: its user chose
+    // to land it THROUGH that pull request, and a local landing behind its
+    // back would leave the pull request open on work that is already in the
+    // base. Their explicit merge click is unaffected, as above.
+    if task.delivery.is_some() {
+        return false;
+    }
     if task.last_error.is_some() {
         return false;
     }
@@ -6625,6 +6841,224 @@ fn classify_push_refusal(error: &str) -> PushRefusal {
         return PushRefusal::BranchMoved;
     }
     PushRefusal::Unknown
+}
+
+/// What a delivery delivers FROM — which decides where it pushes, what pull
+/// request it goes into or opens, and where it records the one it reached.
+#[derive(Debug, Clone)]
+enum DeliverySource {
+    /// Triggered from a forge issue: the task's own branch, in a pull request
+    /// that closes the issue.
+    Issue(ForgeSourceMeta),
+    /// Triggered from a pull request: pushed back onto that pull request's
+    /// head branch.
+    Pull(ForgeSourceMeta),
+    /// No forge provenance: the task's own branch, in a pull request on the
+    /// repository the project's `origin` names. `recorded` is the number of
+    /// the pull request an earlier delivery opened, if the task stayed in
+    /// review after it.
+    Local {
+        target: DeliveryTarget,
+        recorded: Option<i64>,
+    },
+}
+
+impl DeliverySource {
+    /// The forge, repository and pinned account every step of the delivery
+    /// speaks to.
+    fn ctx<'a>(
+        &'a self,
+        conn: &'a sea_orm::DatabaseConnection,
+        data_dir: &'a Path,
+    ) -> DeliveryCtx<'a> {
+        let (provider, server_host, account_id, owner_repo) = match self {
+            DeliverySource::Issue(meta) | DeliverySource::Pull(meta) => (
+                meta.provider,
+                meta.server_host.as_str(),
+                meta.account_id.as_str(),
+                meta.owner_repo.as_str(),
+            ),
+            DeliverySource::Local { target, .. } => (
+                target.provider,
+                target.server_host.as_str(),
+                target.account_id.as_str(),
+                target.owner_repo.as_str(),
+            ),
+        };
+        DeliveryCtx {
+            conn,
+            data_dir,
+            provider,
+            server_host,
+            account_id,
+            owner_repo,
+        }
+    }
+
+    fn provider(&self) -> ForgeProvider {
+        match self {
+            DeliverySource::Issue(meta) | DeliverySource::Pull(meta) => meta.provider,
+            DeliverySource::Local { target, .. } => target.provider,
+        }
+    }
+
+    fn owner_repo(&self) -> &str {
+        match self {
+            DeliverySource::Issue(meta) | DeliverySource::Pull(meta) => &meta.owner_repo,
+            DeliverySource::Local { target, .. } => &target.owner_repo,
+        }
+    }
+
+    /// The pull request an earlier delivery of this task opened, which its
+    /// next delivery pushes into. Never a pull-request task's own: that one
+    /// is the task's identity, not something it delivered.
+    fn recorded_pull(&self) -> Option<i64> {
+        match self {
+            // Both halves, or it is not a record: a row delivered before the
+            // number was kept names its pull request by URL alone, and every
+            // such row is `done`.
+            DeliverySource::Issue(meta) => meta.result_pr.as_ref().and(meta.result_pr_number),
+            DeliverySource::Pull(_) => None,
+            DeliverySource::Local { recorded, .. } => *recorded,
+        }
+    }
+
+    /// What a local task's delivery persists for crash recovery — the one
+    /// source with nothing else naming its repository and account.
+    fn local_target(&self) -> Option<&DeliveryTarget> {
+        match self {
+            DeliverySource::Local { target, .. } => Some(target),
+            _ => None,
+        }
+    }
+
+    /// Body of the pull request a delivery of this task opens.
+    fn pull_request_body(&self, task_id: i32) -> String {
+        match self {
+            DeliverySource::Issue(meta) => pull_request_body(&meta.url, meta.number, task_id),
+            // A pull-request task never opens one; the local body is the one
+            // that claims nothing.
+            DeliverySource::Pull(_) | DeliverySource::Local { .. } => {
+                local_pull_request_body(task_id)
+            }
+        }
+    }
+}
+
+/// A pull request a delivery pushes INTO instead of opening one — a
+/// pull-request task's own, or the one an issue's or a local task's earlier
+/// delivery opened before the task stayed in review. Everything the push and
+/// the checks around it need to know, whichever of the two it is.
+#[derive(Debug, Clone)]
+struct PullTarget {
+    number: i64,
+    provider: ForgeProvider,
+    /// `owner/repo` its head branch lives in, as recorded — the fork, for a
+    /// fork's pull request. Compared with `same_repo`, never `==`.
+    head_repo: String,
+    /// Where the push lands: `head_repo`, normalized.
+    push_repo: String,
+    /// The source repository — where every API call goes, and what tells a
+    /// fork's push apart from a same-repository one in an error.
+    owner_repo: String,
+    head_ref: String,
+    /// The base it was reviewed against. `None` (a pull-request row hydrated
+    /// before the field existed) skips the retarget check.
+    base_ref: Option<String>,
+    /// Record what each push adds — a pull-request task's own-work anchor
+    /// (`pushed_onto`) and its counters, which measure from the pull request's
+    /// head. An issue's or a local task's counters measure from its base, and
+    /// already cover everything its pull request carries.
+    record_push: bool,
+}
+
+impl PullTarget {
+    /// A pull-request task's own pull request, pushed back to on `head_ref`.
+    fn own_pull_request(meta: &ForgeSourceMeta, head_ref: &str) -> Self {
+        // Rows without a recorded head repository are same-repo by
+        // construction: builds that predate the field refused forks.
+        let head_repo = meta
+            .head_repo
+            .as_deref()
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+            .unwrap_or(&meta.owner_repo)
+            .to_string();
+        PullTarget {
+            number: meta.number,
+            provider: meta.provider,
+            push_repo: pull_push_repo(meta).unwrap_or_else(|_| head_repo.clone()),
+            head_repo,
+            owner_repo: meta.owner_repo.clone(),
+            head_ref: head_ref.to_string(),
+            base_ref: meta.base_ref.clone(),
+            record_push: true,
+        }
+    }
+
+    /// The pull request `number` an earlier delivery of an issue's or a local
+    /// task opened from the task's own branch, in its own repository, against
+    /// the base it was reviewed on.
+    fn recorded(source: &DeliverySource, number: i64, head_ref: &str, base_ref: &str) -> Self {
+        let owner_repo = source.owner_repo().to_string();
+        PullTarget {
+            number,
+            provider: source.provider(),
+            head_repo: owner_repo.clone(),
+            push_repo: crate::forge::normalize_repo(&owner_repo)
+                .unwrap_or_else(|| owner_repo.clone()),
+            owner_repo,
+            head_ref: head_ref.to_string(),
+            base_ref: Some(base_ref.to_string()),
+            record_push: false,
+        }
+    }
+}
+
+/// How a delivery INTO an existing pull request came out.
+#[derive(Debug)]
+enum IntoPull {
+    /// Pushed — or already there — and checked: the pull request to settle on.
+    Delivered(ForgePr),
+    /// Closed or merged BEFORE anything was pushed, with commits still to
+    /// push. Nothing was published.
+    NoLongerOpen(ForgePr),
+}
+
+/// What an interrupted delivery was delivering from, read back for crash
+/// recovery. A local task's repository and account come from the merge state
+/// the delivery persisted — the one record of them until it settles — and,
+/// failing that, from the pull request an earlier delivery recorded.
+fn recovery_source(
+    task: &crate::db::entities::work_task::Model,
+    state: &WorkTaskMergeState,
+) -> Result<DeliverySource, ()> {
+    let forge_meta = || {
+        task.source_meta
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<ForgeSourceMeta>(s).ok())
+            .ok_or(())
+    };
+    match task.source_kind.as_deref() {
+        Some(SOURCE_KIND_ISSUE) => Ok(DeliverySource::Issue(forge_meta()?)),
+        Some(SOURCE_KIND_PR) => Ok(DeliverySource::Pull(forge_meta()?)),
+        None => {
+            let recorded = task
+                .delivery
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<WorkTaskDelivery>(s).ok());
+            let target = state
+                .target
+                .clone()
+                .or_else(|| recorded.as_ref().map(|r| r.target.clone()))
+                .ok_or(())?;
+            Ok(DeliverySource::Local {
+                target,
+                recorded: recorded.map(|r| r.pr_number),
+            })
+        }
+        Some(_) => Err(()),
+    }
 }
 
 /// The repository a pull-request task's push-back lands in: the HEAD
@@ -8047,6 +8481,19 @@ mod tests {
         task.deferred_at = Some(chrono::Utc::now());
         assert!(!auto_merge_candidate(&task, &settings));
         task.deferred_at = None;
+
+        // Delivered to a pull request and kept in review: its user lands it
+        // through that pull request. Same flip-only-this-field proof.
+        task.delivery = Some(
+            r#"{"provider":"github","server_host":"github.com","account_id":"a","owner_repo":"acme/app","pr_url":"https://github.test/acme/app/pull/42","pr_number":42}"#
+                .into(),
+        );
+        assert!(
+            !auto_merge_candidate(&task, &settings),
+            "a task with an open pull request never lands locally unattended"
+        );
+        task.delivery = None;
+        assert!(auto_merge_candidate(&task, &settings));
         assert!(auto_merge_candidate(&task, &settings));
 
         // Only review is mergeable.
@@ -8256,6 +8703,7 @@ mod tests {
             source_kind: None,
             source_key: None,
             source_meta: None,
+            delivery: None,
             created_at: now,
             updated_at: now,
             started_at: None,
@@ -11063,9 +11511,11 @@ mod tests {
     /// step independently failable so each failure point can be exercised.
     #[derive(Default)]
     struct FakeForge {
-        /// `(repository, work branch, remote branch)` of every push.
+        /// `(repository, commit, remote branch)` of every push.
         pushes: Mutex<Vec<(String, String, String)>>,
         created: Mutex<Vec<(String, String, String, bool)>>,
+        /// The body of every pull request opened, in `created`'s order.
+        bodies: Mutex<Vec<String>>,
         existing: Mutex<Vec<ForgePr>>,
         /// What the source repository's base branch points at. The fixture
         /// seeds it with the task's own base, i.e. "nothing unpushed".
@@ -11091,6 +11541,15 @@ mod tests {
         /// so only a check against the OID the delivery actually published can
         /// tell that the branch has outrun it.
         commit_on_push: Option<String>,
+        /// Where the project's `origin` would send a task without provenance:
+        /// `None` answers like a checkout whose remote codeg cannot deliver to.
+        local: Mutex<Option<DeliveryTarget>>,
+        /// How many times the engine asked the checkout — a pinned task must
+        /// not ask again.
+        local_lookups: Mutex<u32>,
+        /// The head a newly opened pull request reports, when it is not the
+        /// commit last pushed to its branch — someone else pushed in between.
+        create_head: Option<String>,
     }
 
     #[async_trait::async_trait]
@@ -11100,7 +11559,7 @@ mod tests {
             _ctx: &DeliveryCtx<'_>,
             worktree_path: &str,
             repo: &str,
-            work_branch: &str,
+            commit: &str,
             remote_branch: &str,
         ) -> Result<(), String> {
             if let Some(e) = &self.push_error {
@@ -11118,7 +11577,7 @@ mod tests {
             }
             self.pushes.lock().await.push((
                 repo.to_string(),
-                work_branch.to_string(),
+                commit.to_string(),
                 remote_branch.to_string(),
             ));
             if let Some(changed) = self.after_push.lock().await.clone() {
@@ -11163,6 +11622,17 @@ mod tests {
                 .map_err(|e| e.to_string())
         }
 
+        async fn local_target(
+            &self,
+            _conn: &sea_orm::DatabaseConnection,
+            _project_path: &str,
+        ) -> Result<DeliveryTarget, String> {
+            *self.local_lookups.lock().await += 1;
+            self.local.lock().await.clone().ok_or_else(|| {
+                "this project has no `origin` remote codeg can deliver to".to_string()
+            })
+        }
+
         async fn get_pull(&self, _ctx: &DeliveryCtx<'_>, number: i64) -> Result<ForgePr, String> {
             if let Some(e) = &self.get_pull_error {
                 return Err(e.clone());
@@ -11203,18 +11673,36 @@ mod tests {
             if let Some(e) = &self.create_error {
                 return Err(e.clone());
             }
-            self.created.lock().await.push((
+            let mut created = self.created.lock().await;
+            created.push((
                 req.title.to_string(),
                 req.head.to_string(),
                 req.base.to_string(),
                 req.draft,
             ));
+            self.bodies.lock().await.push(req.body.to_string());
+            // #42 first, then one up per pull request opened after it — what
+            // tells "pushed into the same one" from "opened another".
+            let number = 41 + created.len() as i64;
+            // Opened over what the branch holds: the last commit pushed to it.
+            let head_sha = match &self.create_head {
+                Some(other) => other.clone(),
+                None => self
+                    .pushes
+                    .lock()
+                    .await
+                    .iter()
+                    .rev()
+                    .find(|(_, _, branch)| branch == req.head)
+                    .map(|(_, commit, _)| commit.clone())
+                    .unwrap_or_default(),
+            };
             Ok(ForgePr {
-                number: 42,
-                html_url: "https://github.test/acme/app/pull/42".to_string(),
+                number,
+                html_url: format!("https://github.test/acme/app/pull/{number}"),
                 state: "open".to_string(),
                 merged: false,
-                head_sha: "unused-by-the-fake".to_string(),
+                head_sha,
                 head_ref: req.head.to_string(),
                 head_repo: "acme/app".to_string(),
                 base_ref: req.base.to_string(),
@@ -11393,18 +11881,15 @@ mod tests {
         let f = delivery_fixture(FakeForge::default()).await;
         let url = f
             .engine
-            .deliver_pr(f.task_id, Some("  Fix login  ".into()), false, false)
+            .deliver_pr(f.task_id, Some("  Fix login  ".into()), false, false, true)
             .await
             .expect("delivery");
         assert_eq!(url, "https://github.test/acme/app/pull/42");
 
         assert_eq!(
             f.forge.pushes.lock().await.as_slice(),
-            [(
-                "acme/app".to_string(),
-                "task/7".to_string(),
-                "task/7".to_string()
-            )]
+            [("acme/app".to_string(), f.head.clone(), "task/7".to_string())],
+            "the commit the delivery snapshotted, onto the task's own branch"
         );
         let created = f.forge.created.lock().await.clone();
         assert_eq!(
@@ -11443,7 +11928,7 @@ mod tests {
         let f = delivery_fixture(FakeForge::default()).await;
         let url = f
             .engine
-            .deliver_pr(f.task_id, None, false, true)
+            .deliver_pr(f.task_id, None, false, true, true)
             .await
             .expect("delivery");
         assert_eq!(url, "https://github.test/acme/app/pull/42");
@@ -11483,7 +11968,7 @@ mod tests {
         .await;
         let url = f
             .engine
-            .deliver_pr(f.task_id, None, false, true)
+            .deliver_pr(f.task_id, None, false, true, true)
             .await
             .expect("delivery");
         assert_eq!(url, "https://github.test/acme/app/pull/42");
@@ -11525,7 +12010,7 @@ mod tests {
         .await;
         let url = f
             .engine
-            .deliver_pr(f.task_id, None, false, true)
+            .deliver_pr(f.task_id, None, false, true, true)
             .await
             .expect("delivery");
         assert_eq!(url, "https://github.test/acme/app/pull/42");
@@ -11574,7 +12059,7 @@ mod tests {
 
         let url = f
             .engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("delivery");
         assert_eq!(url, "https://github.test/acme/app/pull/11");
@@ -11604,7 +12089,7 @@ mod tests {
 
         let url = f
             .engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("delivery");
         assert_eq!(
@@ -11646,7 +12131,7 @@ mod tests {
             let f = delivery_fixture(forge).await;
             let err = f
                 .engine
-                .deliver_pr(f.task_id, None, false, false)
+                .deliver_pr(f.task_id, None, false, false, true)
                 .await
                 .expect_err("must fail");
             assert!(err.contains(expected), "got {err}");
@@ -11677,7 +12162,7 @@ mod tests {
         });
         let err = f
             .engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect_err("must stop");
         assert!(err.contains("closed without merging"), "got {err}");
@@ -11698,7 +12183,7 @@ mod tests {
         std::fs::write(dirty.worktree.join("scratch.txt"), "junk\n").expect("write");
         let err = dirty
             .engine
-            .deliver_pr(dirty.task_id, None, false, false)
+            .deliver_pr(dirty.task_id, None, false, false, true)
             .await
             .expect_err("dirty worktree");
         assert!(err.contains("uncommitted changes"), "got {err}");
@@ -11709,7 +12194,7 @@ mod tests {
         git_run(&empty.worktree, &["reset", "-q", "--hard", "HEAD~1"]);
         let err = empty
             .engine
-            .deliver_pr(empty.task_id, None, false, false)
+            .deliver_pr(empty.task_id, None, false, false, true)
             .await
             .expect_err("nothing to deliver");
         assert!(err.contains("nothing to deliver"), "got {err}");
@@ -11726,16 +12211,18 @@ mod tests {
     /// The gate lives in the engine, not the UI: this command is reachable by
     /// id from an old frontend or a direct web API call.
     ///
-    /// Two ways to be undeliverable, and neither may push anything: a task with
-    /// no forge source has no repository to deliver to at all, and a
-    /// pull-request task whose branch information is missing (a row written
-    /// before that was recorded) must be re-triggered rather than pushed at a
-    /// branch name we would have to guess.
+    /// Three ways to be undeliverable, and none may push anything: a task with
+    /// no forge source whose project's `origin` is no forge codeg can deliver
+    /// to, a source this build does not know, and a pull-request task whose
+    /// branch information is missing (a row written before that was recorded)
+    /// — which must be re-triggered rather than pushed at a branch name we
+    /// would have to guess.
     #[tokio::test]
     async fn a_task_without_deliverable_provenance_is_refused() {
         use sea_orm::{ActiveModelTrait, Set};
         for (kind, needle) in [
-            (None, "issue or pull request"),
+            (None, "no `origin` remote"),
+            (Some("automation"), "cannot be delivered"),
             (Some(SOURCE_KIND_PR), "does not know which branch"),
         ] {
             let f = delivery_fixture(FakeForge::default()).await;
@@ -11746,7 +12233,7 @@ mod tests {
 
             let err = f
                 .engine
-                .deliver_pr(f.task_id, None, false, false)
+                .deliver_pr(f.task_id, None, false, false, true)
                 .await
                 .expect_err("must refuse");
             assert!(err.contains(needle), "got {err}");
@@ -11888,7 +12375,7 @@ mod tests {
 
         let err = f
             .engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect_err("must refuse");
         assert!(err.contains("not on the remote yet"), "got {err}");
@@ -11907,7 +12394,7 @@ mod tests {
         *f.forge.remote_base.lock().await = None;
         let err = f
             .engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect_err("an unreadable base must refuse");
         assert!(err.contains("could not read"), "got {err}");
@@ -11961,7 +12448,7 @@ mod tests {
 
         let err = f
             .engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect_err("the second must not run");
         assert!(err.contains("already merging"), "got {err}");
@@ -12024,7 +12511,7 @@ mod tests {
 
         let err = f
             .engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect_err("must bounce");
         assert!(err.contains("different commit"), "got {err}");
@@ -12111,7 +12598,7 @@ mod tests {
         f.forge.existing.lock().await.push(pr);
 
         f.engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("push back");
 
@@ -12153,7 +12640,7 @@ mod tests {
         active.update(&f.engine.db.conn).await.expect("stale counters");
 
         f.engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("push back");
 
@@ -12203,7 +12690,7 @@ mod tests {
 
         let refused = f
             .engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect_err("a retargeted pull request is not settled against");
         assert!(refused.contains("retargeted"), "{refused}");
@@ -12231,7 +12718,7 @@ mod tests {
             existing[0].head_sha = pushed;
         }
         f.engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("the retry settles");
         assert_eq!(f.forge.pushes.lock().await.len(), 1, "the retry pushed nothing");
@@ -12301,7 +12788,7 @@ mod tests {
             .expect("record the run's result");
 
         f.engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("delivery");
 
@@ -12340,7 +12827,7 @@ mod tests {
         let f = delivery_fixture(FakeForge::default()).await;
         set_writeback(&f, false).await;
         f.engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("delivery");
         // The settle emitted; give a spawned write-back the same chance to run
@@ -12367,7 +12854,7 @@ mod tests {
             "the fixture stands in for a pre-choice row"
         );
         f.engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("delivery");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -12388,7 +12875,7 @@ mod tests {
         .await;
         enable_writeback(&f).await;
         f.engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("delivery");
 
@@ -13237,6 +13724,613 @@ mod tests {
         assert_eq!(files, ["a.txt"], "the drawer agrees with the counters");
     }
 
+    // ── tasks without provenance, and deliveries that keep the task ─────────
+
+    /// Re-stamp the delivery fixture's task as an ordinary board task — no
+    /// forge provenance at all — in a project whose `origin` the fake forge
+    /// answers with `acme/app` on GitHub. Returns that target.
+    async fn as_local_task(f: &Delivery) -> DeliveryTarget {
+        use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+        let target = DeliveryTarget {
+            provider: ForgeProvider::GitHub,
+            server_host: "github.com".into(),
+            account_id: "acc-default".into(),
+            owner_repo: "acme/app".into(),
+        };
+        *f.forge.local.lock().await = Some(target.clone());
+        let mut active = row(&f.engine, f.task_id).await.into_active_model();
+        active.title = Set("Tidy the login form".to_string());
+        active.source_kind = Set(None);
+        active.source_key = Set(None);
+        active.source_meta = Set(None);
+        active
+            .update(&f.engine.db.conn)
+            .await
+            .expect("as a local task");
+        target
+    }
+
+    fn delivery_record(task: &crate::db::entities::work_task::Model) -> Option<WorkTaskDelivery> {
+        task.delivery
+            .as_deref()
+            .map(|s| serde_json::from_str(s).expect("delivery record json"))
+    }
+
+    fn source_record(task: &crate::db::entities::work_task::Model) -> ForgeSourceMeta {
+        serde_json::from_str(task.source_meta.as_deref().expect("source meta"))
+            .expect("source meta json")
+    }
+
+    /// The pull request the fake opened first (#42), as the forge reports it
+    /// once the push that preceded it landed.
+    fn opened_pull(head_sha: &str) -> ForgePr {
+        ForgePr {
+            number: 42,
+            html_url: "https://github.test/acme/app/pull/42".into(),
+            state: "open".into(),
+            merged: false,
+            head_sha: head_sha.into(),
+            head_ref: "task/7".into(),
+            head_repo: "acme/app".into(),
+            base_ref: "main".into(),
+        }
+    }
+
+    /// Another round's commit on the task branch — what a follow-up leaves
+    /// behind before the next delivery.
+    async fn commit_another_round(f: &Delivery) -> String {
+        std::fs::write(f.worktree.join("a.txt"), "one\ntwo\nthree\n").expect("write");
+        git_run(&f.worktree, &["commit", "-qam", "round two"]);
+        task_git::rev_parse(f.worktree.to_str().unwrap(), "task/7")
+            .await
+            .expect("round two head")
+    }
+
+    /// Long enough for a spawned write-back to have posted, had one been
+    /// spawned — the only way to observe that none was.
+    async fn settle_spawned_work() {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    }
+
+    /// A task with no forge provenance is delivered to the repository its
+    /// project's `origin` names, as the account that speaks for that host: its
+    /// own branch, a pull request against its base, and the record of both on
+    /// the row — nothing claiming an issue, and no thread to comment on.
+    #[tokio::test]
+    async fn a_local_task_is_delivered_to_its_projects_origin() {
+        let f = delivery_fixture(FakeForge::default()).await;
+        let target = as_local_task(&f).await;
+
+        let url = f
+            .engine
+            .deliver_pr(f.task_id, None, true, false, true)
+            .await
+            .expect("delivery");
+        assert_eq!(url, "https://github.test/acme/app/pull/42");
+        assert_eq!(
+            f.forge.pushes.lock().await.as_slice(),
+            [("acme/app".to_string(), f.head.clone(), "task/7".to_string())]
+        );
+        assert_eq!(
+            f.forge.created.lock().await.as_slice(),
+            [(
+                "Tidy the login form".to_string(),
+                "task/7".to_string(),
+                "main".to_string(),
+                true
+            )],
+            "titled after the task, against its base, as the draft asked for"
+        );
+        let body = f.forge.bodies.lock().await[0].clone();
+        assert!(
+            body.contains(&format!("work task `{}`", f.task_id)),
+            "{body}"
+        );
+        assert!(
+            !body.contains("Closes"),
+            "there is no issue to close: {body}"
+        );
+
+        let task = row(&f.engine, f.task_id).await;
+        assert_eq!(task.status, WorkTaskStatus::Done);
+        assert_eq!(task.completion_kind.as_deref(), Some("delivered_pr"));
+        assert_eq!(
+            delivery_record(&task),
+            Some(WorkTaskDelivery {
+                target,
+                pr_url: url,
+                pr_number: 42,
+            })
+        );
+        assert!(
+            task.source_kind.is_none() && task.source_meta.is_none(),
+            "a delivery mints no provenance"
+        );
+        assert_eq!(*f.forge.local_lookups.lock().await, 1);
+        settle_spawned_work().await;
+        assert!(
+            f.forge.comments.lock().await.is_empty(),
+            "no thread to write back to"
+        );
+    }
+
+    /// Unchecking "mark done" keeps the task: back in review with its pull
+    /// request recorded, the worktree untouched even with its box ticked — the
+    /// next round runs in it — and nothing told to the issue, because nothing
+    /// ended. The delivery that does finish it pushes INTO that pull request,
+    /// and only then does the thread hear, once.
+    #[tokio::test]
+    async fn a_delivery_kept_in_review_is_finished_by_the_next_one_into_the_same_pull_request() {
+        let f = delivery_fixture(FakeForge::default()).await;
+        enable_writeback(&f).await;
+
+        let url = f
+            .engine
+            .deliver_pr(f.task_id, Some("Fix login".into()), false, true, false)
+            .await
+            .expect("kept delivery");
+        assert_eq!(url, "https://github.test/acme/app/pull/42");
+        let task = row(&f.engine, f.task_id).await;
+        assert_eq!(task.status, WorkTaskStatus::Review);
+        assert!(task.completion_kind.is_none() && task.finished_at.is_none());
+        assert!(task.merge_state.is_none() && task.last_error.is_none());
+        let meta = source_record(&task);
+        assert_eq!(meta.result_pr.as_deref(), Some(url.as_str()));
+        assert_eq!(meta.result_pr_number, Some(42));
+        assert!(
+            f.worktree.exists(),
+            "a task kept in review keeps its checkout"
+        );
+        assert!(task.worktree_folder_id.is_some());
+        assert!(events_of(&f.engine, f.task_id)
+            .await
+            .contains(&"delivered_pr".to_string()));
+        settle_spawned_work().await;
+        assert!(
+            f.forge.comments.lock().await.is_empty(),
+            "nothing ended yet"
+        );
+
+        // Another round, then the delivery that finishes it. The forge has
+        // not caught up with the new push when it is read back — still the
+        // old head — which a push INTO the pull request must not mistake for
+        // someone else's commit.
+        f.forge.existing.lock().await.push(opened_pull(&f.head));
+        let round_two = commit_another_round(&f).await;
+        let again = f
+            .engine
+            .deliver_pr(f.task_id, None, false, false, true)
+            .await
+            .expect("finishing delivery");
+        assert_eq!(again, url, "the same pull request");
+        assert_eq!(
+            f.forge.created.lock().await.len(),
+            1,
+            "nothing opened twice"
+        );
+        assert_eq!(
+            f.forge.pushes.lock().await.as_slice(),
+            [
+                ("acme/app".to_string(), f.head.clone(), "task/7".to_string()),
+                ("acme/app".to_string(), round_two, "task/7".to_string()),
+            ]
+        );
+        let task = row(&f.engine, f.task_id).await;
+        assert_eq!(task.status, WorkTaskStatus::Done);
+        assert_eq!(task.completion_kind.as_deref(), Some("delivered_pr"));
+        let forge = f.forge.clone();
+        wait_for("the write-back", move || {
+            let forge = forge.clone();
+            async move { !forge.comments.lock().await.is_empty() }
+        })
+        .await;
+        settle_spawned_work().await;
+        assert_eq!(
+            f.forge.comments.lock().await.len(),
+            1,
+            "one comment, when it ended"
+        );
+    }
+
+    /// The pull request a kept task opened was merged on the forge with
+    /// exactly this task's work. Finishing the task then pushes nothing — a
+    /// push would only resurrect a head branch the forge may have deleted —
+    /// and needs nothing "landable" here: the work is already where it goes.
+    #[tokio::test]
+    async fn a_kept_task_finishes_on_its_merged_pull_request_without_pushing() {
+        let f = delivery_fixture(FakeForge::default()).await;
+        f.engine
+            .deliver_pr(f.task_id, None, false, false, false)
+            .await
+            .expect("kept delivery");
+        let mut merged = opened_pull(&f.head);
+        merged.state = "closed".into();
+        merged.merged = true;
+        f.forge.existing.lock().await.push(merged);
+
+        f.engine
+            .deliver_pr(f.task_id, None, false, false, true)
+            .await
+            .expect("finished on the merge");
+        assert_eq!(
+            f.forge.pushes.lock().await.len(),
+            1,
+            "only the first delivery pushed"
+        );
+        let task = row(&f.engine, f.task_id).await;
+        assert_eq!(task.status, WorkTaskStatus::Done);
+        assert_eq!(task.completion_kind.as_deref(), Some("delivered_pr"));
+    }
+
+    /// The push published the snapshot; a pull request that comes back opened
+    /// at another commit means someone pushed to the branch in between, and
+    /// the task must not be recorded as delivering work it never pushed.
+    #[tokio::test]
+    async fn a_pull_request_opened_at_a_commit_the_task_did_not_push_is_not_claimed() {
+        let f = delivery_fixture(FakeForge {
+            create_head: Some("1111111111111111111111111111111111111111".into()),
+            ..Default::default()
+        })
+        .await;
+        let err = f
+            .engine
+            .deliver_pr(f.task_id, None, false, false, true)
+            .await
+            .expect_err("someone else's commit");
+        assert!(err.contains("did not push"), "{err}");
+        let task = row(&f.engine, f.task_id).await;
+        assert_eq!(task.status, WorkTaskStatus::Review);
+        assert!(task.completion_kind.is_none());
+        assert!(source_record(&task).result_pr.is_none(), "nothing recorded");
+    }
+
+    /// A kept task's pull request was built on by its author and merged at
+    /// that newer commit. The merge carries this task's work, so finishing the
+    /// task settles on it — nothing pushed, and nothing stranded: a merged pull
+    /// request cannot be reopened, and a task with work cannot be completed.
+    #[tokio::test]
+    async fn a_kept_task_finishes_on_a_merge_that_built_on_its_work() {
+        for from_pull in [false, true] {
+            let f = delivery_fixture(FakeForge::default()).await;
+            let number = if from_pull {
+                let pr = open_pull(&f.base_sha, "feature", "acme/app");
+                as_pull_request_task(&f, pr.clone()).await;
+                f.forge.existing.lock().await.push(pr);
+                7
+            } else {
+                42
+            };
+            f.engine
+                .deliver_pr(f.task_id, None, false, false, false)
+                .await
+                .expect("kept delivery");
+            assert_eq!(
+                row(&f.engine, f.task_id).await.status,
+                WorkTaskStatus::Review
+            );
+
+            // The author adds a commit on top of the task's and merges that,
+            // published where the forge publishes a change's head.
+            git_run(
+                &f.worktree,
+                &["commit", "-q", "--allow-empty", "-m", "the author's"],
+            );
+            let built_on = task_git::rev_parse(f.worktree.to_str().unwrap(), "HEAD")
+                .await
+                .expect("author head");
+            git_run(
+                &f.root,
+                &["update-ref", &format!("refs/pull/{number}/head"), &built_on],
+            );
+            git_run(&f.worktree, &["reset", "-q", "--hard", &f.head]);
+            let mut merged = if from_pull {
+                open_pull(&built_on, "feature", "acme/app")
+            } else {
+                opened_pull(&built_on)
+            };
+            merged.state = "closed".into();
+            merged.merged = true;
+            *f.forge.existing.lock().await = vec![merged];
+
+            f.engine
+                .deliver_pr(f.task_id, None, false, false, true)
+                .await
+                .unwrap_or_else(|e| panic!("from_pull={from_pull}: {e}"));
+            assert_eq!(
+                f.forge.pushes.lock().await.len(),
+                1,
+                "from_pull={from_pull}"
+            );
+            let task = row(&f.engine, f.task_id).await;
+            assert_eq!(task.status, WorkTaskStatus::Done, "from_pull={from_pull}");
+            assert_eq!(task.completion_kind.as_deref(), Some("delivered_pr"));
+            assert_eq!(f.forge.created.lock().await.len(), usize::from(!from_pull));
+        }
+    }
+
+    /// The pull request a kept local task opened was closed since, and the
+    /// task has a new round on its branch. That round goes in a NEW pull
+    /// request — what a first delivery would do — and the pinned target is
+    /// what both deliveries push with, whatever the checkout says by now.
+    #[tokio::test]
+    async fn a_kept_local_task_opens_a_new_pull_request_once_its_old_one_closed() {
+        let f = delivery_fixture(FakeForge::default()).await;
+        let target = as_local_task(&f).await;
+        f.engine
+            .deliver_pr(f.task_id, None, false, false, false)
+            .await
+            .expect("kept delivery");
+        assert_eq!(
+            row(&f.engine, f.task_id).await.status,
+            WorkTaskStatus::Review
+        );
+        let mut closed = opened_pull(&f.head);
+        closed.state = "closed".into();
+        f.forge.existing.lock().await.push(closed);
+        // The project's `origin` moved somewhere else meanwhile.
+        *f.forge.local.lock().await = Some(DeliveryTarget {
+            owner_repo: "elsewhere/app".into(),
+            ..target.clone()
+        });
+        commit_another_round(&f).await;
+
+        let url = f
+            .engine
+            .deliver_pr(f.task_id, None, false, false, true)
+            .await
+            .expect("delivery into a new pull request");
+        assert_eq!(url, "https://github.test/acme/app/pull/43");
+        assert_eq!(f.forge.created.lock().await.len(), 2);
+        assert!(
+            f.forge
+                .pushes
+                .lock()
+                .await
+                .iter()
+                .all(|(repo, _, _)| repo == "acme/app"),
+            "the pinned repository, not where the checkout points now"
+        );
+        assert_eq!(
+            *f.forge.local_lookups.lock().await,
+            1,
+            "a pinned task never asks again"
+        );
+        let task = row(&f.engine, f.task_id).await;
+        assert_eq!(task.status, WorkTaskStatus::Done);
+        assert_eq!(
+            delivery_record(&task),
+            Some(WorkTaskDelivery {
+                target,
+                pr_url: url,
+                pr_number: 43,
+            })
+        );
+    }
+
+    /// A pull-request task's push back can keep the task too — and what the
+    /// push learned about where the pull request ended (`pushed_onto`) must
+    /// survive its settle, or the next round measures its own work from the
+    /// trigger-time head and counts the pushed commits again.
+    #[tokio::test]
+    async fn a_push_back_records_where_it_pushed_whether_or_not_it_finishes_the_task() {
+        for mark_done in [false, true] {
+            let f = delivery_fixture(FakeForge::default()).await;
+            let pr = open_pull(&f.base_sha, "feature", "acme/app");
+            as_pull_request_task(&f, pr.clone()).await;
+            f.forge.existing.lock().await.push(pr);
+
+            f.engine
+                .deliver_pr(f.task_id, None, false, false, mark_done)
+                .await
+                .expect("push back");
+            let task = row(&f.engine, f.task_id).await;
+            let expected = if mark_done {
+                WorkTaskStatus::Done
+            } else {
+                WorkTaskStatus::Review
+            };
+            assert_eq!(task.status, expected, "mark_done={mark_done}");
+            let meta = source_record(&task);
+            assert_eq!(
+                meta.pushed_onto.as_deref(),
+                Some(f.base_sha.as_str()),
+                "mark_done={mark_done}: the head the push went onto is kept"
+            );
+            assert_eq!(
+                meta.result_pr.as_deref(),
+                Some("https://github.test/acme/app/pull/7")
+            );
+            if mark_done {
+                continue;
+            }
+            // The forge caught up with the push. Finishing the task now
+            // pushes nothing and keeps the record.
+            f.forge.existing.lock().await[0].head_sha = f.head.clone();
+            f.engine
+                .deliver_pr(f.task_id, None, false, false, true)
+                .await
+                .expect("finish on the pull request");
+            assert_eq!(f.forge.pushes.lock().await.len(), 1);
+            let task = row(&f.engine, f.task_id).await;
+            assert_eq!(task.status, WorkTaskStatus::Done);
+            assert_eq!(
+                source_record(&task).pushed_onto.as_deref(),
+                Some(f.base_sha.as_str())
+            );
+        }
+    }
+
+    /// Park the task in `merging` with exactly `state`, as a process that died
+    /// mid-delivery would have left it.
+    async fn interrupt_with(f: &Delivery, state: WorkTaskMergeState) {
+        let seq = row(&f.engine, f.task_id).await.run_seq;
+        work_task_service::begin_delivery(&f.engine.db.conn, f.task_id, &state, seq)
+            .await
+            .expect("begin delivery")
+            .expect("CAS");
+    }
+
+    /// An interrupted delivery of a local task recovers from the target its
+    /// merge state persisted — never by asking the checkout again — and
+    /// settles the way it was asked to: finished (taking the worktree along
+    /// when that was asked for), or back in review with the pull request.
+    #[tokio::test]
+    async fn recovery_settles_a_local_delivery_the_way_it_was_asked() {
+        for keep_in_review in [false, true] {
+            let f = delivery_fixture(FakeForge::default()).await;
+            let target = as_local_task(&f).await;
+            let mut found = opened_pull(&f.head);
+            found.number = 21;
+            found.html_url = "https://github.test/acme/app/pull/21".into();
+            f.forge.existing.lock().await.push(found);
+            interrupt_with(
+                &f,
+                WorkTaskMergeState {
+                    op: WorkTaskMergeOp::DeliverPr,
+                    remote_branch: Some("task/7".into()),
+                    expected_head: Some(f.head.clone()),
+                    target: Some(target.clone()),
+                    keep_in_review,
+                    delete_worktree: !keep_in_review,
+                    ..Default::default()
+                },
+            )
+            .await;
+
+            f.engine.recover_merging(f.task_id).await;
+
+            let task = row(&f.engine, f.task_id).await;
+            let expected = if keep_in_review {
+                WorkTaskStatus::Review
+            } else {
+                WorkTaskStatus::Done
+            };
+            assert_eq!(task.status, expected, "keep={keep_in_review}");
+            assert_eq!(
+                delivery_record(&task).map(|d| (d.target, d.pr_number)),
+                Some((target, 21)),
+                "keep={keep_in_review}"
+            );
+            assert_eq!(
+                f.worktree.exists(),
+                keep_in_review,
+                "keep={keep_in_review}: the cleanup follows the finished delivery only"
+            );
+            assert_eq!(
+                *f.forge.local_lookups.lock().await,
+                0,
+                "recovery never asks the checkout"
+            );
+        }
+
+        // A local row whose interrupted state names no target cannot be
+        // recovered against anything: back to a human.
+        let f = delivery_fixture(FakeForge::default()).await;
+        as_local_task(&f).await;
+        interrupt_delivery(&f, "task/7").await;
+        f.engine.recover_merging(f.task_id).await;
+        let task = row(&f.engine, f.task_id).await;
+        assert_eq!(task.status, WorkTaskStatus::Review);
+        assert!(task
+            .last_error
+            .as_deref()
+            .unwrap_or("")
+            .contains("unreadable"));
+    }
+
+    /// An interrupted push INTO the pull request a kept task opened recovers by
+    /// that number: it settles only if the pull request shows the commit the
+    /// dead process meant to push.
+    #[tokio::test]
+    async fn recovery_of_a_push_into_a_recorded_pull_request_needs_its_commit() {
+        for landed in [true, false] {
+            let f = delivery_fixture(FakeForge::default()).await;
+            f.engine
+                .deliver_pr(f.task_id, None, false, false, false)
+                .await
+                .expect("kept delivery");
+            let next = commit_another_round(&f).await;
+            let shown = if landed { next.clone() } else { f.head.clone() };
+            f.forge.existing.lock().await.push(opened_pull(&shown));
+            interrupt_with(
+                &f,
+                WorkTaskMergeState {
+                    op: WorkTaskMergeOp::DeliverPr,
+                    remote_branch: Some("task/7".into()),
+                    expected_head: Some(next),
+                    pull_number: Some(42),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+            f.engine.recover_merging(f.task_id).await;
+
+            let task = row(&f.engine, f.task_id).await;
+            if landed {
+                assert_eq!(task.status, WorkTaskStatus::Done);
+                assert_eq!(source_record(&task).result_pr_number, Some(42));
+            } else {
+                assert_eq!(task.status, WorkTaskStatus::Review);
+                assert!(
+                    task.last_error
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("does not show"),
+                    "{:?}",
+                    task.last_error
+                );
+            }
+            assert_eq!(
+                f.forge.created.lock().await.len(),
+                1,
+                "recovery never creates"
+            );
+        }
+    }
+
+    /// The pull request a kept task opened was closed, so the interrupted
+    /// attempt opened a NEW one by branch — and died before settling. The
+    /// recorded number no longer shows the delivery; the branch does, and
+    /// recovery takes it rather than telling the user to reopen the old one.
+    #[tokio::test]
+    async fn recovery_finds_the_new_pull_request_an_attempt_opened_past_a_closed_one() {
+        let f = delivery_fixture(FakeForge::default()).await;
+        f.engine
+            .deliver_pr(f.task_id, None, false, false, false)
+            .await
+            .expect("kept delivery");
+        let next = commit_another_round(&f).await;
+        let mut closed = opened_pull(&f.head);
+        closed.state = "closed".into();
+        let mut replacement = opened_pull(&next);
+        replacement.number = 43;
+        replacement.html_url = "https://github.test/acme/app/pull/43".into();
+        f.forge.existing.lock().await.extend([closed, replacement]);
+        interrupt_with(
+            &f,
+            WorkTaskMergeState {
+                op: WorkTaskMergeOp::DeliverPr,
+                remote_branch: Some("task/7".into()),
+                expected_head: Some(next),
+                pull_number: Some(42),
+                ..Default::default()
+            },
+        )
+        .await;
+
+        f.engine.recover_merging(f.task_id).await;
+
+        let task = row(&f.engine, f.task_id).await;
+        assert_eq!(task.status, WorkTaskStatus::Done, "{:?}", task.last_error);
+        let meta = source_record(&task);
+        assert_eq!(meta.result_pr_number, Some(43));
+        assert_eq!(
+            meta.result_pr.as_deref(),
+            Some("https://github.test/acme/app/pull/43")
+        );
+    }
+
     // ── tasks that ARE a pull request ───────────────────────────────────────
 
     /// Re-stamp the delivery fixture's task as one triggered from a pull
@@ -14018,7 +15112,7 @@ mod tests {
 
             let err = f
                 .engine
-                .deliver_pr(f.task_id, None, false, false)
+                .deliver_pr(f.task_id, None, false, false, true)
                 .await
                 .err()
                 .unwrap_or_else(|| panic!("{label}: must not settle"));
@@ -14051,7 +15145,7 @@ mod tests {
         merged_ours.head_sha = f.head.clone();
         *f.forge.after_push.lock().await = Some(merged_ours);
         f.engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("merged at our commit is a delivery");
         assert_eq!(row(&f.engine, f.task_id).await.status, WorkTaskStatus::Done);
@@ -14082,7 +15176,7 @@ mod tests {
         merged_on_top.head_sha = descendant;
         *f.forge.after_push.lock().await = Some(merged_on_top);
         f.engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("a merge that contains our commit is a delivery");
         assert_eq!(row(&f.engine, f.task_id).await.status, WorkTaskStatus::Done);
@@ -14107,7 +15201,7 @@ mod tests {
         *f.forge.after_push.lock().await = Some(merged_theirs);
         let err = f
             .engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect_err("a merge without our commit is not a delivery");
         assert!(err.contains("does not contain it"), "{err}");
@@ -14151,7 +15245,7 @@ mod tests {
 
         let url = f
             .engine
-            .deliver_pr(f.task_id, Some("ignored".into()), false, false)
+            .deliver_pr(f.task_id, Some("ignored".into()), false, false, true)
             .await
             .expect("push back");
         assert_eq!(url, "https://github.test/acme/app/pull/7");
@@ -14159,10 +15253,10 @@ mod tests {
             f.forge.pushes.lock().await.as_slice(),
             [(
                 "acme/app".to_string(),
-                "task/7".to_string(),
+                f.head.clone(),
                 "feature".to_string()
             )],
-            "the work branch goes to the pull request's head branch"
+            "the work goes to the pull request's head branch"
         );
         assert!(
             f.forge.created.lock().await.is_empty(),
@@ -14198,14 +15292,14 @@ mod tests {
         f.forge.existing.lock().await.push(pr);
 
         f.engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("fork push back");
         assert_eq!(
             f.forge.pushes.lock().await.as_slice(),
             [(
                 "contributor/app".to_string(),
-                "task/7".to_string(),
+                f.head.clone(),
                 "feature".to_string()
             )],
             "the push lands in the fork, not in the source repository"
@@ -14240,7 +15334,7 @@ mod tests {
 
         let refused = f
             .engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect_err("a delivery with nothing in it");
         assert!(refused.contains("complete it instead"), "{refused}");
@@ -14287,7 +15381,7 @@ mod tests {
             .push(open_pull(&f.head, "feature", "contributor/app"));
 
         f.engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("settled without a push");
         assert!(f.forge.pushes.lock().await.is_empty(), "no push may run");
@@ -14312,14 +15406,14 @@ mod tests {
         ));
 
         f.engine
-            .deliver_pr(f.task_id, None, false, false)
+            .deliver_pr(f.task_id, None, false, false, true)
             .await
             .expect("push back");
         assert_eq!(
             f.forge.pushes.lock().await.as_slice(),
             [(
                 "acme/app".to_string(),
-                "task/7".to_string(),
+                f.head.clone(),
                 "feature".to_string()
             )]
         );
@@ -14339,7 +15433,7 @@ mod tests {
         closed.forge.existing.lock().await.push(pr);
         let err = closed
             .engine
-            .deliver_pr(closed.task_id, None, false, false)
+            .deliver_pr(closed.task_id, None, false, false, true)
             .await
             .expect_err("closed");
         assert!(err.contains("no longer open"), "{err}");
@@ -14355,7 +15449,7 @@ mod tests {
         as_pull_request_task(&fork, open_pull("x", "feature", "project-4711")).await;
         let err = fork
             .engine
-            .deliver_pr(fork.task_id, None, false, false)
+            .deliver_pr(fork.task_id, None, false, false, true)
             .await
             .expect_err("unnameable fork");
         assert!(err.contains("cannot see"), "{err}");
@@ -14377,7 +15471,7 @@ mod tests {
             .push(open_pull("x", "someone-elses-branch", "acme/app"));
         let err = moved
             .engine
-            .deliver_pr(moved.task_id, None, false, false)
+            .deliver_pr(moved.task_id, None, false, false, true)
             .await
             .expect_err("retargeted");
         assert!(err.contains("now tracks branch"), "{err}");

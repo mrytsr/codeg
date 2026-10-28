@@ -20,6 +20,7 @@ mod opencode_context_window;
 pub mod pi;
 pub mod qoder;
 mod summary_cache;
+mod trae_usage;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -172,8 +173,11 @@ pub fn external_transcript_sources() -> Vec<ExternalSource> {
             indexes: &[],
         },
         ExternalSource {
+            // The default file even when `$OPENCODE_DB` moves the database the
+            // history is read from: the archive keys this entry by file name,
+            // and only a `.db` name is snapshotted as SQLite.
             agent: "opencode",
-            root: opencode::resolve_opencode_base_dir().join("opencode.db"),
+            root: opencode::resolve_opencode_base_dir().join(opencode::OPENCODE_DB_FILE),
             is_file: true,
             sqlite: true,
             include_top: None,
@@ -432,12 +436,16 @@ pub fn build_agent_parser(agent_type: AgentType, env: &AgentEnv) -> Box<dyn Agen
         AgentType::Antigravity => Box::new(antigravity::AntigravityParser::for_env(env)),
         AgentType::Kiro => Box::new(kiro::KiroParser::for_env(env)),
         // Custom ACP agents have no native store to reverse-engineer; their
-        // history is codeg's own ACP transcript. TRAE CLI's rollouts use an
-        // undocumented paginated format of its own (see `acp::trae`), and so
-        // do Command Code's session trees (see `acp::command_code`), so both
-        // take the same route.
-        AgentType::Custom(_) | AgentType::ZCode | AgentType::Trae | AgentType::CommandCode => {
-            Box::new(acp_native::AcpNativeParser::new(agent_type))
+        // history is codeg's own ACP transcript. TRAE CLI takes the same route
+        // for message history, but AcpNativeParser enriches those turns from
+        // the precise token_usage_record rows in TRAE's native rollouts.
+        // Command Code's undocumented session tree remains ACP-only.
+        AgentType::Custom(_)
+        | AgentType::ZCode
+        | AgentType::Trae
+        | AgentType::CommandCode
+        | AgentType::MiniMaxCode => {
+            Box::new(acp_native::AcpNativeParser::for_env(agent_type, env))
         }
     };
     Box::new(RouteSanitized(inner))

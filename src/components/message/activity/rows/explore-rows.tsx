@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils"
 import { ReadImagePreview } from "../../read-image-preview"
 import { SearchResultsOutput } from "../../search-results-output"
 import { useActivityRender } from "../activity-context"
-import { ActivityMembers, ActivityRow } from "../activity-row"
+import { ActivityMembers, ActivityRow, useGroupGoing } from "../activity-row"
 import { DetailBox } from "../detail-box"
 import { useDisclosure } from "../disclosure-store"
 import { FileHeader } from "../file-header"
@@ -97,18 +97,22 @@ function useExploreSummary(steps: ToolStep[]): string {
 
 /**
  * "Explored · 3 files, 1 search": a run of reads and searches. Folded unless a
- * member failed without being redone. While the run is live and folded, the
- * member that is running shows under the header, so the current step is never
- * hidden.
+ * member failed without being redone. Open, its members end on a foot that
+ * turns while the run is still going, then folds it. While the run is live
+ * and folded, the member that is running shows under the header, so the
+ * current step is never hidden.
  */
 export const ExploreGroupRow = memo(function ExploreGroupRow({
   groupKey,
   steps,
   status: given,
+  followed = false,
 }: {
   groupKey: string
   steps: ToolStep[]
   status: StepStatus
+  /** Something follows the group in the reply: a row, or the answer. */
+  followed?: boolean
 }) {
   const t = useTranslations("Folder.chat.activity")
   const statusText = useStatusText()
@@ -126,6 +130,7 @@ export const ExploreGroupRow = memo(function ExploreGroupRow({
   })
   const status = awaited ? "awaiting" : given
   const live = status === "running" || status === "pending"
+  const going = useGroupGoing(live, followed)
   const liveStep = open
     ? null
     : (awaited ?? (live ? lastLiveTool(steps) : null))
@@ -164,7 +169,14 @@ export const ExploreGroupRow = memo(function ExploreGroupRow({
         ) : null
       }
       detail={() => (
-        <ActivityMembers end={live || awaited ? "pending" : "reached"}>
+        <ActivityMembers
+          foot={{
+            working: going,
+            after: "dot",
+            what: summary,
+            onFold: () => setOpen(false),
+          }}
+        >
           {steps.map((step) => (
             <ExploreChildRow key={step.key} step={step} />
           ))}
@@ -175,12 +187,12 @@ export const ExploreGroupRow = memo(function ExploreGroupRow({
         <span
           className={cn(
             "shrink-0 font-medium",
-            live ? "activity-shimmer" : "text-muted-foreground"
+            live ? "activity-shimmer" : "text-activity-secondary"
           )}
         >
           {live || awaited ? t("row.exploring") : t("row.explored")}
         </span>
-        <span className="min-w-0 truncate text-muted-foreground">
+        <span className="min-w-0 truncate text-activity-secondary">
           {summary}
         </span>
       </span>
@@ -286,18 +298,18 @@ export const ExploreChildRow = memo(function ExploreChildRow({
       >
         {known ? (
           standalone ? (
-            <span className="shrink-0 font-medium text-muted-foreground">
+            <span className="shrink-0 font-medium text-activity-secondary">
               {t(STEP_VERB_KEY[tool.kind as keyof typeof STEP_VERB_KEY])}
             </span>
           ) : (
-            <span className="activity-mono w-14 shrink-0 text-muted-foreground">
+            <span className="activity-mono w-14 shrink-0 text-activity-secondary">
               {t(VERB_KEY[tool.kind as keyof typeof VERB_KEY])}
             </span>
           )
         ) : null}
         <span
           className={cn(
-            "min-w-0 truncate font-mono text-muted-foreground",
+            "min-w-0 truncate font-mono text-activity-secondary",
             standalone && "text-[0.8125rem]"
           )}
           dir="ltr"
@@ -305,7 +317,7 @@ export const ExploreChildRow = memo(function ExploreChildRow({
           {targetText}
         </span>
         {tool.detail ? (
-          <span className="min-w-0 shrink truncate font-sans text-muted-foreground">
+          <span className="min-w-0 shrink truncate font-sans text-activity-secondary">
             {tool.detail}
           </span>
         ) : null}

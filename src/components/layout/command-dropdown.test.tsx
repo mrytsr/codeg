@@ -288,9 +288,7 @@ describe("CommandDropdown local and global commands", () => {
   })
 
   it("runs a command that merely starts with local: in a terminal", async () => {
-    mocks.listFolderCommands.mockResolvedValue([
-      hostCommand(5, "local: zed ."),
-    ])
+    mocks.listFolderCommands.mockResolvedValue([hostCommand(5, "local: zed .")])
     mocks.syncFolderCommandsFromPackageJson.mockResolvedValue([
       hostCommand(5, "local: zed ."),
     ])
@@ -381,7 +379,9 @@ describe("CommandDropdown local and global commands", () => {
     mocks.desktop = false
     mocks.remote = false
     mocks.listFolderCommands.mockResolvedValue([hostCommand(5, "zed .", true)])
-    mocks.syncFolderCommandsFromPackageJson.mockResolvedValue([hostCommand(5, "zed .", true)])
+    mocks.syncFolderCommandsFromPackageJson.mockResolvedValue([
+      hostCommand(5, "zed .", true),
+    ])
     renderDropdown()
     fireEvent.click(await screen.findByTitle(RUN_TITLE("zed .")))
     await waitFor(() =>
@@ -456,7 +456,9 @@ describe("CommandDropdown local and global commands", () => {
 
     // Stopping it there leaves folder 1's run alone.
     fireEvent.click(await screen.findByTitle(STOP_TITLE("pnpm dev")))
-    await waitFor(() => expect(mocks.terminalStop).toHaveBeenCalledWith("terminal-b"))
+    await waitFor(() =>
+      expect(mocks.terminalStop).toHaveBeenCalledWith("terminal-b")
+    )
     expect(useCommandTerminalLinkStore.getState().links).toEqual({
       [`${1}:${-1}`]: "terminal-a",
     })

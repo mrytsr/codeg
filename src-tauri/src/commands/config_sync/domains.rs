@@ -159,7 +159,16 @@ pub const CONFIG_DOMAINS: &[ConfigDomain] = &[
 ];
 
 fn validate_model_providers(value: &Value) -> Result<(), AppCommandError> {
-    decode_rows::<ModelProviderDto>(DOMAIN_MODEL_PROVIDERS, value).map(drop)
+    // A synced Codex row's model config reaches codex's files on the next
+    // bind or provider edit, so it passes the checks a provider saved in the
+    // settings page does. Other agents' rows keep the lenient decode: older
+    // rows predate some of those checks and must still import.
+    for row in decode_rows::<ModelProviderDto>(DOMAIN_MODEL_PROVIDERS, value)? {
+        if row.agent_type == "codex" {
+            crate::commands::model_provider::validate_model(&row.agent_type, row.model.as_deref())?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_agent_settings(value: &Value) -> Result<(), AppCommandError> {

@@ -57,24 +57,50 @@ use crate::acp_transcript::{self, EntryKind, Transcript, TranscriptEntry};
 use crate::models::agent::AgentType;
 use crate::models::conversation::{ConversationDetail, ConversationSummary, SessionStats};
 use crate::models::message::{ContentBlock, ImageData, MessageTurn, TurnRole, TurnUsage};
-use crate::parsers::{user_turn_block, user_turn_block_from_wire, AgentParser, ParseError};
+use crate::parsers::{
+    user_turn_block, user_turn_block_from_wire, AgentEnv, AgentParser, ParseError,
+};
 
 pub struct AcpNativeParser {
     agent_type: AgentType,
     root: PathBuf,
+    trae_sessions: Option<PathBuf>,
 }
 
 impl AcpNativeParser {
     pub fn new(agent_type: AgentType) -> Self {
+        Self::for_env(agent_type, &AgentEnv::inherited())
+    }
+
+    pub fn for_env(agent_type: AgentType, env: &AgentEnv) -> Self {
         Self {
             agent_type,
             root: crate::paths::codeg_acp_transcripts_root(),
+            trae_sessions: crate::acp::trae::uses_trae_rollouts(agent_type)
+                .then(|| crate::acp::trae::resolve_trae_sessions_dir_for_env(env)),
         }
     }
 
     /// Root-injectable constructor for tests.
     pub fn new_in(agent_type: AgentType, root: PathBuf) -> Self {
-        Self { agent_type, root }
+        Self {
+            agent_type,
+            root,
+            trae_sessions: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_in_with_trae_sessions(
+        agent_type: AgentType,
+        root: PathBuf,
+        trae_sessions: PathBuf,
+    ) -> Self {
+        Self {
+            agent_type,
+            root,
+            trae_sessions: Some(trae_sessions),
+        }
     }
 
     /// Directory name for this agent's transcripts: its ACP registry id.
@@ -122,10 +148,33 @@ impl AgentParser for AcpNativeParser {
                 conversation_id.to_string(),
             ));
         }
-        let turns = project_turns(&transcript.entries);
+        let mut turns = project_turns(&transcript.entries);
+        let native_usage = self.trae_sessions.as_deref().and_then(|sessions| {
+            // Every session of the chain spent tokens under its own id.
+            let mut native_session_ids = vec![conversation_id.to_string()];
+            native_session_ids.extend(acp_transcript::continuation_ancestors_in(
+                &self.root,
+                dir,
+                conversation_id,
+            ));
+            super::trae_usage::enrich_turns(sessions, &native_session_ids, &mut turns)
+        });
         let (used, size) = latest_context_window(&transcript.entries);
-        let session_stats =
-            crate::parsers::merge_context_window_stats(session_stats(&turns), used, size);
+        let stats = session_stats(&turns);
+        let stats = if stats
+            .as_ref()
+            .and_then(|stats| stats.total_usage.as_ref())
+            .is_none()
+        {
+            session_stats_with_native_usage(stats, native_usage)
+        } else {
+            stats
+        };
+        let session_stats = crate::parsers::merge_context_window_stats(
+            stats,
+            used,
+            size,
+        );
         Ok(ConversationDetail {
             summary: self.summarize(conversation_id, &transcript),
             turns,
@@ -388,8 +437,8 @@ pub fn is_recorded_update(update: &SessionUpdate) -> bool {
 /// not the per-turn input/output counts `MessageTurn::usage` holds — so it
 /// feeds the session footer's context-window trio, exactly like the built-in
 /// parsers derive it from their own stores, and never a turn's token usage.
-/// (A turn's usage comes only from what its turn end records, today ZCode's
-/// per-window reports, see `acp::zcode_turn`; otherwise it stays `None`.
+/// (A turn's usage comes only from its recorded prompt response or ZCode's
+/// native turn metrics, see `acp::zcode_turn`; otherwise it stays `None`.
 /// Inventing one from occupancy deltas would be a guess rendered as fact.)
 ///
 /// Matched on the raw payload rather than by deserializing: the answer is
@@ -487,10 +536,13 @@ pub fn project_turns(entries: &[TranscriptEntry]) -> Vec<MessageTurn> {
                     // prompt; the part's own span (`flush`) is the honest one.
                     apply_turn_end(p, &entry.p, !steered);
                     p.last_at_ms = entry.t;
-                } else if steered {
-                    // Nothing came after the last steer, so the usage and model
-                    // the turn end reports go on the part before it — never on
-                    // a reply to an earlier prompt.
+                } else {
+                    // Nothing came after the last user message of this turn —
+                    // a steer, or one the agent relayed from another client
+                    // (claude-agent-acp forwards Remote Control messages as
+                    // `user_message_chunk`). The usage and model the turn end
+                    // reports go on the part before it — never on a reply to an
+                    // earlier prompt.
                     if let Some(last) = turns
                         .iter_mut()
                         .skip(prompt_start.unwrap_or(usize::MAX))
@@ -505,6 +557,20 @@ pub fn project_turns(entries: &[TranscriptEntry]) -> Vec<MessageTurn> {
                             last.usage = usage;
                         }
                     }
+                }
+                // A paid attempt can finish without emitting any text or
+                // tools. Keep its reported usage without inventing content,
+                // and never attach an unprompted footer to an earlier turn.
+                if pending.is_none()
+                    && prompt_start.is_some()
+                    && !turns.iter().skip(prompt_start.unwrap_or(usize::MAX))
+                        .any(|turn| matches!(turn.role, TurnRole::Assistant))
+                    && turn_end_model_and_usage(&entry.p).1.is_some()
+                {
+                    let mut turn = PendingTurn::new(turn_start_hint.unwrap_or(entry.t));
+                    apply_turn_end(&mut turn, &entry.p, !steered);
+                    turn.last_at_ms = entry.t;
+                    pending = Some(turn);
                 }
                 flush(&mut pending, &mut turns, &mut seq);
                 prompt_just_recorded = false;
@@ -548,7 +614,7 @@ pub fn project_turns(entries: &[TranscriptEntry]) -> Vec<MessageTurn> {
 
 fn flush(pending: &mut Option<PendingTurn>, turns: &mut Vec<MessageTurn>, seq: &mut usize) {
     let Some(p) = pending.take() else { return };
-    if !p.has_content {
+    if !p.has_content && p.usage.is_none() {
         return;
     }
     turns.push(MessageTurn {
@@ -596,7 +662,7 @@ fn turn_end_model_and_usage(payload: &serde_json::Value) -> (Option<String>, Opt
     (model, usage)
 }
 
-/// Read an ACP usage object. Field names follow the `unstable_session_usage`
+/// Read an ACP usage object. Field names follow `unstable_end_turn_token_usage`
 /// shape, with snake_case accepted as well since agents differ.
 fn parse_usage(value: &serde_json::Value) -> Option<TurnUsage> {
     let get = |keys: &[&str]| -> u64 {
@@ -1054,6 +1120,41 @@ fn session_stats(turns: &[MessageTurn]) -> Option<SessionStats> {
     })
 }
 
+/// Preserve native usage from a TRAE turn that produced no renderable
+/// assistant message. Normally `trae_usage::enrich_turns` attaches every
+/// native turn to an ACP turn and the regular aggregation above wins.
+///
+/// Without native usage the stats stand as they are: most ACP agents report
+/// no tokens, and their footer still has the turns' durations to show.
+fn session_stats_with_native_usage(
+    stats: Option<SessionStats>,
+    native_usage: Option<TurnUsage>,
+) -> Option<SessionStats> {
+    let Some(usage) = native_usage else {
+        return stats;
+    };
+    let total_tokens = usage
+        .input_tokens
+        .saturating_add(usage.output_tokens)
+        .saturating_add(usage.cache_creation_input_tokens)
+        .saturating_add(usage.cache_read_input_tokens);
+    match stats {
+        Some(mut stats) => {
+            stats.total_usage = Some(usage);
+            stats.total_tokens = Some(total_tokens);
+            Some(stats)
+        }
+        None => Some(SessionStats {
+            total_usage: Some(usage),
+            total_tokens: Some(total_tokens),
+            total_duration_ms: 0,
+            context_window_used_tokens: None,
+            context_window_max_tokens: None,
+            context_window_usage_percent: None,
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1086,6 +1187,46 @@ mod tests {
             "sessionUpdate": kind,
             "content": { "type": "text", "text": text }
         })
+    }
+
+    #[test]
+    fn reported_usage_survives_a_turn_without_output_but_not_an_orphan_footer() {
+        let footer = entry(200, EntryKind::TurnEnd, serde_json::json!({
+            "stopReason":"end_turn", "durationMs":100,
+            "usage":{"inputTokens":3,"outputTokens":0,"cachedReadTokens":4,"totalTokens":7}
+        }));
+        let turns = project_turns(&[prompt(100, "attempt"), footer.clone()]);
+        assert_eq!(turns.len(), 2);
+        assert!(turns[1].blocks.is_empty());
+        assert_eq!(turns[1].usage.as_ref().unwrap().input_tokens, 3);
+        assert_eq!(turns[1].usage.as_ref().unwrap().cache_read_input_tokens, 4);
+        assert_eq!(turns[1].duration_ms, Some(100));
+        assert!(project_turns(&[footer]).is_empty());
+    }
+
+    /// A message typed in another client of the session reaches codeg as a
+    /// `user_message_chunk` while the prompt is still open. It closes the
+    /// reply so far, and when nothing follows it the turn end's usage still
+    /// belongs to that reply.
+    #[test]
+    fn a_relayed_user_message_does_not_drop_the_turn_end_usage() {
+        let turns = project_turns(&[
+            prompt(100, "P"),
+            update(150, text_chunk("agent_message_chunk", "Reply")),
+            update(200, text_chunk("user_message_chunk", "Remote follow-up")),
+            entry(
+                300,
+                EntryKind::TurnEnd,
+                serde_json::json!({
+                    "stopReason": "end_turn", "model": "opus",
+                    "usage": {"inputTokens": 4000, "outputTokens": 10, "totalTokens": 4010}
+                }),
+            ),
+        ]);
+        assert_eq!(roles(&turns), ["User", "Assistant", "User"]);
+        assert_eq!(turns[1].usage.as_ref().map(|u| u.input_tokens), Some(4000));
+        assert_eq!(turns[1].model.as_deref(), Some("opus"));
+        assert_eq!(turns[2].usage, None);
     }
 
     fn attachment_prompt() -> serde_json::Value {
@@ -1995,9 +2136,13 @@ mod tests {
             steer(2_500, "make it blue"),
             reported_turn_end(3_000, 990),
         ]);
-        assert_eq!(roles(&silent), ["User", "Assistant", "User", "User"]);
+        // The second prompt's reported spend belongs to its own empty result,
+        // never to the reply produced for the first prompt.
+        assert_eq!(roles(&silent), ["User", "Assistant", "User", "User", "Assistant"]);
         assert_eq!(silent[1].usage, None);
         assert_eq!(silent[1].model, None);
+        assert!(silent[4].blocks.is_empty());
+        assert_eq!(silent[4].usage.as_ref().map(|usage| usage.input_tokens), Some(10));
     }
 
     /// A call the reply started before a steer can report after it: a command
@@ -2385,6 +2530,173 @@ mod tests {
             Err(ParseError::ConversationNotFound(_))
         ));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn custom_traecli_history_is_enriched_from_its_native_usage_record() {
+        let transcript_dir = tempfile::tempdir().unwrap();
+        let native_dir = tempfile::tempdir().unwrap();
+        let session_id = "01a13673-cfd5-7c23-bc00-ce5be75fd42b";
+        let agent = AgentType::custom("traecli").unwrap();
+        let agent_dir = crate::acp::registry::registry_id_for(agent);
+
+        let header = TranscriptHeader::new(
+            "custom:traecli",
+            session_id,
+            "/workspace",
+            1_791_914_922_197,
+        );
+        acp_transcript::record_header_in(transcript_dir.path(), agent_dir, &header)
+            .await
+            .unwrap();
+        for (kind, payload) in [
+            (
+                EntryKind::Prompt,
+                serde_json::json!([{"type":"text","text":"hello"}]),
+            ),
+            (
+                EntryKind::Update,
+                serde_json::json!({
+                    "sessionUpdate":"agent_message_chunk",
+                    "content":{"type":"text","text":"done"}
+                }),
+            ),
+            (
+                EntryKind::Update,
+                serde_json::json!({
+                    "sessionUpdate":"usage_update",
+                    "used":20_584,
+                    "size":760_000
+                }),
+            ),
+            (
+                EntryKind::TurnEnd,
+                serde_json::json!({
+                    "stopReason":"end_turn",
+                    "durationMs":3_497,
+                    "model":"gpt-5.6-sol"
+                }),
+            ),
+        ] {
+            acp_transcript::record_entry_in(
+                transcript_dir.path(),
+                agent_dir,
+                session_id,
+                kind,
+                payload,
+            )
+            .await
+            .unwrap();
+        }
+
+        let day = native_dir.path().join("2026/10/14");
+        std::fs::create_dir_all(&day).unwrap();
+        let rollout = day.join(format!(
+            "rollout-2026-10-14T02-08-42-{session_id}.jsonl"
+        ));
+        std::fs::write(
+            rollout,
+            serde_json::json!({
+                "timestamp":"2026-10-13T18:08:45.732Z",
+                "type":"token_usage_record",
+                "payload":{
+                    "thread_id":session_id,
+                    "session_id":session_id,
+                    "turn_id":"turn-1",
+                    "response_id":"resp-1",
+                    "usage":{
+                        "input_tokens":20_454,
+                        "cache_creation_input_tokens":128,
+                        "cached_input_tokens":19_968,
+                        "output_tokens":130,
+                        "reasoning_output_tokens":24,
+                        "total_tokens":20_584
+                    }
+                }
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+
+        let parser = AcpNativeParser::new_in_with_trae_sessions(
+            agent,
+            transcript_dir.path().to_path_buf(),
+            native_dir.path().to_path_buf(),
+        );
+        let detail = parser.get_conversation(session_id).unwrap();
+        let usage = detail.turns[1].usage.as_ref().unwrap();
+        assert_eq!(usage.input_tokens, 358);
+        assert_eq!(usage.cache_creation_input_tokens, 128);
+        assert_eq!(usage.cache_read_input_tokens, 19_968);
+        assert_eq!(usage.output_tokens, 130);
+        let stats = detail.session_stats.unwrap();
+        assert_eq!(stats.total_tokens, Some(20_584));
+        assert_eq!(stats.context_window_used_tokens, Some(20_584));
+        assert_eq!(stats.context_window_max_tokens, Some(760_000));
+    }
+
+    /// A turn end that reports a duration but no tokens — what most ACP agents
+    /// send — keeps its duration in the session footer, whether or not the
+    /// agent has a native store to read usage from.
+    #[tokio::test]
+    async fn a_duration_only_turn_keeps_its_session_stats() {
+        async fn record_duration_only_turn(root: &Path, agent: AgentType, session_id: &str) {
+            let agent_dir = crate::acp::registry::registry_id_for(agent);
+            let header =
+                TranscriptHeader::new(&agent.as_wire(), session_id, "/workspace", 1_791_914_922_197);
+            acp_transcript::record_header_in(root, agent_dir, &header)
+                .await
+                .unwrap();
+            for (kind, payload) in [
+                (
+                    EntryKind::Prompt,
+                    serde_json::json!([{"type":"text","text":"hello"}]),
+                ),
+                (
+                    EntryKind::Update,
+                    serde_json::json!({
+                        "sessionUpdate":"agent_message_chunk",
+                        "content":{"type":"text","text":"done"}
+                    }),
+                ),
+                (
+                    EntryKind::TurnEnd,
+                    serde_json::json!({"stopReason":"end_turn","durationMs":3_000}),
+                ),
+            ] {
+                acp_transcript::record_entry_in(root, agent_dir, session_id, kind, payload)
+                    .await
+                    .unwrap();
+            }
+        }
+
+        let session_id = "01a13673-cfd5-7c23-bc00-ce5be75fd42c";
+        let plain = AgentType::custom("plain-agent").unwrap();
+        let traecli = AgentType::custom("traecli").unwrap();
+        let transcripts = tempfile::tempdir().unwrap();
+        // TRAE's native store, holding no rollout for this session.
+        let native = tempfile::tempdir().unwrap();
+        record_duration_only_turn(transcripts.path(), plain, session_id).await;
+        record_duration_only_turn(transcripts.path(), traecli, session_id).await;
+
+        for parser in [
+            AcpNativeParser::new_in(plain, transcripts.path().to_path_buf()),
+            AcpNativeParser::new_in_with_trae_sessions(
+                traecli,
+                transcripts.path().to_path_buf(),
+                native.path().to_path_buf(),
+            ),
+        ] {
+            let stats = parser
+                .get_conversation(session_id)
+                .unwrap()
+                .session_stats
+                .expect("a duration-only turn still has session stats");
+            assert_eq!(stats.total_duration_ms, 3_000);
+            assert!(stats.total_usage.is_none());
+            assert_eq!(stats.total_tokens, None);
+        }
     }
 
     #[test]

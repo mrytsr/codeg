@@ -202,9 +202,7 @@ describe("ConversationDetailPanel new conversation layout", () => {
       "<OverlayHostHiddenProvider hidden={filesMaximized}>"
     )
     // A backgrounded conversation tab behind the selected one.
-    expect(source).toContain(
-      "<OverlayHostHiddenProvider hidden={!canTileG && !visible}>"
-    )
+    expect(source).toContain("<OverlayHostHiddenProvider hidden={!visible}>")
   })
 
   it("does not render a decorative welcome backdrop", () => {
@@ -319,7 +317,33 @@ describe("ConversationDetailPanel split-group render model", () => {
     expect(source).not.toContain("<RenderGroupShell")
     expect(source).not.toContain("<RenderTabWrapper")
     expect(source).toContain("key={groupId}")
-    expect(source).toContain("computeRects(groupLayout)")
+    expect(source).toContain("computeRects(visibleLayout)")
+  })
+
+  // While tabs follow the folder, each folder has its own layout. A hidden
+  // tab must stay in its own view's shell, and the shells must keep one fixed
+  // order whatever folder is on screen: a switch that reparented a tab would
+  // remount it, and one that reordered the shells would move their nodes and
+  // reset every transcript inside.
+  it("keeps hidden tabs in their own view's shells, in a fixed order", () => {
+    expect(source).toContain(": shellGroupOfTab(state, tab.id)")
+    expect(source).toContain("[...tabsByGroup.keys()].sort()")
+  })
+
+  // A selected folder with nothing open is not a blank column: the panel says
+  // so and offers a first conversation, whether or not other folders have
+  // tabs, and the workspace keeps the strip (and its "+") up for it.
+  it("shows the empty-folder state instead of a blank column", () => {
+    expect(source).toContain(
+      "return tabsFollowFolder ? <FolderTabsEmptyState /> : null"
+    )
+    expect(source).toContain(
+      "{tabsFollowFolder && visibleTabs.length === 0 && ("
+    )
+    expect(workspaceLayoutSource).toContain(
+      "const showConvStrip = hasConvTabs || tabsFollowFolder"
+    )
+    expect(workspaceLayoutSource).toContain("{showConvStrip ? (")
   })
 
   // TileScrollContainer ignores mutations strictly inside a marked tile — that
@@ -667,4 +691,14 @@ describe("ConversationDetailPanel session-load failure surface", () => {
       "detail?.summary.external_id ?? runtimeExternalId ?? undefined"
     )
   })
+})
+
+it("gates the no-tab draft creation effect on folder-tabs mode", () => {
+  const start = source.indexOf("// Ensure no-tab state")
+  const end = source.indexOf("// Split-group render model", start)
+  const effect = source.slice(start, end)
+  expect(effect).toContain(
+    "shouldSeedConversation(useFolderTabsStore.getState().enabled, hasNoTabs)"
+  )
+  expect(effect).toContain("openNewConversationTab(")
 })

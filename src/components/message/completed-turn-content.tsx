@@ -19,6 +19,7 @@ import { ActivityParts, ContentPartsRenderer } from "./content-parts-renderer"
 import { ActivityHeader } from "./activity/activity-header"
 import { useActivityLive } from "./activity/activity-live-context"
 import { openDisclosures } from "./activity/disclosure-store"
+import { useFoldBack } from "./activity/fold-back"
 import { WorkingMark } from "./activity/rail-icon"
 
 export interface SplitAssistantTurnParts {
@@ -207,21 +208,47 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
     )
   }, [activity, failureKey, open, handleOpenChange])
 
-  // While its agent is at work — not while it waits on the user to answer a
-  // permission request — a live reply ends on a turning mark: at the foot of
-  // the rail when the open timeline is its last block, else under whatever
-  // does end it (the answer being written, a folded body, no steps yet).
+  // An open fold's steps end on a foot. While its agent is at work — not
+  // while it waits on the user to answer a permission request — that is the
+  // turning ring; otherwise a row that folds the steps away, saying what it
+  // folds: `Collapse 14 steps · 3m 34s`. A live reply with no foot in view
+  // (its steps folded, none yet, or none it can fold) ends on the turning
+  // mark under whatever does end it instead.
   const { awaitingUser } = useActivityLive()
   const working = isStreaming && !awaitingUser
-  const workingOnRail =
-    working &&
-    foldable &&
-    open &&
-    activity.items.length > 0 &&
-    !hasVisibleAnswer(split.answer)
+  const footShown = foldable && open && activity.items.length > 0
+  const tActivity = useTranslations("Folder.chat.activity")
+  const headerRef = useRef<HTMLDivElement | null>(null)
+  const foldBack = useFoldBack()
+  const steps = activity.summary.steps
+  // The time, as the header gives it: once the turn is done.
+  const took = completed ? elapsed : null
+  const foot = useMemo(
+    () => ({
+      // Only while the steps are open: folding, they stay in view as they
+      // slide shut, and the mark under the reply has taken over by then.
+      working: working && open,
+      what:
+        [steps > 0 ? tActivity("header.steps", { count: steps }) : null, took]
+          .filter(Boolean)
+          .join(tActivity("header.separator")) || tActivity("header.label"),
+      onFold: (control: HTMLButtonElement) =>
+        foldBack({
+          head: headerRef.current,
+          control,
+          toggle:
+            headerRef.current?.querySelector<HTMLElement>(
+              "button[aria-expanded]"
+            ) ?? null,
+          fold: () => handleOpenChange(false),
+        }),
+    }),
+    [working, open, steps, took, tActivity, foldBack, handleOpenChange]
+  )
 
   const header = (
     <ActivityHeader
+      ref={headerRef}
       summary={activity.summary}
       completed={completed}
       hasSteps={activity.items.length > 0}
@@ -314,7 +341,7 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
             <ActivityParts
               model={activity}
               isStreaming={isStreaming}
-              working={workingOnRail}
+              foot={foot}
               headed
             />
           </div>
@@ -327,7 +354,7 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
           isStreaming={isStreaming}
         />
       )}
-      {working && !workingOnRail ? <WorkingMark /> : null}
+      {working && !footShown ? <WorkingMark /> : null}
     </div>
   )
 })

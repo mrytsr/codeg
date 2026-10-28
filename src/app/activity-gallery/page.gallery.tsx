@@ -141,6 +141,63 @@ const FAILURE_TURN: MessageTurn = {
   ],
 }
 
+/** Commands that exited non-zero: some answered what they asked (a search that
+ *  found nothing, a test that came out false, a name or a path that is not
+ *  there, files that differ), some failed — one with a code that names why. */
+const EXITS_TURN: MessageTurn = {
+  id: "turn-exits",
+  role: "assistant",
+  timestamp: "2026-10-22T09:01:00Z",
+  duration_ms: 132000,
+  blocks: [
+    toolUse("x1", "Bash", { command: "rg -n 'source_bindings' web/lib" }),
+    toolResult("x1", "Exit code 1", true),
+    toolUse("x2", "Bash", { command: "test -f .env.local && echo present" }),
+    toolResult("x2", "Exit code 1", true),
+    toolUse("x3", "Bash", { command: "which python2" }),
+    toolResult("x3", "Exit code 1\npython2 not found", true),
+    toolUse("x4", "Bash", { command: "cat web/.env.example" }),
+    toolResult(
+      "x4",
+      "Exit code 1\ncat: web/.env.example: No such file or directory",
+      true
+    ),
+    toolUse("x5", "Bash", { command: "git diff --quiet -- web" }),
+    toolResult("x5", "Exit code 1", true),
+    {
+      type: "text",
+      text: "No `.env.local` and nothing reads `source_bindings` in `web/lib`; the web tree has uncommitted changes.",
+    },
+    toolUse("x6", "Bash", { command: "pyhton scripts/regen_report.py" }),
+    toolResult(
+      "x6",
+      "Exit code 127\n(eval):1: command not found: pyhton",
+      true
+    ),
+    toolUse("x7", "Bash", {
+      command: "pnpm --filter web test",
+      description: "Run web unit tests",
+    }),
+    toolResult(
+      "x7",
+      [
+        "FAIL  lib/report.test.ts > maps inactive bindings",
+        "",
+        "Tests: 1 failed, 47 passed, 48 total",
+        "",
+        "Exit code 1",
+      ].join("\n"),
+      true
+    ),
+    toolUse("x8", "Bash", { command: "node scripts/crawl-audit.js" }),
+    toolResult("x8", "Exit code 143\nCommand timed out after 2m 0s", true),
+    {
+      type: "text",
+      text: "The test run still fails one case, and the crawl timed out.",
+    },
+  ],
+}
+
 /** A reply that is all process: prose first, then a call that failed, and no
  *  answer after it — the header cannot fold it away. */
 const NO_ANSWER_TURN: MessageTurn = {
@@ -1073,6 +1130,7 @@ const SCENARIOS: Scenario[] = [
     inProgress: ["l3"],
   },
   { id: "failure", title: "Failures", turn: FAILURE_TURN },
+  { id: "exits", title: "Exit codes", turn: EXITS_TURN },
   { id: "no-answer", title: "Stopped on a failed call", turn: NO_ANSWER_TURN },
   { id: "codex", title: "Codex", turn: CODEX_TURN },
   { id: "agent", title: "Sub-agent", turn: AGENT_TURN },

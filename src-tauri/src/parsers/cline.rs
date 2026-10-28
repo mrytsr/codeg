@@ -296,18 +296,25 @@ pub(crate) fn cline_data_dir() -> PathBuf {
     cline_data_dir_for_env(&AgentEnv::inherited())
 }
 
-/// The data dir of the Cline launched with `env`: its `CLINE_DIR` (trimmed),
-/// else `~/.cline/data`.
+/// The data dir of the Cline launched with `env`, by Cline's own rule
+/// (`resolveClineDataDir`): `CLINE_DATA_DIR`, else `<CLINE_DIR>/data`, else
+/// `~/.cline/data`, each value trimmed.
 pub(crate) fn cline_data_dir_for_env(env: &AgentEnv) -> PathBuf {
-    if let Some(custom) = env.var("CLINE_DIR") {
-        let trimmed = custom.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
+    let set = |key: &str| {
+        env.var(key)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    if let Some(data_dir) = set("CLINE_DATA_DIR") {
+        return PathBuf::from(data_dir);
     }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".cline")
+    set("CLINE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".cline")
+        })
         .join("data")
 }
 
@@ -2261,10 +2268,19 @@ mod tests {
     /// env puts the agent's files, not where codeg's own environment does.
     #[test]
     fn for_env_reads_the_data_dir_of_the_launch_env() {
+        // Cline's own rule: `<CLINE_DIR>/data`, unless `CLINE_DATA_DIR` names it.
         let env = AgentEnv::with_overrides(&[("CLINE_DIR", "/relocated/cline")]);
         assert_eq!(
             ClineParser::for_env(&env).base_dir,
-            PathBuf::from("/relocated/cline")
+            PathBuf::from("/relocated/cline/data")
+        );
+        let env = AgentEnv::with_overrides(&[
+            ("CLINE_DIR", "/relocated/cline"),
+            ("CLINE_DATA_DIR", " /elsewhere/data "),
+        ]);
+        assert_eq!(
+            ClineParser::for_env(&env).base_dir,
+            PathBuf::from("/elsewhere/data")
         );
     }
 }

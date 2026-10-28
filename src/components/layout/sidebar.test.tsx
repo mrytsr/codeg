@@ -21,6 +21,10 @@ import {
   resetConversationTagsStore,
   useConversationTagsStore,
 } from "@/stores/conversation-tags-store"
+import {
+  resetFolderTabsStore,
+  useFolderTabsStore,
+} from "@/stores/folder-tabs-store"
 
 // Stable spies + mutable active-folder, referenced from the hoisted mock
 // factories below (vi.mock is hoisted above imports).
@@ -426,6 +430,51 @@ describe("Sidebar — Show Recent group toggle", () => {
     expect(
       screen.getByRole("menuitemcheckbox", { name: "Show Recent group" })
     ).toBeTruthy()
+  })
+})
+
+describe("Sidebar — Tabs follow folder", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetFolderTabsStore()
+    mockState.activeFolder = { id: 7, path: "/x" }
+  })
+
+  it("is a root row of View options that switches the mode both ways and keeps the menu open", async () => {
+    renderSidebar()
+    await userEvent.click(screen.getByRole("button", { name: "View options" }))
+    const row = () =>
+      screen.getByRole("menuitemcheckbox", { name: "Tabs follow folder" })
+    expect(row()).toHaveAttribute("aria-checked", "false")
+    // A root row, not one more checkbox behind a submenu.
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: "Show Recent group" })
+    ).toBeNull()
+
+    await userEvent.click(row())
+    expect(useFolderTabsStore.getState().enabled).toBe(true)
+    expect(localStorage.getItem("workspace:tabs-follow-folder:local")).toBe(
+      "true"
+    )
+    expect(row()).toHaveAttribute("aria-checked", "true")
+
+    await userEvent.click(row())
+    expect(useFolderTabsStore.getState().enabled).toBe(false)
+    expect(localStorage.getItem("workspace:tabs-follow-folder:local")).toBe(
+      "false"
+    )
+    expect(row()).toHaveAttribute("aria-checked", "false")
+  })
+
+  it("reflects a mode switched on elsewhere", async () => {
+    act(() => {
+      useFolderTabsStore.getState().setEnabled(true)
+    })
+    renderSidebar()
+    await userEvent.click(screen.getByRole("button", { name: "View options" }))
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: "Tabs follow folder" })
+    ).toHaveAttribute("aria-checked", "true")
   })
 })
 

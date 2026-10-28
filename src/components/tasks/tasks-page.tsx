@@ -17,10 +17,6 @@ import { useTasksView } from "@/contexts/tasks-view-context"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { workTaskArchive, workTaskReorder, workTaskStart } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
-import {
-  consumePendingTaskDraft,
-  CREATE_TASK_FROM_TEXT_EVENT,
-} from "@/lib/task-compose-events"
 import { clearTasksFocus, peekTasksFocus } from "@/lib/workbench-focus"
 import {
   DEFAULT_TASKS_BOARD_FILTER,
@@ -227,24 +223,10 @@ export function TasksPage() {
     }
   )
 
-  // "Task from message" hand-off: consume the parked draft on mount (this page
-  // is unmounted while other routes are active) and on the live event.
-  useEffect(() => {
-    const consume = () => {
-      const draft = consumePendingTaskDraft()
-      if (!draft) return
-      openNewTask(draft)
-    }
-    consume()
-    window.addEventListener(CREATE_TASK_FROM_TEXT_EVENT, consume)
-    return () =>
-      window.removeEventListener(CREATE_TASK_FROM_TEXT_EVENT, consume)
-  }, [openNewTask])
   const [settingsOpen, setSettingsOpen] = useState(false)
-
   // The settings entry lives in the chrome strip (TasksPageTitle), a separate
   // tree branch — it asks this page (which owns the dialog + folder scope) to
-  // open via a window event, like the "task from message" hand-off above.
+  // open via a window event.
   useEffect(() => {
     const open = () => setSettingsOpen(true)
     window.addEventListener(OPEN_TASK_SETTINGS_EVENT, open)

@@ -76,19 +76,23 @@ export const GenericRow = memo(function GenericRow({
       typeof parsed?.[key] === "string" ? (parsed[key] as string).trim() : ""
     return { result: text("result"), progress: text("task_progress") }
   }, [isCompletion, part.input])
+  // A sandbox's network request has one argument, the host, which its line
+  // already names: there is nothing more to open.
+  const isNetwork = tool.kind === "network"
   const expandable =
-    !!args || !!result?.trim() || todos.length > 0 || !!completion?.result
+    !isNetwork &&
+    (!!args || !!result?.trim() || todos.length > 0 || !!completion?.result)
 
   const label = (() => {
     switch (tool.kind) {
       case "skill":
         return (
           <>
-            <span className="shrink-0 font-medium text-muted-foreground">
+            <span className="shrink-0 font-medium text-activity-secondary">
               {t("row.skill")}
             </span>
             {tool.target ? (
-              <span className="min-w-0 truncate font-mono text-[0.8125rem]">
+              <span className="min-w-0 truncate font-mono text-[0.8125rem] text-activity-secondary">
                 {tool.target.text}
               </span>
             ) : null}
@@ -97,17 +101,36 @@ export const GenericRow = memo(function GenericRow({
       case "todo":
         return (
           <>
-            <span className="shrink-0 font-medium text-muted-foreground">
+            <span className="shrink-0 font-medium text-activity-secondary">
               {t("row.todos")}
             </span>
             {tool.target ? (
-              <span className="min-w-0 truncate" dir="auto">
+              <span
+                className="min-w-0 truncate text-activity-secondary"
+                dir="auto"
+              >
                 {tool.target.text}
               </span>
             ) : null}
             {tool.detail ? (
-              <span className="shrink-0 font-mono text-xs text-muted-foreground">
+              <span className="shrink-0 font-mono text-xs text-activity-secondary">
                 {tool.detail}
+              </span>
+            ) : null}
+          </>
+        )
+      case "network":
+        return (
+          <>
+            <span className="shrink-0 font-medium text-activity-secondary">
+              {t("row.networkAccess")}
+            </span>
+            {tool.target ? (
+              <span
+                className="min-w-0 truncate font-mono text-[0.8125rem] text-activity-secondary"
+                dir="ltr"
+              >
+                {tool.target.text}
               </span>
             ) : null}
           </>
@@ -115,12 +138,12 @@ export const GenericRow = memo(function GenericRow({
       case "completion":
         return (
           <>
-            <span className="shrink-0 font-medium text-muted-foreground">
+            <span className="shrink-0 font-medium text-activity-secondary">
               {t("row.completion")}
             </span>
             {tool.target ? (
               <span
-                className="min-w-0 truncate text-muted-foreground"
+                className="min-w-0 truncate text-activity-secondary"
                 dir="auto"
               >
                 {tool.target.text}
@@ -141,7 +164,7 @@ export const GenericRow = memo(function GenericRow({
             </span>
             {tool.detail ? (
               <span
-                className="min-w-0 truncate text-muted-foreground"
+                className="min-w-0 truncate text-activity-secondary"
                 dir="auto"
               >
                 {tool.detail}
@@ -161,7 +184,7 @@ export const GenericRow = memo(function GenericRow({
         <RailIcon
           icon={toolIcon(tool)}
           status={tool.status}
-          label={`${t("kind.tool")}, ${statusText(tool.status)}`}
+          label={`${t(isNetwork ? "kind.network" : "kind.tool")}, ${statusText(tool.status)}`}
         />
       }
       expandable={expandable}
@@ -249,7 +272,7 @@ export const ToolResultRow = memo(function ToolResultRow({
         </DetailBox>
       )}
     >
-      <span className="font-medium text-muted-foreground">
+      <span className="font-medium text-activity-secondary">
         {t("row.toolResult")}
       </span>
     </ActivityRow>

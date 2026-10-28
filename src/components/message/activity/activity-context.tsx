@@ -4,6 +4,7 @@ import { createContext, useContext, type ReactNode } from "react"
 
 import type { ActivityModel } from "@/lib/activity/types"
 import type { AdaptedContentPart } from "@/lib/adapters/ai-elements-adapter"
+import type { ActivityFoot } from "./timeline-foot"
 
 /**
  * What the timeline's rows need from the surface that renders them.
@@ -19,8 +20,13 @@ export interface ActivityRenderContextValue {
   isStreaming: boolean
   /** Failed steps a later step redid successfully (see `summarizeActivity`). */
   recoveredKeys: ReadonlySet<string>
-  /** Draw a nested timeline (a sub-agent's own steps) with the same wiring. */
-  renderNested: (model: ActivityModel, isStreaming: boolean) => ReactNode
+  /** Draw a nested timeline (a sub-agent's own steps) with the same wiring,
+   *  ending on the capsule that folds its host. */
+  renderNested: (
+    model: ActivityModel,
+    isStreaming: boolean,
+    foot?: ActivityFoot
+  ) => ReactNode
   /** Only rows still running are drawn — the folded turn's long-lived rows
    *  (delegations, sub-agents, background tasks that outlive the turn). */
   pinnedOnly: boolean

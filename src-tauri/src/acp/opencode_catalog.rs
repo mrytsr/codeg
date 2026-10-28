@@ -1,12 +1,13 @@
-//! OpenCode provider catalog backed by [models.dev](https://models.dev).
+//! OpenCode provider catalog backed by the models.dev registry.
 //!
-//! OpenCode resolves its built-in providers and their model lists from the
-//! models.dev registry (`https://models.dev/api.json`). To drive a guided
-//! "connect a provider" experience we mirror that catalog here, normalized to
-//! a slim shape the frontend can render.
+//! OpenCode resolves its built-in providers and their model lists from its
+//! own copy of the models.dev registry, `https://models.opencode.ai/api.json`
+//! (`OPENCODE_MODELS_URL` overrides it; the two serve the same document).
+//! To drive a guided "connect a provider" experience we mirror that catalog
+//! here, normalized to a slim shape the frontend can render.
 //!
 //! Resolution order (most fresh first):
-//! 1. live fetch of `models.dev/api.json` (when forced, or when the cache is
+//! 1. live fetch of that `api.json` (when forced, or when the cache is
 //!    stale), normalized and written back to the on-disk cache;
 //! 2. the on-disk cache under `<data_dir>/cache/opencode/models-dev-v2.json`;
 //! 3. the snapshot bundled into the binary, so the catalog is always available
@@ -19,8 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::app_error::AppCommandError;
 
-/// models.dev JSON API — the same source OpenCode itself reads.
-pub const MODELS_DEV_URL: &str = "https://models.dev/api.json";
+/// The registry's JSON API, where OpenCode itself reads it (its default
+/// `OPENCODE_MODELS_URL` plus `/api.json`).
+pub const MODELS_DEV_URL: &str = "https://models.opencode.ai/api.json";
 
 /// Cache lifetime before we attempt a fresh fetch. Stale cache is still used as
 /// a fallback when the network is unavailable.

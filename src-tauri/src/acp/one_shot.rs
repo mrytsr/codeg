@@ -85,7 +85,10 @@ pub fn is_one_shot_owner(owner_window_label: &str) -> bool {
 pub(crate) fn session_meta(
     agent_type: AgentType,
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
-    let mut meta = crate::acp::connection::claude_raw_sdk_session_meta(agent_type, false)?;
+    let mut meta = crate::acp::connection::claude_raw_sdk_session_meta(
+        agent_type,
+        &crate::acp::connection::ClaudeSessionOptions::new(false),
+    )?;
     if let Some(serde_json::Value::Object(claude_code)) = meta.get_mut("claudeCode") {
         let options = claude_code
             .entry("options")

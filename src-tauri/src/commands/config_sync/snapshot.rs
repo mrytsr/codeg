@@ -330,7 +330,7 @@ fn reject_newer_schema(schema_version: u32) -> Result<(), AppCommandError> {
 /// exactly where the label is supposed to earn its keep. `gethostname(2)` is
 /// one already-vendored `libc` call away (`libc` is a unix-only dependency of
 /// this crate) and needs no new crate.
-fn source_device() -> String {
+pub(crate) fn source_device() -> String {
     resolve_device_name(env_device_name(), host_name())
 }
 

@@ -30,6 +30,10 @@ import {
   useAppWorkspaceStore,
 } from "@/stores/app-workspace-store"
 import enMessages from "@/i18n/messages/en.json"
+import {
+  resetFolderTabsStore,
+  useFolderTabsStore,
+} from "@/stores/folder-tabs-store"
 
 // ── Probes ────────────────────────────────────────────────────────────────
 // AgentIcon renders once per card body → counts card re-renders. The Folder /
@@ -1121,6 +1125,91 @@ describe("SidebarConversationList — worktree grouping (Show worktrees)", () =>
     expect(probes.folder).toBe(0)
     expect(probes.root).toBe(0)
   })
+
+  describe("while tabs follow the folder", () => {
+    beforeEach(() => resetFolderTabsStore())
+    afterEach(() => resetFolderTabsStore())
+
+    // The container's header and its root row both carry the repo's id; the
+    // worktree's header carries its own.
+    const containerHeader = () =>
+      document.querySelectorAll<HTMLElement>('[data-folder-id="1"]')[0]!
+    const rootHeader = () =>
+      document.querySelectorAll<HTMLElement>('[data-folder-id="1"]')[1]
+    const worktreeHeader = () =>
+      document.querySelector<HTMLElement>('[data-folder-id="2"]')
+    const marked = (header: HTMLElement | null | undefined) =>
+      header?.parentElement?.hasAttribute("data-scope-selected") ?? false
+
+    it("marks the root row, not the container above it, for the repo's own scope", () => {
+      act(() => {
+        useFolderTabsStore.setState({ enabled: true, scope: 1 })
+      })
+      render(wtTree(true))
+      expect(marked(rootHeader())).toBe(true)
+      expect(rootHeader()).toHaveAttribute("aria-current", "true")
+      expect(marked(containerHeader())).toBe(false)
+      expect(containerHeader()).not.toHaveAttribute("aria-current")
+
+      act(() => {
+        fireEvent.click(worktreeHeader()!)
+      })
+      expect(useFolderTabsStore.getState().scope).toBe(2)
+      expect(marked(worktreeHeader())).toBe(true)
+      expect(marked(rootHeader())).toBe(false)
+      // Selecting the container still selects its main worktree — the root
+      // row — and the container stays unmarked.
+      act(() => {
+        fireEvent.click(containerHeader())
+      })
+      expect(useFolderTabsStore.getState().scope).toBe(1)
+      expect(marked(rootHeader())).toBe(true)
+      expect(marked(containerHeader())).toBe(false)
+      expect(marked(worktreeHeader())).toBe(false)
+
+      act(() => {
+        fireEvent.click(rootHeader()!)
+      })
+      expect(useFolderTabsStore.getState().scope).toBe(1)
+      expect(marked(rootHeader())).toBe(true)
+      expect(marked(containerHeader())).toBe(false)
+    })
+
+    it("marks a folded container for the scope folded away inside it", () => {
+      act(() => {
+        useFolderTabsStore.setState({ enabled: true, scope: 2 })
+      })
+      render(wtTree(true))
+      expect(marked(containerHeader())).toBe(false)
+      // Fold the container: its disclosure button sits right after its row
+      // button.
+      act(() => {
+        fireEvent.click(containerHeader().nextElementSibling as HTMLElement)
+      })
+      expect(worktreeHeader()).toBeNull()
+      expect(rootHeader()).toBeUndefined()
+      expect(marked(containerHeader())).toBe(true)
+
+      act(() => {
+        useFolderTabsStore.setState({ scope: 1 })
+      })
+      expect(marked(containerHeader())).toBe(true)
+      act(() => {
+        useFolderTabsStore.setState({ scope: "global" })
+      })
+      expect(marked(containerHeader())).toBe(false)
+
+      // Unfolded, the rows that show the scopes take the mark back.
+      act(() => {
+        fireEvent.click(containerHeader().nextElementSibling as HTMLElement)
+      })
+      act(() => {
+        useFolderTabsStore.setState({ scope: 1 })
+      })
+      expect(marked(rootHeader())).toBe(true)
+      expect(marked(containerHeader())).toBe(false)
+    })
+  })
 })
 
 describe("SidebarConversationList — Recent section", () => {
@@ -2173,5 +2262,78 @@ describe("SidebarConversationList — tag filter", () => {
     })
     expect(probes.card).toBe(1)
     expect(probes.folder).toBe(0)
+  })
+})
+
+describe("SidebarConversationList — folder header and folder-tabs mode", () => {
+  beforeEach(() => {
+    const folders = [folder(1, "Folder 1"), folder(2, "Folder 2")]
+    useAppWorkspaceStore.setState({
+      folders,
+      allFolders: folders,
+      conversations: [conv(11, 1), conv(21, 2)],
+    })
+    store.activeTabId = null
+    store.tabSpec = []
+    resetFolderTabsStore()
+  })
+  afterEach(() => resetFolderTabsStore())
+
+  const header = (folderId: number) =>
+    document.querySelector(`[data-folder-id="${folderId}"]`) as HTMLElement
+  const disclosureButtons = () =>
+    document.querySelectorAll('[aria-label="Expand or collapse folder"]')
+
+  it("normal mode keeps the row button as the disclosure, with no extra button", () => {
+    render(tree())
+    const before = header(1).getAttribute("aria-expanded")
+    expect(before === "true" || before === "false").toBe(true)
+    expect(header(1)).not.toHaveAttribute("aria-current")
+    expect(header(1).parentElement).not.toHaveAttribute("data-scope-selected")
+    expect(disclosureButtons()).toHaveLength(0)
+    act(() => {
+      fireEvent.click(header(1))
+    })
+    expect(header(1)).toHaveAttribute(
+      "aria-expanded",
+      before === "true" ? "false" : "true"
+    )
+    expect(useFolderTabsStore.getState().scope).toBe("global")
+  })
+
+  it("folder-tabs mode: the row selects the folder, a separate chevron button toggles it", () => {
+    act(() => {
+      useFolderTabsStore.setState({ enabled: true, scope: 2 })
+    })
+    render(tree())
+    expect(header(1)).not.toHaveAttribute("aria-expanded")
+    expect(header(2)).toHaveAttribute("aria-current", "true")
+    // The folder on screen wears the selected-row tint, not only the ARIA.
+    const row = (folderId: number) => header(folderId).parentElement!
+    expect(row(2)).toHaveAttribute("data-scope-selected", "true")
+    expect(row(2).className).toContain("bg-sidebar-primary/8")
+    expect(row(1)).not.toHaveAttribute("data-scope-selected")
+    expect(row(1).className).not.toContain("bg-sidebar-primary/8")
+    act(() => {
+      fireEvent.click(header(1))
+    })
+    expect(useFolderTabsStore.getState().scope).toBe(1)
+    expect(header(1)).toHaveAttribute("aria-current", "true")
+    expect(row(1)).toHaveAttribute("data-scope-selected", "true")
+    expect(row(2)).not.toHaveAttribute("data-scope-selected")
+    // The row's own disclosure button sits right after the row button.
+    const toggle = () => header(1).nextElementSibling as HTMLElement
+    expect(toggle()).toHaveAttribute("aria-label", "Expand or collapse folder")
+    expect(disclosureButtons()).toHaveLength(2)
+    const before = toggle().getAttribute("aria-expanded")
+    expect(before === "true" || before === "false").toBe(true)
+    act(() => {
+      fireEvent.click(toggle())
+    })
+    expect(toggle()).toHaveAttribute(
+      "aria-expanded",
+      before === "true" ? "false" : "true"
+    )
+    expect(useFolderTabsStore.getState().scope).toBe(1)
   })
 })

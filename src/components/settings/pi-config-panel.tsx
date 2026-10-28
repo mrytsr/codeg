@@ -45,6 +45,12 @@ import {
 } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
 import { useAgentInstallStream } from "@/hooks/use-agent-install-stream"
+import { useProviderModels } from "@/hooks/use-provider-models"
+import {
+  ModelIdInputWithFetch,
+  ModelIdListField,
+} from "@/components/settings/provider-models"
+import type { ProviderModelsProtocol } from "@/lib/types"
 import {
   PI_CONFIG_DIR_ENV,
   PI_MIN_RUNTIME_VERSION,
@@ -157,6 +163,13 @@ const PI_CUSTOM_API_PROTOCOLS = [
   "anthropic-messages",
   "google-generative-ai",
 ]
+
+/** How a custom provider speaking `api` lists its models. */
+function piModelsProtocol(api: string): ProviderModelsProtocol {
+  if (api === "anthropic-messages") return "anthropic"
+  if (api === "google-generative-ai") return "gemini"
+  return "openai"
+}
 
 function isAbsolutePiPath(path: string): boolean {
   return (
@@ -302,6 +315,7 @@ export function PiConfigPanel({
   onSaved: () => Promise<void>
 }) {
   const t = useTranslations("AcpAgentSettings")
+  const tModels = useTranslations("ProviderModels")
 
   // --- Credentials (pi's native ~/.pi/agent/{settings,auth,models}.json) ---
   // `selectedProvider` is the Select value: a built-in id, a loaded-but-not-
@@ -312,6 +326,9 @@ export function PiConfigPanel({
   const [customBaseUrl, setCustomBaseUrl] = useState("")
   const [customApi, setCustomApi] = useState(PI_CUSTOM_API_PROTOCOLS[0])
   const [customProviders, setCustomProviders] = useState<PiCustomProvider[]>([])
+  /** The custom provider's model list as edited; `null` until touched, so a
+   *  save leaves the list on disk as it is. */
+  const [customModels, setCustomModels] = useState<string[] | null>(null)
   const [model, setModel] = useState("")
   const [thinkingLevel, setThinkingLevel] = useState("")
   const [apiKey, setApiKey] = useState("")
@@ -342,6 +359,33 @@ export function PiConfigPanel({
 
   const isCustom = selectedProvider === PI_CUSTOM_SENTINEL
   const effectiveProvider = (isCustom ? customId : selectedProvider).trim()
+
+  // The edited model list belongs to one provider; another one starts from
+  // its own list on disk.
+  const [customModelsFor, setCustomModelsFor] = useState(effectiveProvider)
+  if (customModelsFor !== effectiveProvider) {
+    setCustomModelsFor(effectiveProvider)
+    setCustomModels(null)
+  }
+  const storedCustomModels =
+    customProviders
+      .find((provider) => provider.id === effectiveProvider)
+      ?.models?.map((entry) => entry.id) ?? []
+  // The custom provider's own models, asked the way its protocol lists them —
+  // with the key typed here, else the one pi keeps for it.
+  const providerModels = useProviderModels(
+    isCustom
+      ? {
+          protocol: piModelsProtocol(customApi),
+          baseUrl: customBaseUrl,
+          apiKey,
+          storedKey:
+            effectiveProvider && authProviders.includes(effectiveProvider)
+              ? { kind: "piAuth", provider: effectiveProvider }
+              : null,
+        }
+      : null
+  )
 
   // Rehydrate the reasoning controls whenever the edited model's identity changes
   // (provider switch, or a different model id typed in). Reading the stored entry
@@ -534,6 +578,8 @@ export function PiConfigPanel({
               >,
             }
           : undefined,
+        customModels:
+          isCustom && customModels !== null ? customModels : undefined,
       })
       if (apiKey.trim()) {
         setApiKey("")
@@ -549,9 +595,16 @@ export function PiConfigPanel({
         // the chips that are now on disk rather than a stale read.
         setCustomProviders((prev) => {
           const previous = prev.find((c) => c.id === effectiveProvider)
+          const listed = customModels === null ? null : new Set(customModels)
           const models = (previous?.models ?? []).filter(
-            (entry) => entry.id !== trimmedModel
+            (entry) =>
+              entry.id !== trimmedModel && (!listed || listed.has(entry.id))
           )
+          for (const id of customModels ?? []) {
+            if (id !== trimmedModel && !models.some((m) => m.id === id)) {
+              models.push({ id, reasoning: null, thinkingLevelMap: {} })
+            }
+          }
           models.push({
             id: trimmedModel,
             reasoning: reasoning.enabled,
@@ -591,6 +644,7 @@ export function PiConfigPanel({
     defaultLevelUnlisted,
     reasoning,
     apiKey,
+    customModels,
     onSaved,
     t,
   ])
@@ -1296,14 +1350,25 @@ export function PiConfigPanel({
           <label className="text-2xs text-muted-foreground">
             {t("pi.modelLabel")}
           </label>
-          <Input
+          <ModelIdInputWithFetch
             value={model}
-            onChange={(event) => setModel(event.target.value)}
+            onChange={setModel}
+            state={providerModels}
             placeholder="claude-sonnet-5-5"
-            spellCheck={false}
             disabled={savingCreds || loadingCreds}
           />
         </div>
+
+        {isCustom && (
+          <ModelIdListField
+            ids={customModels ?? storedCustomModels}
+            onChange={setCustomModels}
+            state={providerModels}
+            readOnly={savingCreds || loadingCreds}
+            title={tModels("piList.title")}
+            hint={tModels("piList.hint")}
+          />
+        )}
 
         {/* ---- Reasoning card ----
             pi reads `reasoning: modelDef.reasoning ?? false`, and an undeclared

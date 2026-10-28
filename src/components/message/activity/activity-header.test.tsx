@@ -43,7 +43,7 @@ function renderHeader(
       />
     </NextIntlClientProvider>
   )
-  return document.querySelector<HTMLElement>(".ws-msg-chip")!
+  return document.querySelector<HTMLElement>(".activity-capsule")!
 }
 
 describe("ActivityHeader", () => {

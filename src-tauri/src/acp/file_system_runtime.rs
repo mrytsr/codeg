@@ -730,8 +730,9 @@ fn agent_root_slots(agent_type: AgentType) -> &'static [RootSlot] {
             default_rel: &[".local", "share", "opencode"],
             dir_name_env: None,
         }],
+        // `cline_data_dir_for_env`: `CLINE_DATA_DIR`, else `<CLINE_DIR>/data`.
         AgentType::Cline => &[RootSlot {
-            candidates: &[("CLINE_DIR", "", VERBATIM)],
+            candidates: &[("CLINE_DATA_DIR", "", VERBATIM), ("CLINE_DIR", "data", VERBATIM)],
             trims: true,
             default_rel: &[".cline", "data"],
             dir_name_env: None,
@@ -794,9 +795,14 @@ fn agent_root_slots(agent_type: AgentType) -> &'static [RootSlot] {
         // writes files itself rather than through `fs/*` (verified against
         // 0.209.1), so its `~/.trae` never needs to be a write root either.
         // Command Code is the same case: codeg's transcript is its history,
-        // and its tools never go through `fs/*` (verified against 1.84.0 and
-        // 1.86.3).
-        AgentType::Custom(_) | AgentType::ZCode | AgentType::Trae | AgentType::CommandCode => &[],
+        // and its tools never go through `fs/*` (verified against 1.84.0,
+        // 1.86.3 and 1.88.0). So is MiniMax Code: its tools run in-process and it sends
+        // codeg no `fs/*` or `terminal/*` request (verified against 0.7.0).
+        AgentType::Custom(_)
+        | AgentType::ZCode
+        | AgentType::Trae
+        | AgentType::CommandCode
+        | AgentType::MiniMaxCode => &[],
     }
 }
 
@@ -1586,7 +1592,7 @@ mod tests {
             (AgentType::KimiCode, "KIMI_CODE_HOME"),
             (AgentType::Cursor, "CURSOR_CONFIG_DIR"),
             (AgentType::Hermes, "HERMES_HOME"),
-            (AgentType::Cline, "CLINE_DIR"),
+            (AgentType::Cline, "CLINE_DATA_DIR"),
             (AgentType::Pi, "PI_CODING_AGENT_DIR"),
         ];
 

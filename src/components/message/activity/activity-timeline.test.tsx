@@ -35,6 +35,7 @@ import {
 import type { MessageTurn } from "@/lib/types"
 import { mockTruncateLayout } from "@/test-layout"
 import { CompletedTurnContent } from "../completed-turn-content"
+import { MessageScrollProvider } from "../message-scroll-context"
 import { resetDisclosureStore } from "./disclosure-store"
 
 const STORE: ConnectionStoreApi = {
@@ -114,7 +115,7 @@ const foldControl = (label = "Activity") =>
 
 /** The capsule itself — the line the label, the figures and the time share. */
 const activityHeader = () =>
-  document.querySelector<HTMLElement>(".ws-msg-chip")!
+  document.querySelector<HTMLElement>("div.activity-capsule")!
 
 /** The timeline row whose header contains `text`. */
 function rowOf(text: string | RegExp): HTMLElement {
@@ -398,8 +399,8 @@ describe("activity timeline: the reference turn", () => {
     // Like a row's: after the summary, pointing down while the process shows —
     // but in view folded too, not only on hover.
     renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
-    const summary = screen.getByText(/14 steps/)
     const header = activityHeader()
+    const summary = within(header).getByText(/14 steps/)
     const chevron = header.querySelector("svg.lucide-chevron-right")!
     expect(
       summary.compareDocumentPosition(chevron) &
@@ -417,7 +418,6 @@ describe("activity timeline: the reference turn", () => {
     renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
     const header = activityHeader()
     expect(header.className).toMatch(/\brounded-full\b/)
-    expect(header.className).toMatch(/\bws-msg-chip\b/)
     const classes = header.className.split(/\s+/)
     expect(classes).toContain("w-fit")
     // `max-w-full` is not `w-full`: the capsule caps at the column, it does
@@ -425,6 +425,83 @@ describe("activity timeline: the reference turn", () => {
     expect(classes).not.toContain("w-full")
     expect(header.querySelector(".h-px")).toBeNull()
     expect(header.querySelector("span[aria-hidden='true'].flex-1")).toBeNull()
+  })
+
+  it("fills the header with the steps' secondary grey, its words in inks that read on it", () => {
+    // The bubble's `--secondary` is tinted in the coloured presets (pink under
+    // red, peach under orange); the capsule is a translucent wash of the grey
+    // the steps' secondary words are set in, grey in every preset. The
+    // summary and the time take the stronger muted ink and a failure the
+    // stronger red, both keeping 4.5:1 on it.
+    renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
+    const header = activityHeader()
+    const classes = header.className.split(/\s+/)
+    expect(classes).toContain("bg-activity-capsule")
+    expect(classes).toContain("hover:bg-activity-capsule-hover")
+    expect(classes.filter((name) => /bg-(muted|secondary)/.test(name))).toEqual(
+      []
+    )
+    for (const figure of header.querySelectorAll(".activity-mono")) {
+      expect(figure).toHaveClass("text-activity-muted-strong")
+      expect(figure).not.toHaveClass("text-muted-foreground")
+    }
+    // The tokens, outside the fallback for engines without color-mix.
+    const flat = (value: string | undefined) =>
+      (value ?? "")
+        .replace(/\s+/g, " ")
+        .replace(/\( /g, "(")
+        .replace(/ \)/g, ")")
+    const css = postcss.parse(
+      readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8")
+    )
+    const tokens = new Map<string, string>()
+    css.walkRules((rule) => {
+      if (rule.parent?.type !== "root") return
+      rule.walkDecls(/^--activity-capsule/, (decl) => {
+        tokens.set(`${rule.selector} ${decl.prop}`, flat(decl.value))
+      })
+    })
+    const wash = (share: number) =>
+      `color-mix(in oklab, var(--activity-secondary) ${share}%, transparent)`
+    // A light wash, a deeper one on a dark page; hovered, a step deeper in
+    // either.
+    expect(tokens.get(":root --activity-capsule")).toBe(wash(12))
+    expect(tokens.get(":root --activity-capsule-hover")).toBe(wash(18))
+    expect(tokens.get(".dark --activity-capsule")).toBe(wash(24))
+    expect(tokens.get(".dark --activity-capsule-hover")).toBe(wash(32))
+    // Translucent already: over a background image the same wash, with the
+    // bubble's ring.
+    expect(tokens.has('[data-workspace-bg="on"] --activity-capsule')).toBe(
+      false
+    )
+    expect(
+      globalsDecl('[data-workspace-bg="on"] .activity-capsule', "box-shadow")
+    ).toBe(
+      globalsDecl(
+        '[data-workspace-bg="on"] .is-user .ws-msg-secondary',
+        "box-shadow"
+      )
+    )
+    expect(tokens.get(":root --activity-capsule-danger")).toBe(
+      "color-mix(in oklab, var(--tone-danger) 85%, var(--foreground))"
+    )
+  })
+
+  it("sets an unrecovered failure in the capsule's own red", () => {
+    const FAILED: MessageTurn = {
+      id: "capsule-failure",
+      role: "assistant",
+      timestamp: "2026-10-22T09:00:00Z",
+      blocks: [
+        toolUse("f1", "Bash", { command: "pnpm test" }),
+        toolResult("f1", "Exit code 1\n1 failed", true),
+        { type: "text", text: "The tests fail." },
+      ],
+    }
+    renderSettled(partsOf(FAILED))
+    const failure = within(activityHeader()).getByText("1 failed")
+    expect(failure).toHaveClass("text-activity-capsule-danger")
+    expect(failure).not.toHaveClass("text-tone-danger")
   })
 
   it("makes the header a block 2rem tall", () => {
@@ -460,7 +537,7 @@ describe("activity timeline: the reference turn", () => {
 
   it("folds and unfolds from anywhere on the header", () => {
     renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
-    fireEvent.click(screen.getByText(/14 steps/))
+    fireEvent.click(within(activityHeader()).getByText(/14 steps/))
     expect(foldControl()).toHaveAttribute("aria-expanded", "false")
     expect(screen.queryByText("Explored")).toBeNull()
     fireEvent.click(activityHeader().querySelector(".activity-mono")!)
@@ -526,19 +603,32 @@ describe("activity timeline: the reference turn", () => {
     }
   })
 
-  it("sets a row's verb, a group's title and the file it acts on in the light ink", () => {
+  it("sets a row's verb and a group's title in the ink of the words after them", () => {
     renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
-    for (const label of ["Explored", "Ran 2 commands", "Edited"]) {
-      expect(screen.getAllByText(label)[0]).toHaveClass("text-muted-foreground")
+    for (const label of ["Thought", "Explored", "Ran 2 commands", "Edited"]) {
+      const verb = screen.getAllByText(label)[0]!
+      expect(verb).toHaveClass("text-activity-secondary", "font-medium")
+      expect(verb).not.toHaveClass("text-muted-foreground")
     }
     // The edited file: its folder and its name alike.
     const name = screen.getByText("query_tasks.py")
     expect(name).not.toHaveClass("text-foreground")
-    expect(name.closest(".text-muted-foreground")).toBe(name.parentElement)
-    // A file an explore group read.
+    expect(name.closest(".text-activity-secondary")).toBe(name.parentElement)
+    // A group's members: the verb column and the file it read.
     fireEvent.click(within(rowOf("Explored")).getAllByRole("button")[0]!)
-    const read = within(rowOf(/\/Makefile$/)).getByText(/\/Makefile$/)
-    expect(read).toHaveClass("text-muted-foreground")
+    const member = rowOf(/\/Makefile$/)
+    expect(within(member).getByText(/\/Makefile$/)).toHaveClass(
+      "text-activity-secondary"
+    )
+    expect(within(member).getByText("read")).toHaveClass(
+      "text-activity-secondary"
+    )
+    // The fold at the foot of the open list reads the same.
+    const foot = document.querySelector<HTMLElement>(
+      "li[data-marker='foot'] > button"
+    )!
+    expect(foot).toHaveClass("text-activity-secondary")
+    expect(foot).not.toHaveClass("text-muted-foreground")
   })
 
   it("spaces a group's members like the rows around the group", () => {
@@ -579,6 +669,40 @@ describe("activity timeline: the reference turn", () => {
     expect(child.className).toMatch(/\bpy-0\.5\b/)
     expect(explored.className).toMatch(/\bpy-0\.5\b/)
   })
+
+  it("starts a group's words as far past its rings as the timeline's", () => {
+    // A member's ring is smaller, so its column is narrower by as much: the
+    // words start the same 0.75rem past the ring in every list — a reply's,
+    // a sub-agent's, a group's.
+    const stylesheet = postcss.parse(
+      readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8")
+    )
+    const column = (selector: string) => {
+      let value = Number.NaN
+      stylesheet.walkRules((rule) => {
+        if (rule.selector !== selector) return
+        rule.walkDecls("padding-inline-start", (decl) => {
+          value = Number.parseFloat(decl.value)
+        })
+      })
+      return value
+    }
+    renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
+    const group = screen.getAllByText("Ran 2 commands")[0]!.closest("li")!
+    fireEvent.click(within(group).getAllByRole("button")[0]!)
+    // Tailwind's size-N is N quarter-rems.
+    const ring = (marker: Element) =>
+      Number(marker.className.match(/\bsize-(\d+)\b/)![1]) / 4
+    const list = document.querySelector(".activity-timeline")!
+    const mainRing = list.querySelector(
+      ':scope > li[data-marker="ring"] > span'
+    )!
+    const memberRing = list.querySelector(
+      'li.activity-child[data-marker="ring"] > span'
+    )!
+    expect(column(".activity-item") - ring(mainRing)).toBe(0.75)
+    expect(column(".activity-child") - ring(memberRing)).toBe(0.75)
+  })
 })
 
 describe("activity timeline: failures", () => {
@@ -597,11 +721,30 @@ describe("activity timeline: failures", () => {
     vi.restoreAllMocks()
   })
 
-  it("opens a failure nobody redid and says so in red in the header", () => {
+  it("leaves a failed command folded, its failure in red on its row and in the header", () => {
+    // A command that exits non-zero is routine — a test run mid-fix, a grep
+    // with no match — and opening its output by itself pushed the reply about.
+    // The red `exit 2` and the header's count say it failed; the output is a
+    // click away.
     renderSettled(partsOf(FAILURE))
     expect(screen.getByText("1 failed")).toBeTruthy()
     const row = rowOf("pnpm build")
     expect(within(row).getByText("exit 2")).toBeTruthy()
+    const header = within(row).getByRole("button")
+    expect(header).toHaveAttribute("aria-expanded", "false")
+    expect(within(row).queryByText(/Type error/)).toBeNull()
+    fireEvent.click(header)
+    expect(within(row).getByText(/Type error/)).toBeTruthy()
+  })
+
+  it("opens the failed command from the header's red count", () => {
+    renderSettled(partsOf(FAILURE))
+    fireEvent.click(screen.getByRole("button", { name: "1 failed" }))
+    const row = rowOf("pnpm build")
+    expect(within(row).getAllByRole("button")[0]).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
     expect(within(row).getByText(/Type error/)).toBeTruthy()
   })
 
@@ -652,7 +795,7 @@ describe("activity timeline: a live turn", () => {
     // Its label shimmers while it runs, as a running row's verb does.
     expect(within(row).getByText("Command")).toHaveClass("activity-shimmer")
     expect(within(row).getByText("Run web unit tests")).toHaveClass(
-      "text-muted-foreground"
+      "text-activity-secondary"
     )
   })
 })
@@ -699,32 +842,160 @@ describe("activity timeline: the status rings", () => {
   })
 
   it("turns the same arc at the foot of a live reply", () => {
-    // Under a reply with no answer yet: the mark is a track with the arc over
-    // it, so the two read as one ring.
+    // While the agent works the rail ends on a single turning ring: a track
+    // with the arc over it, so the two read as one ring — no fold row yet.
     const { container } = renderTurn(
       <CurrentRound
         parts={partsOf(MOCKUP_LIVE_TURN, true, ["l3"])}
         completed={false}
       />
     )
-    const mark = container.querySelector<HTMLElement>(
-      '.activity-timeline > [data-marker="working"]'
-    )!
+    const list = container.querySelector(".activity-timeline")!
+    const foot = list.lastElementChild as HTMLElement
+    expect(foot).toHaveAttribute("data-marker", "working")
+    expect(foot).toHaveAttribute("aria-hidden", "true")
+    const mark = foot.firstElementChild!
     expect(mark.querySelector(".border-activity-ring")).toBeTruthy()
     const arc = mark.querySelector<HTMLElement>(".border-t-activity-ring-live")!
     expect(arc.className).toMatch(/\banimate-spin\b/)
     // Two plain children: the track and the arc, nothing inside either.
-    expect(mark.firstElementChild!.childElementCount).toBe(2)
+    expect(mark.childElementCount).toBe(2)
+    expect(arc.childElementCount).toBe(0)
+    expect(foot.querySelector("svg, button")).toBeNull()
+    expect(container.querySelectorAll('[data-marker="working"]')).toHaveLength(
+      1
+    )
   })
 })
 
 describe("activity timeline: where the rail ends", () => {
-  // The rail itself is CSS (globals.css): the list says whether it is done.
+  // The rail itself is CSS (globals.css); the list ends on its foot.
   const list = () => document.querySelector(".activity-timeline")!
+  /** The list's own child marked `marker` (not one of a nested list's). */
+  const childMarked = (el: Element, marker: string) =>
+    ([...el.children].find(
+      (child) => child.getAttribute("data-marker") === marker
+    ) ?? null) as HTMLElement | null
+  const footOf = (el: Element) => childMarked(el, "foot")
+  const workingOf = (el: Element) => childMarked(el, "working")
+  /** The row that folds the list, at its foot. */
+  const foldOf = (el: Element) =>
+    within(footOf(el)!).getByRole("button", { name: /^Collapse / })
 
-  it("ends a finished reply's steps on the end mark", () => {
+  it("ends a finished reply's steps on a row that folds them, saying what it folds", () => {
     renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
-    expect(list()).toHaveAttribute("data-end", "reached")
+    const foot = footOf(list())!
+    expect(foot).toBe(list().lastElementChild)
+    expect(foot).toHaveClass("activity-item")
+    // "Collapse", then the steps it folds and the time they took.
+    expect(foldOf(list())).toHaveAccessibleName("Collapse 14 steps · 3m 34s")
+    expect(within(foot).getByText("Collapse")).toHaveClass("font-medium")
+    // There is no end mark any more: the list keeps no note of being done.
+    expect(list()).not.toHaveAttribute("data-end")
+  })
+
+  it("rings the fold's chevron like a finished step's icon", () => {
+    // Where a step's icon would be: the same faint ring, the same place, a
+    // glyph of the same size — the fold's chevron, pointing up.
+    renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
+    const classes = (el: Element) =>
+      el.getAttribute("class")!.split(/\s+/).sort()
+    const fold = foldOf(list())
+    const mark = fold.firstElementChild as HTMLElement
+    const stepMark = list().querySelector<HTMLElement>(
+      ':scope > li[data-marker="ring"] > span'
+    )!
+    expect(classes(mark)).toEqual(classes(stepMark))
+    const ring = mark.querySelector<HTMLElement>('[data-ring="quiet"]')!
+    const stepRing = list().querySelector<HTMLElement>(
+      'li[data-status="succeeded"] [data-ring="quiet"]'
+    )!
+    expect(classes(ring)).toEqual(classes(stepRing))
+    const chevron = mark.querySelector("svg.lucide-chevron-up")!
+    const stepGlyph = stepMark.querySelector("svg")!
+    expect(chevron.getAttribute("viewBox")).toBe(
+      stepGlyph.getAttribute("viewBox")
+    )
+    expect(chevron).toHaveClass("absolute", "inset-0", "size-full")
+    // The words beside it say what it does: the ring is no image of its own.
+    expect(mark.querySelector('[role="img"]')).toBeNull()
+  })
+
+  it("says the steps alone with no time to give, and the process with no steps to count", () => {
+    const view = renderSettled(partsOf(MOCKUP_ASSISTANT_TURN), 0)
+    expect(foldOf(list())).toHaveAccessibleName("Collapse 14 steps")
+    view.unmount()
+    // A thought is no step: a reply that only thought before it answered
+    // folds its process by name, with the time it took when there is one.
+    const THOUGHT_ONLY: MessageTurn = {
+      id: "turn-t",
+      role: "assistant",
+      timestamp: "2026-10-22T09:00:00Z",
+      blocks: [
+        { type: "thinking", text: "**Weighing it**\n\nShort and safe." },
+        { type: "text", text: "Use the short one." },
+      ],
+    }
+    const bare = renderSettled(partsOf(THOUGHT_ONLY), 0)
+    expect(foldOf(list())).toHaveAccessibleName("Collapse Activity")
+    bare.unmount()
+    renderSettled(partsOf(THOUGHT_ONLY), 5000)
+    expect(foldOf(list())).toHaveAccessibleName("Collapse 5s")
+  })
+
+  it("folds the reply from its foot, keeping the answer", () => {
+    renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
+    fireEvent.click(foldOf(list()))
+    expect(foldControl()).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByText("Explored")).toBeNull()
+    expect(screen.getByText(/The web build is clean/)).toBeTruthy()
+    expect(document.querySelector('[data-marker="foot"]')).toBeNull()
+    // Unfolded again, it ends on its foot again.
+    fireEvent.click(foldControl())
+    expect(footOf(list())).toBeTruthy()
+  })
+
+  it("brings the header into view before it folds from its foot", () => {
+    // The foot is at the bottom of what folds away; with the header above the
+    // view, the answer would slide in under the reader instead.
+    const order: string[] = []
+    const revealFromAbove = vi.fn((element: Element) => {
+      order.push(
+        `reveal:${element.querySelector("button[aria-expanded]")?.getAttribute("aria-expanded")}`
+      )
+    })
+    renderTurn(
+      <MessageScrollProvider
+        value={{ scrollToIndex: vi.fn(), revealFromAbove }}
+      >
+        <CurrentRound
+          parts={partsOf(MOCKUP_ASSISTANT_TURN)}
+          durationMs={214000}
+          completed
+        />
+      </MessageScrollProvider>
+    )
+    fireEvent.click(foldOf(list()))
+    expect(revealFromAbove).toHaveBeenCalledTimes(1)
+    expect(revealFromAbove.mock.calls[0]![0]).toBe(activityHeader())
+    // Read while the steps were still there.
+    expect(order).toEqual(["reveal:true"])
+    expect(foldControl()).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("hands the focus to the header's fold control when the foot had it", () => {
+    renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
+    const fold = foldOf(list())
+    fold.focus()
+    fireEvent.click(fold)
+    expect(document.activeElement).toBe(foldControl())
+  })
+
+  it("draws no foot under a reply that cannot fold", () => {
+    renderSettled(partsOf(STOPPED_ON_FAILURE), 9000)
+    expect(screen.queryByRole("button", { name: "Activity" })).toBeNull()
+    expect(footOf(list())).toBeNull()
+    expect(workingOf(list())).toBeNull()
   })
 
   it("hangs the reply's rows under the header, a step's gap below it", () => {
@@ -787,97 +1058,189 @@ describe("activity timeline: where the rail ends", () => {
       ':scope > li[data-marker="dot"] > span'
     ) as HTMLElement
     expect(dot.className.split(/\s+/)).toContain("start-[0.4375rem]")
-
-    const stylesheet = postcss.parse(
-      readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8")
-    )
-    const decl = (selector: string, prop: string) => {
-      let value: string | undefined
-      stylesheet.walkRules((rule) => {
-        if (rule.selector.replace(/\s+/g, " ") !== selector) return
-        rule.walkDecls(prop, (d) => {
-          value = d.value
-        })
-      })
-      return value
-    }
     // The segment under the ring, and a dot's incoming one, follow its centre.
     for (const selector of [
       ".activity-item::before",
       '.activity-item[data-marker="dot"]:not(:first-child)::after',
     ]) {
-      expect(decl(selector, "inset-inline-start")).toBe(
+      expect(globalsDecl(selector, "inset-inline-start")).toBe(
         "calc(0.625rem - 0.5px)"
       )
     }
-    // The end mark is a 0.5rem ring centred there too, and the working mark
-    // under a live reply starts at the same column.
-    expect(
-      decl(
-        '.activity-timeline[data-end="reached"] > .activity-item:last-child::before',
-        "inset-inline-start"
-      )
-    ).toBe("calc(0.625rem - 0.25rem)")
   })
 
-  it("levels the end marks with the line the list measures, else a footer's", () => {
-    // Each mark is centred on `--activity-end-line` (use-end-mark-line.ts),
-    // half its height below it; unmeasured, on a panel footer's, a group
-    // member's or a line of prose's centre: 0.125rem of padding under a 1.5rem
-    // line, 0.875rem above the row's bottom edge.
-    const stylesheet = postcss.parse(
-      readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8")
-    )
-    const decl = (selector: string, prop: string) => {
-      let value: string | undefined
-      stylesheet.walkRules((rule) => {
-        if (rule.selector.replace(/\s+/g, " ") !== selector) return
-        rule.walkDecls(prop, (d) => {
-          value = d.value
-        })
-      })
-      return value
+  it("sets each foot where a ring of its list would be, the rail stopping as short of it", () => {
+    // A segment reaches into the next row as far as it must to stop 0.125rem
+    // above that row's marker: a reply's ring at 0.25rem, a group member's
+    // ring at 0.375rem. The foot's ring — and the turning ring before it —
+    // starts the same 0.125rem below where the segment above it stops; after
+    // an explore group's dots, which reach 0.3125rem further, the foot starts
+    // that much lower.
+    const gap = remOf("var(--activity-gap)")
+    const reach = (selector: string) =>
+      -remOf(globalsDecl(selector, "bottom")) - gap
+    const tw: Record<string, number> = { "top-1": 0.25, "top-1.5": 0.375 }
+    const topOf = (el: Element) => {
+      const name = el
+        .getAttribute("class")!
+        .split(/\s+/)
+        .find((c) => c in tw)
+      if (!name) throw new Error(`no top on ${el.getAttribute("class")}`)
+      return tw[name]!
     }
-    // The main mark: a 0.5rem ring at the bottom of the segment's box.
-    expect(
-      decl(
-        '.activity-timeline[data-end="reached"] > .activity-item:last-child::before',
-        "bottom"
-      )
-    ).toBe("calc(var(--activity-end-line, 0.875rem) - 0.25rem)")
-    const child =
-      '.activity-children[data-end="reached"] > .activity-child:last-child[data-body]::after'
-    expect(decl(child, "height")).toBe("0.375rem")
-    expect(decl(child, "bottom")).toBe(
-      "calc(var(--activity-end-line, 0.875rem) - 0.1875rem)"
-    )
-  })
+    const ringOf = (foot: HTMLElement) =>
+      foot.querySelector(":scope > button > span")!
+    const lower =
+      remOf(
+        globalsDecl(
+          '.activity-child[data-after="dot"]:not(:first-child)',
+          "margin-top"
+        )
+      ) - gap
 
-  it("holds the end mark back while the reply runs", () => {
+    const view = renderTurn(
+      <CurrentRound
+        parts={partsOf(MOCKUP_ASSISTANT_TURN)}
+        durationMs={214000}
+        completed
+      />
+    )
+    expect(
+      topOf(ringOf(footOf(list())!)) - reach(".activity-item::before")
+    ).toBeCloseTo(0.125)
+    for (const [label, marker, after] of [
+      ["Explored", "dot", "dot"],
+      ["Ran 2 commands", "ring", undefined],
+    ] as const) {
+      const group = screen.getAllByText(label)[0]!.closest("li")!
+      fireEvent.click(within(group).getAllByRole("button")[0]!)
+      const foot = footOf(group.querySelector(".activity-children")!)!
+      expect(foot.getAttribute("data-after") ?? undefined).toBe(after)
+      const segment = reach(`.activity-child[data-marker="${marker}"]::before`)
+      expect(topOf(ringOf(foot)) - (segment - (after ? lower : 0))).toBeCloseTo(
+        0.125
+      )
+    }
+    view.unmount()
+
+    // The turning ring, before it, starts as far under the segment.
     renderTurn(
       <CurrentRound
         parts={partsOf(MOCKUP_LIVE_TURN, true, ["l3"])}
         completed={false}
       />
     )
-    expect(list()).toHaveAttribute("data-end", "pending")
+    expect(
+      topOf(workingOf(list())!.firstElementChild!) -
+        reach(".activity-item::before")
+    ).toBeCloseTo(0.125)
   })
 
-  it("ends an open group's members on their own mark once the group is done", () => {
+  it("keeps the turning ring and the fold row one height, so nothing under them moves as the steps end", () => {
+    const view = renderTurn(
+      <CurrentRound
+        parts={partsOf(MOCKUP_LIVE_TURN, true, ["l3"])}
+        completed={false}
+      />
+    )
+    // h-7: 1.75rem, a one-line row's py-0.5 around its 1.5rem line.
+    expect(workingOf(list())).toHaveClass("h-7")
+    view.unmount()
+    renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
+    const classes = foldOf(list()).className.split(/\s+/)
+    expect(classes).toContain("py-0.5")
+    expect(classes).toContain("leading-6")
+  })
+
+  it("ends an open group's members on a row that folds the group", () => {
     renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
     const group = rowOf("Explored")
-    fireEvent.click(within(group).getAllByRole("button")[0]!)
-    expect(group.querySelector(".activity-children")).toHaveAttribute(
-      "data-end",
-      "reached"
+    const header = within(group).getAllByRole("button")[0]!
+    fireEvent.click(header)
+    const members = group.querySelector(".activity-children")!
+    const foot = footOf(members)!
+    expect(foot).toBe(members.lastElementChild)
+    expect(foot).toHaveClass("activity-child")
+    const fold = foldOf(members)
+    // What the group holds, as its header says it.
+    expect(fold).toHaveAccessibleName("Collapse 3 files, 1 search")
+    expect(fold.querySelector("svg.lucide-chevron-up")).toBeTruthy()
+    fold.focus()
+    fireEvent.click(fold)
+    expect(header).toHaveAttribute("aria-expanded", "false")
+    expect(group.querySelector(".activity-children")).toBeNull()
+    // The focus goes back to the group's header, not to the page.
+    expect(document.activeElement).toBe(header)
+    // The reply itself stays open.
+    expect(foldControl()).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("ends a goal's own steps on the turning ring while it runs, then a row that folds its card", () => {
+    const goal = (isRunning: boolean): AdaptedContentPart => ({
+      type: "goal-run",
+      start: {
+        type: "tool-call",
+        toolCallId: "g-start",
+        toolName: "create_goal",
+        input: JSON.stringify({ objective: "Tidy the README" }),
+        state: "output-available",
+      },
+      end: null,
+      items: [
+        {
+          type: "tool-call",
+          toolCallId: "g-read",
+          toolName: "Read",
+          input: JSON.stringify({ file_path: "/r/README.md" }),
+          state: "output-available",
+          output: "# hvac",
+        },
+      ],
+      isRunning,
+    })
+    const nested = () =>
+      [...document.querySelectorAll<HTMLElement>(".activity-timeline")].find(
+        (ol) => ol.parentElement!.closest(".activity-timeline")
+      )
+    const view = renderTurn(
+      <CurrentRound parts={[goal(true)]} completed={false} />
     )
+    expect(workingOf(nested()!)).toBeTruthy()
+    expect(footOf(nested()!)).toBeNull()
+
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <StaticConnectionStoreProvider store={STORE}>
+          <StaticDelegationProvider value={DELEGATION}>
+            <StaticWorkspaceActionsProvider value={WORKSPACE}>
+              <CurrentRound parts={[goal(false)]} completed />
+            </StaticWorkspaceActionsProvider>
+          </StaticDelegationProvider>
+        </StaticConnectionStoreProvider>
+      </NextIntlClientProvider>
+    )
+    // Settled, the card folds by itself; opened, its steps end on the fold.
+    if (!nested()) {
+      fireEvent.click(screen.getByRole("button", { name: /Tidy the README/ }))
+    }
+    const steps = nested()!
+    const fold = foldOf(steps)
+    expect(fold).toHaveAccessibleName("Collapse 1 step")
+    fireEvent.click(fold)
+    expect(steps.isConnected).toBe(false)
+    expect(screen.queryByText("/r/README.md")).toBeNull()
+    // The goal's card folded, its row still on the reply's rail.
+    expect(
+      screen.getByRole("button", { name: /Tidy the README/ })
+    ).toHaveAttribute("aria-expanded", "false")
   })
 
   it("runs the rail past the last row only beside a body under its line", () => {
-    renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
+    // A list with no foot under it — a reply that cannot fold.
+    renderSettled(partsOf(STOPPED_ON_FAILURE), 9000)
     const rows = list().querySelectorAll(":scope > li")
     const last = rows[rows.length - 1] as HTMLElement
-    // Folded, the last row ends the rail at its ring: no segment, no mark.
+    // Folded, the last row ends the rail at its ring: no segment.
     expect(last).not.toHaveAttribute("data-body")
     fireEvent.click(within(last).getAllByRole("button")[0]!)
     expect(last).toHaveAttribute("data-body")
@@ -887,7 +1250,7 @@ describe("activity timeline: where the rail ends", () => {
     ).toHaveAttribute("data-body")
   })
 
-  it("holds a running group's mark back, and draws none under its folded member", () => {
+  it("turns a running group's foot, and draws none under its folded member", () => {
     const LIVE: MessageTurn = {
       id: "turn-g",
       role: "assistant",
@@ -902,16 +1265,16 @@ describe("activity timeline: where the rail ends", () => {
       <CurrentRound parts={partsOf(LIVE, true, ["g2"])} completed={false} />
     )
     const group = rowOf("Running 2 commands")
-    // Open while the reply is written, its list still going: no mark yet.
-    expect(group.querySelector(".activity-children")).toHaveAttribute(
-      "data-end",
-      "pending"
-    )
-    // Folded, the running member shows under the header: one row, no list.
+    // Open while the reply is written: its members end on the turning ring.
+    const members = () => group.querySelector(".activity-children")!
+    const working = workingOf(members())!
+    expect(working.querySelector(".animate-spin")).toBeTruthy()
+    expect(footOf(members())).toBeNull()
+    // Folded, the running member shows under the header: one row, no foot.
     fireEvent.click(within(group).getAllByRole("button")[0]!)
-    expect(group.querySelector(".activity-children")).not.toHaveAttribute(
-      "data-end"
-    )
+    expect(members().querySelectorAll(":scope > li")).toHaveLength(1)
+    expect(workingOf(members())).toBeNull()
+    expect(footOf(members())).toBeNull()
   })
 })
 
@@ -979,11 +1342,11 @@ describe("activity timeline: commands", () => {
     const header = within(row).getAllByRole("button")[0]!
     expect(header.textContent).toBe("CommandInstall and run the web tests")
     expect(within(header).getByText("Command")).toHaveClass(
-      "text-muted-foreground"
+      "text-activity-secondary"
     )
     expect(
       within(header).getByText("Install and run the web tests")
-    ).toHaveClass("text-muted-foreground")
+    ).toHaveClass("text-activity-secondary")
     expect(header).toHaveAttribute("title", "Install and run the web tests")
     fireEvent.click(header)
     const panel = row.querySelector(".activity-detail") as HTMLElement
@@ -1070,7 +1433,8 @@ describe("activity timeline: codex scripts", () => {
   ): HTMLElement {
     renderSettled(partsOf(scriptTurn(output, failed, title)))
     const row = rowOf("Script")
-    if (!failed) fireEvent.click(within(row).getAllByRole("button")[0]!)
+    // Folded however it ended: the reader opens it.
+    fireEvent.click(within(row).getAllByRole("button")[0]!)
     return row.querySelector(".activity-detail-box") as HTMLElement
   }
 

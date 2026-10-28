@@ -14,7 +14,8 @@ static NPM_ENV_CACHE: Mutex<Option<Vec<CheckItem>>> = Mutex::new(None);
 #[serde(rename_all = "snake_case")]
 pub enum FixActionKind {
     OpenUrl,
-    InstallOpencodePlugins,
+    /// Opens the OpenCode plugins dialog.
+    ManageOpencodePlugins,
     InstallUv,
 }
 
@@ -738,173 +739,217 @@ async fn check_binary_environment(
         checks.push(cache_check);
     }
 
-    // OpenCode plugin checks
+    // OpenCode plugins: what its global config declares. OpenCode 2 installs
+    // package plugins itself when a session starts, so there is nothing for
+    // codeg to install or find in a cache — only declarations that cannot work.
     if agent_type == AgentType::OpenCode {
-        use crate::acp::opencode_plugins::{self, spec_has_floating_version, PluginStatus};
-        match opencode_plugins::check_opencode_plugins(None) {
-            Ok(summary) => {
-                // Anything the install pass can actually fix, which includes a
-                // package sitting in the legacy flat layout: present on disk,
-                // invisible to the pinned opencode, and re-downloaded on every
-                // start. Reporting that as installed is how the original bug
-                // stayed hidden.
-                //
-                // Path plugins are NOT in here: opencode imports those off disk,
-                // so "install" has nothing to do for them and listing them under
-                // a fix action that cannot clear promises a repair that never
-                // comes.
-                let missing: Vec<_> = summary
-                    .plugins
-                    .iter()
-                    .filter(|p| {
-                        matches!(
-                            p.status,
-                            PluginStatus::Missing | PluginStatus::NeedsMigration
-                        )
-                    })
-                    .collect();
-
-                if summary.plugins.is_empty() {
-                    checks.push(CheckItem {
-                        check_id: "opencode_plugins".into(),
-                        label: "OpenCode plugins".into(),
-                        status: CheckStatus::Pass,
-                        message: "No plugins declared".into(),
-                        fixes: vec![],
-                    });
-                } else if missing.is_empty() {
-                    checks.push(CheckItem {
-                        check_id: "opencode_plugins".into(),
-                        label: "OpenCode plugins".into(),
-                        status: CheckStatus::Pass,
-                        // "ready", not "installed": a path plugin is never
-                        // installed anywhere and is still perfectly loadable.
-                        // The count leaves out the ones the warning below says
-                        // are not on disk, so the two rows cannot contradict
-                        // each other.
-                        message: format!(
-                            "{} plugin(s) ready",
-                            summary
-                                .plugins
-                                .iter()
-                                .filter(|p| p.status != PluginStatus::PathMissing)
-                                .count()
-                        ),
-                        fixes: vec![],
-                    });
-                } else {
-                    let names: Vec<&str> = missing.iter().map(|p| p.name.as_str()).collect();
-                    let stale = missing
-                        .iter()
-                        .filter(|p| p.status == PluginStatus::NeedsMigration)
-                        .count();
-                    let detail = if stale > 0 {
-                        format!(
-                            " ({stale} installed in the old cache layout OpenCode no longer reads)"
-                        )
-                    } else {
-                        String::new()
-                    };
-                    checks.push(CheckItem {
-                        check_id: "opencode_plugins".into(),
-                        label: "OpenCode plugins".into(),
-                        status: CheckStatus::Fail,
-                        message: format!(
-                            "{} plugin(s) not installed: {}{detail}",
-                            missing.len(),
-                            names.join(", ")
-                        ),
-                        fixes: vec![FixAction {
-                            label: "Install Plugins".into(),
-                            kind: FixActionKind::InstallOpencodePlugins,
-                            payload: String::new(),
-                        }],
-                    });
-                }
-
-                // A declared path plugin with nothing at the end of it. Warn
-                // rather than Fail: opencode starts fine and publishes a load
-                // error for that one plugin. No fix action — the file has to be
-                // put there or the path corrected; installing cannot help.
-                let path_missing: Vec<String> = summary
-                    .plugins
-                    .iter()
-                    .filter(|p| p.status == PluginStatus::PathMissing)
-                    .map(|p| {
-                        p.resolved_path
-                            .clone()
-                            .unwrap_or_else(|| p.declared_spec.clone())
-                    })
-                    .collect();
-                if !path_missing.is_empty() {
-                    checks.push(CheckItem {
-                        check_id: "opencode_plugins_path".into(),
-                        label: "Plugin files".into(),
-                        status: CheckStatus::Warn,
-                        message: format!(
-                            "{} path plugin(s) declared in opencode.json do not exist: {}. \
-                             OpenCode will report a load error for each; fix the path or restore \
-                             the file (these are loaded from disk, not installed).",
-                            path_missing.len(),
-                            path_missing.join(", ")
-                        ),
-                        fixes: vec![],
-                    });
-                }
-
-                // Warn about @latest specs that cause slow startup
-                let floating: Vec<&str> = summary
-                    .plugins
-                    .iter()
-                    .filter(|p| spec_has_floating_version(&p.declared_spec))
-                    .map(|p| p.name.as_str())
-                    .collect();
-                if !floating.is_empty() {
-                    checks.push(CheckItem {
-                        check_id: "opencode_plugins_floating".into(),
-                        label: "Plugin versions".into(),
-                        status: CheckStatus::Warn,
-                        message: format!(
-                            "{} plugin(s) use @latest which forces a network check on every startup: {}. \
-                             Install via the plugin manager to auto-pin versions.",
-                            floating.len(),
-                            floating.join(", ")
-                        ),
-                        fixes: vec![FixAction {
-                            label: "Install Plugins".into(),
-                            kind: FixActionKind::InstallOpencodePlugins,
-                            payload: String::new(),
-                        }],
-                    });
-                }
-
-                // Project-level config hint
-                if summary.has_project_config_hint {
-                    checks.push(CheckItem {
-                        check_id: "opencode_project_config_hint".into(),
-                        label: "Project config".into(),
-                        status: CheckStatus::Warn,
-                        message:
-                            "Project-level opencode config detected; its plugins are not checked. \
-                             Expect slower first connect if it declares plugins."
-                                .into(),
-                        fixes: vec![],
-                    });
-                }
-            }
-            Err(e) => {
-                checks.push(CheckItem {
-                    check_id: "opencode_plugins".into(),
-                    label: "OpenCode plugins".into(),
-                    status: CheckStatus::Warn,
-                    message: format!("Failed to parse opencode.json: {e}"),
-                    fixes: vec![],
-                });
-            }
-        }
+        checks.extend(opencode_plugin_checks(
+            crate::acp::opencode_plugins::list_plugins(),
+        ));
     }
 
     checks
+}
+
+fn manage_opencode_plugins_fix() -> FixAction {
+    FixAction {
+        label: "Manage Plugins".into(),
+        kind: FixActionKind::ManageOpencodePlugins,
+        payload: String::new(),
+    }
+}
+
+/// The plugin rows of OpenCode's preflight, from what its global config
+/// declares (`listed` is [`crate::acp::opencode_plugins::list_plugins`]).
+///
+/// The summary row always passes and carries the way into the plugins dialog.
+/// What follows only warns: OpenCode starts with a plugin it cannot load and
+/// reports that one plugin's error, so nothing here blocks a session.
+fn opencode_plugin_checks(
+    listed: Result<crate::acp::opencode_plugins::PluginList, String>,
+) -> Vec<CheckItem> {
+    use crate::acp::opencode_plugins::{PluginKind, PluginPathState};
+
+    let list = match listed {
+        Ok(list) => list,
+        Err(e) => {
+            return vec![CheckItem {
+                check_id: "opencode_plugins".into(),
+                label: "OpenCode plugins".into(),
+                status: CheckStatus::Warn,
+                message: format!("Could not read OpenCode's plugin list: {e}"),
+                fixes: vec![],
+            }];
+        }
+    };
+
+    let mut checks = vec![CheckItem {
+        check_id: "opencode_plugins".into(),
+        label: "OpenCode plugins".into(),
+        status: CheckStatus::Pass,
+        message: if list.plugins.is_empty() {
+            "No plugins declared".into()
+        } else {
+            format!(
+                "{} plugin(s) declared; OpenCode installs package plugins itself when a session starts",
+                list.plugins.len()
+            )
+        },
+        fixes: vec![manage_opencode_plugins_fix()],
+    }];
+
+    let legacy: Vec<&str> = list
+        .plugins
+        .iter()
+        .filter(|p| p.legacy)
+        .map(|p| p.spec.as_str())
+        .collect();
+    if !legacy.is_empty() {
+        checks.push(CheckItem {
+            check_id: "opencode_plugins_legacy".into(),
+            label: "OpenCode 1 plugins".into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "{} plugin(s) are declared under OpenCode 1's `plugin` key: {}. OpenCode 2 still \
+                 loads them, but plugin code written for OpenCode 1 does not run in OpenCode 2, so \
+                 check that each has an OpenCode 2 release.",
+                legacy.len(),
+                legacy.join(", ")
+            ),
+            fixes: vec![manage_opencode_plugins_fix()],
+        });
+    }
+
+    // Local plugins resolved the way OpenCode 2 resolves them: a relative
+    // entry from the config file's directory, and only a directory loads.
+    let unloadable: Vec<String> = list
+        .plugins
+        .iter()
+        .filter(|p| p.kind == PluginKind::Path)
+        .filter_map(|p| {
+            let state = match p.path_state? {
+                PluginPathState::Directory => return None,
+                PluginPathState::Missing => "not found",
+                PluginPathState::NotDirectory => "a file, not a directory",
+            };
+            Some(format!(
+                "{} ({state}: {})",
+                p.spec,
+                p.resolved_path.as_deref().unwrap_or(&p.spec)
+            ))
+        })
+        .collect();
+    if !unloadable.is_empty() {
+        checks.push(CheckItem {
+            check_id: "opencode_plugins_path".into(),
+            label: "Plugin files".into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "{} local plugin(s) cannot load: {}. OpenCode 2 loads a local plugin from a \
+                 directory, and resolves ./ and ../ from the directory of {}.",
+                unloadable.len(),
+                unloadable.join("; "),
+                list.config_path.display()
+            ),
+            fixes: vec![manage_opencode_plugins_fix()],
+        });
+    }
+
+    checks
+}
+
+#[cfg(test)]
+mod opencode_plugin_check_tests {
+    use super::*;
+    use crate::acp::opencode_plugins::{PluginEntry, PluginKind, PluginList, PluginPathState};
+
+    fn entry(spec: &str, kind: PluginKind, legacy: bool) -> PluginEntry {
+        PluginEntry {
+            spec: spec.into(),
+            kind,
+            legacy,
+            has_options: false,
+            resolved_path: None,
+            path_state: None,
+        }
+    }
+
+    fn list(plugins: Vec<PluginEntry>) -> PluginList {
+        PluginList {
+            config_path: "/cfg/opencode/opencode.json".into(),
+            plugins,
+        }
+    }
+
+    fn ids(checks: &[CheckItem]) -> Vec<&str> {
+        checks.iter().map(|c| c.check_id.as_str()).collect()
+    }
+
+    /// Package plugins are OpenCode's to install: a declared one is never a
+    /// failure, and the row always leads to the plugins dialog.
+    #[test]
+    fn declared_packages_pass_and_open_the_plugins_dialog() {
+        for plugins in [
+            vec![],
+            vec![entry("oh-my-opencode", PluginKind::Package, false)],
+        ] {
+            let checks = opencode_plugin_checks(Ok(list(plugins)));
+            assert_eq!(ids(&checks), ["opencode_plugins"]);
+            assert!(matches!(checks[0].status, CheckStatus::Pass));
+            assert!(matches!(
+                checks[0].fixes[0].kind,
+                FixActionKind::ManageOpencodePlugins
+            ));
+        }
+        // The settings page keys the dialog on this wire name.
+        assert_eq!(
+            serde_json::to_value(FixActionKind::ManageOpencodePlugins).unwrap(),
+            "manage_opencode_plugins"
+        );
+    }
+
+    #[test]
+    fn legacy_entries_and_unloadable_paths_warn() {
+        let mut missing = entry("./plugins/gone", PluginKind::Path, false);
+        missing.resolved_path = Some("/cfg/opencode/plugins/gone".into());
+        missing.path_state = Some(PluginPathState::Missing);
+        let mut file = entry("/srv/p.ts", PluginKind::Path, false);
+        file.resolved_path = Some("/srv/p.ts".into());
+        file.path_state = Some(PluginPathState::NotDirectory);
+        let mut fine = entry("./plugins/ok", PluginKind::Path, false);
+        fine.resolved_path = Some("/cfg/opencode/plugins/ok".into());
+        fine.path_state = Some(PluginPathState::Directory);
+
+        let checks = opencode_plugin_checks(Ok(list(vec![
+            entry("legacy-pkg", PluginKind::Package, true),
+            missing,
+            file,
+            fine,
+        ])));
+        assert_eq!(
+            ids(&checks),
+            [
+                "opencode_plugins",
+                "opencode_plugins_legacy",
+                "opencode_plugins_path"
+            ]
+        );
+        assert!(checks[1..]
+            .iter()
+            .all(|c| matches!(c.status, CheckStatus::Warn)));
+        assert!(checks[1].message.contains("legacy-pkg"));
+        assert!(checks[2].message.contains("/cfg/opencode/plugins/gone"));
+        assert!(checks[2].message.contains("/srv/p.ts"));
+        assert!(!checks[2].message.contains("plugins/ok"));
+    }
+
+    #[test]
+    fn an_unreadable_config_warns_instead_of_failing() {
+        let checks = opencode_plugin_checks(Err("broken".into()));
+        assert_eq!(ids(&checks), ["opencode_plugins"]);
+        assert!(matches!(checks[0].status, CheckStatus::Warn));
+        assert!(checks[0].message.contains("broken"));
+    }
 }
 
 #[cfg(test)]
@@ -930,7 +975,7 @@ mod adapter_tests {
         );
         assert_eq!(
             info.adapter_package,
-            "@agentclientprotocol/claude-agent-acp@0.94.0"
+            "@agentclientprotocol/claude-agent-acp@0.98.0"
         );
         assert_eq!(info.adapter_cmd, "claude-agent-acp");
         assert!(!info.adapter_installed);
@@ -947,7 +992,7 @@ mod adapter_tests {
     #[test]
     fn codex_adapter_info_uses_codex_home() {
         let info = info_for(AgentType::Codex, None, true);
-        assert_eq!(info.adapter_package, "@agentclientprotocol/codex-acp@2.2.2");
+        assert_eq!(info.adapter_package, "@agentclientprotocol/codex-acp@2.3.0");
         assert_eq!(info.adapter_cmd, "codex-acp");
         assert!(info.adapter_installed);
         assert_eq!(info.native_cmd, "codex");

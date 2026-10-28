@@ -193,6 +193,30 @@ describe("GoalToolCallPart", () => {
     expect(screen.queryByText("Reading README.md")).not.toBeInTheDocument()
   })
 
+  it("hands its steps the fold for the capsule at their foot", () => {
+    // The nested timeline ends on a capsule; pressed, the card folds and its
+    // header takes the focus the capsule had.
+    renderWithIntl(
+      <GoalRunPart
+        part={runningGoalRun([{ type: "text", text: "Reading README.md" }])}
+        renderBody={(fold) => (
+          <button type="button" onClick={(event) => fold(event.currentTarget)}>
+            fold from the foot
+          </button>
+        )}
+      />
+    )
+    const header = screen.getByRole("button", { expanded: true })
+    const capsule = screen.getByRole("button", { name: "fold from the foot" })
+    capsule.focus()
+    fireEvent.click(capsule)
+    expect(header).toHaveAttribute("aria-expanded", "false")
+    expect(
+      screen.queryByRole("button", { name: "fold from the foot" })
+    ).not.toBeInTheDocument()
+    expect(document.activeElement).toBe(header)
+  })
+
   it("shows active status for wrapper-prefixed create_goal names", () => {
     renderWithIntl(
       <GoalRunPart

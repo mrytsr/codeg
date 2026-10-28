@@ -77,6 +77,15 @@ describe("isAsyncLaunchAckText", () => {
     expect(isAsyncLaunchAckText(null)).toBe(false)
   })
 
+  it("matches OpenCode 2's background subagent acknowledgement", () => {
+    // packages/core/src/tool/plugin/subagent.ts `backgroundResult`, 2.2.0.
+    expect(
+      isAsyncLaunchAckText(
+        "The subagent is working in the background (sessionID: ses_e825797d9ffeJ5H3F2cPQH0euo). You will be notified automatically when it finishes."
+      )
+    ).toBe(true)
+  })
+
   it("matches Grok's spawn_subagent background ack (leading position only)", () => {
     expect(
       isAsyncLaunchAckText(

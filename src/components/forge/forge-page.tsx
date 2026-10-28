@@ -100,7 +100,7 @@ import {
   type ForgePageSize,
 } from "@/lib/forge-list-prefs"
 import { pageCount, pageSlots } from "@/lib/forge-pagination"
-import { rememberForgeProvider } from "@/lib/forge-provider-cache"
+import { rememberForgeRemote } from "@/lib/forge-provider-cache"
 import { effectiveForgeSettings } from "@/lib/forge-settings"
 import { openUrl, subscribe } from "@/lib/platform"
 import { cn } from "@/lib/utils"
@@ -713,9 +713,10 @@ export function ForgePage({ embed }: { embed?: ForgePageEmbed } = {}) {
     const resolving = effectiveFolderId
     folderForgeRemote(resolving)
       .then((r) => {
-        // Whoever names the aux panel's change-request tab learns the forge
-        // from here too — see `forge-provider-cache.ts`.
-        rememberForgeProvider(resolving, r?.provider ?? null)
+        // Whoever else reads the folder's forge — the aux panel naming its
+        // change-request tab, the task board offering a pull request — learns
+        // it from here too: see `forge-provider-cache.ts`.
+        rememberForgeRemote(resolving, r)
         if (!cancelled) setRemote(r)
       })
       .catch(() => {

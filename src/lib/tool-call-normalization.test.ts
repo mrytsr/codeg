@@ -8,6 +8,7 @@ import {
   extractClaudeCodeSkillName,
   inferLiveToolName,
   normalizeToolName,
+  PARENT_TOOL_CALL_META_KEY,
   toolCallMovedToBackground,
 } from "./tool-call-normalization"
 
@@ -62,6 +63,93 @@ describe("aliasToolInputKeys", () => {
   it("ignores an alias whose value is null", () => {
     const input = { filePath: null, content: "x" }
     expect(aliasToolInputKeys(input)).toBe(input)
+  })
+})
+
+describe("inferLiveToolName on OpenCode's code-mode execute frames", () => {
+  // A `session/load` replay opens a call with its input already present, so
+  // the frame carries no stamped OpenCode name — only its `execute` title.
+  const replay = (code: string) =>
+    inferLiveToolName({
+      title: "execute",
+      kind: "other",
+      rawInput: JSON.stringify({ code }),
+      meta: null,
+    })
+
+  it("keeps the execute identity when the script quotes a patch", () => {
+    // The delegated task is text; the patch marker in it is no patch call.
+    expect(
+      replay(
+        "await tools['codeg-mcp'].delegate_to_agent({agent_type:'codex',task:`Apply this patch:\n*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch`})"
+      )
+    ).toBe("bash")
+    expect(replay("return 1 + 1")).toBe("bash")
+  })
+
+  it("leaves other tools to the input heuristics", () => {
+    expect(
+      inferLiveToolName({
+        title: "apply_patch",
+        rawInput: JSON.stringify({ input: "*** Begin Patch\n*** End Patch" }),
+        meta: null,
+      })
+    ).toBe("apply_patch")
+    // A script under another title is not OpenCode's code-mode tool.
+    expect(
+      inferLiveToolName({
+        title: "browser_run_code",
+        rawInput: JSON.stringify({ code: "*** Begin Patch" }),
+        meta: null,
+      })
+    ).toBe("apply_patch")
+    // Nor is an `execute` whose `code` is no script.
+    expect(
+      inferLiveToolName({
+        title: "execute",
+        rawInput: JSON.stringify({ code: 42, input: "*** Begin Patch" }),
+        meta: null,
+      })
+    ).toBe("apply_patch")
+  })
+})
+
+describe("OpenCode 2 tool names", () => {
+  // OpenCode 2.2.0's opening frames state the tool as the ACP `name`, which the
+  // backend stamps as `_meta.opencode.toolName` (live capture).
+  const opening = (name: string) =>
+    inferLiveToolName({
+      title: name,
+      kind: "other",
+      rawInput: "{}",
+      meta: { opencode: { toolName: name } },
+    })
+
+  it("maps the renamed tools to their cards", () => {
+    expect(normalizeToolName("patch")).toBe("apply_patch")
+    expect(normalizeToolName("subagent")).toBe("agent")
+    expect(normalizeToolName("shell")).toBe("bash")
+    expect(opening("patch")).toBe("apply_patch")
+    expect(opening("subagent")).toBe("agent")
+    expect(opening("shell")).toBe("bash")
+  })
+
+  it("names a sub-agent's call from the stamp, not its prefixed title", () => {
+    expect(
+      inferLiveToolName({
+        title: "read",
+        kind: "read",
+        rawInput: JSON.stringify({ path: "hello.txt" }),
+        meta: {
+          "opencode/child-session": {
+            id: "ses_child",
+            title: "Probe child task",
+          },
+          opencode: { toolName: "read" },
+          [PARENT_TOOL_CALL_META_KEY]: "call_main_9_11",
+        },
+      })
+    ).toBe("read")
   })
 })
 
@@ -300,6 +388,82 @@ describe("inferLiveToolName meta.claudeCode.toolName override", () => {
         },
       })
     ).toBe("delegate_to_agent")
+  })
+
+  it("names a live Monitor a monitor, not the shell command its input looks like", () => {
+    // claude-agent-acp 0.98.0's live frame, recorded: the `command` key made
+    // the input-shape rule call it "bash" while it ran, and the transcript's
+    // raw name made it a generic "Monitor" on reload.
+    const live = inferLiveToolName({
+      title: "Monitor",
+      kind: "other",
+      rawInput: JSON.stringify({
+        command: "for i in 1 2 3; do echo event-$i; sleep 2; done",
+        description: "probe monitor",
+      }),
+      meta: { claudeCode: { toolName: "Monitor" } },
+    })
+    expect(live).toBe("monitor")
+    expect(normalizeToolName("Monitor")).toBe(live)
+    // A WebSocket monitor has no command at all.
+    expect(
+      inferLiveToolName({
+        title: "Monitor",
+        kind: "other",
+        rawInput: JSON.stringify({
+          ws: { url: "wss://ci.example.com/events" },
+          description: "CI events",
+        }),
+        meta: { claudeCode: { toolName: "Monitor" } },
+      })
+    ).toBe("monitor")
+    // Without the meta name, a command-shaped input is still a command.
+    expect(
+      inferLiveToolName({
+        title: "Monitor",
+        kind: "other",
+        rawInput: JSON.stringify({ command: "tail -f log" }),
+        meta: null,
+      })
+    ).toBe("bash")
+  })
+
+  it("gives a sandbox network request one name in either spelling", () => {
+    const live = inferLiveToolName({
+      title: "SandboxNetworkAccess",
+      kind: "other",
+      rawInput: JSON.stringify({ host: "example.com" }),
+      meta: { claudeCode: { toolName: "SandboxNetworkAccess" } },
+    })
+    expect(live).toBe("sandboxnetworkaccess")
+    expect(normalizeToolName("SandboxNetworkAccess")).toBe(live)
+    expect(normalizeToolName("sandboxnetworkaccess")).toBe(live)
+  })
+
+  it("keeps a sandbox network request by its meta name, whatever its input carries", () => {
+    // `{host}` matches no input shape today; the meta name is what keeps the
+    // call from being read as another tool once its input does (a `url`
+    // reads as a web fetch). The title is the host, as the request has it.
+    const rawInput = JSON.stringify({
+      host: "example.com",
+      url: "https://example.com/",
+    })
+    expect(
+      inferLiveToolName({
+        title: "example.com",
+        kind: "other",
+        rawInput,
+        meta: { claudeCode: { toolName: "SandboxNetworkAccess" } },
+      })
+    ).toBe("sandboxnetworkaccess")
+    expect(
+      inferLiveToolName({
+        title: "example.com",
+        kind: "other",
+        rawInput,
+        meta: null,
+      })
+    ).toBe("webfetch")
   })
 
   it("still classifies a {task_id} tool as task when no Claude Code meta is present", () => {
@@ -587,6 +751,23 @@ describe("normalizeToolName collapses ask_user_question across hosts", () => {
 
   it("does not match a suffix without a separator", () => {
     expect(normalizeToolName("xask_user_question")).not.toBe("question")
+  })
+})
+
+describe("normalizeToolName maps Antigravity's native ask_question", () => {
+  it("collapses the bare name its history parser keeps", () => {
+    expect(normalizeToolName("ask_question")).toBe("question")
+  })
+
+  // A host-prefixed `ask_question` is a third-party MCP tool — DeepWiki's takes
+  // `{repoName, question}` — which the question card cannot render.
+  it.each([
+    "mcp__deepwiki__ask_question",
+    "deepwiki/ask_question",
+    "deepwiki_ask_question",
+    "deepwiki: ask_question",
+  ])("leaves %s to its own card", (input) => {
+    expect(normalizeToolName(input)).not.toBe("question")
   })
 })
 

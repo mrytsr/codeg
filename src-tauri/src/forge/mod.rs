@@ -433,6 +433,12 @@ pub struct ForgeSourceMeta {
     pub head_repo: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_pr: Option<String>,
+    /// Number of `result_pr`, written with it. What lets a task that stayed in
+    /// review after delivering push its next round INTO that pull request
+    /// rather than looking one up by branch again. Absent on rows delivered
+    /// before it was recorded — every one of them `done`, so nothing reads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_pr_number: Option<i64>,
     /// For a pull-request task, the pull request's head that the task's last
     /// push-back went onto: read from the forge right before that push, and
     /// under the task's branch since the push was a fast-forward. The latest
@@ -452,6 +458,34 @@ pub struct ForgeSourceMeta {
     /// which is the posture the old folder setting shipped with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub writeback: Option<bool>,
+}
+
+/// Where a task WITHOUT forge provenance delivers its work: the repository its
+/// project folder's `origin` names, on a forge codeg speaks, and the account
+/// that speaks for that host.
+///
+/// Resolved from the checkout at the task's first delivery and pinned from
+/// then on (in [`WorkTaskDelivery`]) — the same rule a forge-sourced task
+/// follows with the account that triggered it: a later default-account flip,
+/// or an `origin` pointed somewhere else, must not quietly change who pushes,
+/// or into which repository the task's pull request is updated.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryTarget {
+    pub provider: ForgeProvider,
+    pub server_host: String,
+    pub account_id: String,
+    pub owner_repo: String,
+}
+
+/// Stored in `work_task.delivery` (JSON) for a task without forge provenance,
+/// mirrored to the frontend as `WorkTaskDelivery` in `src/lib/types.ts`: where
+/// it delivered, and the pull request the latest delivery settled against.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WorkTaskDelivery {
+    #[serde(flatten)]
+    pub target: DeliveryTarget,
+    pub pr_url: String,
+    pub pr_number: i64,
 }
 
 /// Pages one auto-processing scan reads per collection before it hands the

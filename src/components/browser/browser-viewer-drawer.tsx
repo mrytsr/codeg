@@ -117,7 +117,8 @@ function BrowserViewerBody({
 }) {
   const t = useTranslations("Browser.drawer")
   const { openBrowserTab, switchFileTab } = useWorkspaceActions()
-  const { fileTabs } = useWorkspaceFileTabs()
+  const { fileTabs: visibleFileTabs, allFileTabs } = useWorkspaceFileTabs()
+  const fileTabs = allFileTabs ?? visibleFileTabs
   const route = useOptionalWorkbenchRoute()
 
   // Open (or re-use) the workspace tab without activating the file column,

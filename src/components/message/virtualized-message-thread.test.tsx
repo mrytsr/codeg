@@ -179,6 +179,57 @@ describe("VirtualizedMessageThread scroll API", () => {
   )
 })
 
+describe("VirtualizedMessageThread revealFromAbove", () => {
+  function renderWithScrollApi() {
+    const scrollApiRef = {
+      current: null,
+    } as RefObject<MessageScrollContextValue | null>
+    render(
+      <VirtualizedMessageThread
+        items={[{ id: "a" }]}
+        getItemKey={(item) => item.id}
+        renderItem={() => null}
+        scrollApiRef={scrollApiRef}
+      />
+    )
+    return scrollApiRef
+  }
+  /** An element `top` px below the top of the view (negative: above it). */
+  function at(top: number) {
+    const port = testState.scrollRef.current!
+    port.getBoundingClientRect = () => ({ top: 50 }) as DOMRect
+    const element = document.createElement("div")
+    element.getBoundingClientRect = () => ({ top: 50 + top }) as DOMRect
+    return element
+  }
+
+  it("scrolls up to a part above the view, a rem of room above it, letting go of the lock", () => {
+    // The header of a reply folding from its foot, 900px above the view.
+    const scrollApiRef = renderWithScrollApi()
+    const port = testState.scrollRef.current!
+    port.scrollTop = 4_000
+    document.documentElement.style.fontSize = "20px"
+    try {
+      scrollApiRef.current!.revealFromAbove(at(-900))
+    } finally {
+      document.documentElement.style.fontSize = ""
+    }
+    expect(testState.stopScroll).toHaveBeenCalledTimes(1)
+    expect(port.scrollTop).toBe(4_000 - 900 - 20)
+  })
+
+  it("leaves a part already in view where it is, however close to the edge", () => {
+    const scrollApiRef = renderWithScrollApi()
+    const port = testState.scrollRef.current!
+    port.scrollTop = 4_000
+    for (const top of [240, 8, 0]) {
+      scrollApiRef.current!.revealFromAbove(at(top))
+    }
+    expect(testState.stopScroll).not.toHaveBeenCalled()
+    expect(port.scrollTop).toBe(4_000)
+  })
+})
+
 describe("VirtualizedMessageThread viewport top", () => {
   const items = Array.from({ length: 50 }, (_, i) => ({ id: `item-${i}` }))
 

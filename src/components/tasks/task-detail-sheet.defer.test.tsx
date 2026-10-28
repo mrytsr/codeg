@@ -33,6 +33,9 @@ vi.mock("@/lib/api", () => ({
   workTaskRetry: vi.fn().mockResolvedValue(undefined),
   workTaskReturn: vi.fn().mockResolvedValue(undefined),
   workTaskStart: vi.fn().mockResolvedValue(undefined),
+  // A local reviewed task asks where its project lives (the pull request
+  // offer); none here, which is the board without one.
+  folderForgeRemote: vi.fn().mockResolvedValue(null),
 }))
 vi.mock("@/lib/platform", () => ({
   subscribe: vi.fn().mockResolvedValue(() => {}),

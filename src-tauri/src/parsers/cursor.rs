@@ -1378,7 +1378,12 @@ fn decode_step(
 }
 
 /// `agent.v1.ToolCall` oneof field number → tool name, for every variant the
-/// 2026.07.16 CLI models. Undecoded variants still render a named card.
+/// 2026.10.22-27dcf5f CLI models, plus the ones earlier builds stored and
+/// later ones dropped (`update_pr_code_tour` = 50, which the 2026.07.16 CLI
+/// modeled, and the `pi_*` tools 61–67, which 27dcf5f removed), so older
+/// transcripts keep their cards. Undecoded variants still render a named
+/// card; a number missing here drops the call from the history altogether,
+/// although the live session showed it.
 fn tool_name_for_field(no: u32) -> Option<&'static str> {
     Some(match no {
         1 => "shell",
@@ -1439,6 +1444,28 @@ fn tool_name_for_field(no: u32) -> Option<&'static str> {
         67 => "pi_ls",
         68 => "connect_scm",
         69 => "search_conversations",
+        70 => "create_goal",
+        71 => "update_goal",
+        73 => "get_agent_status",
+        74 => "send_to_agent",
+        75 => "read_agent_transcript",
+        76 => "create_agent",
+        77 => "stop_agent",
+        79 => "write_canvas",
+        80 => "read_canvas",
+        81 => "generate_video",
+        82 => "x_search",
+        83 => "get_origin_pr_code_tour",
+        84 => "update_origin_pr_code_tour",
+        85 => "list_tracked_tasks",
+        86 => "create_tracked_tasks",
+        87 => "update_tracked_tasks",
+        88 => "delete_tracked_tasks",
+        89 => "update_tracked_task_statuses",
+        90 => "create_project",
+        91 => "update_tracked_task_tags",
+        93 => "stop_project_updates",
+        94 => "start_project_updates",
         _ => return None,
     })
 }
@@ -3892,5 +3919,64 @@ mod tests {
             CursorParser::for_env(&env).chats_dir,
             PathBuf::from("/relocated/xdg").join("cursor").join("chats")
         );
+    }
+
+    /// The tool variants of `agent.v1.ToolCall` as the 2026.10.22-27dcf5f CLI
+    /// declares it (read off its bundled descriptor). Fields 54, 57, 59 and 60
+    /// of that message are not tools.
+    const CLI_27DCF5F_TOOL_FIELDS: &[u32] = &[
+        1, 3, 4, 5, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30,
+        31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 51, 52, 53, 55, 56,
+        58, 68, 69, 70, 71, 73, 74, 75, 76, 77, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
+        93, 94,
+    ];
+
+    /// A variant without a name is dropped from the history, so every one the
+    /// pinned CLI declares needs one, and so do the ones older builds stored.
+    #[test]
+    fn names_every_tool_variant_the_cli_declares() {
+        let dropped_since = [50, 61, 62, 63, 64, 65, 66, 67];
+        for no in CLI_27DCF5F_TOOL_FIELDS.iter().chain(&dropped_since) {
+            assert!(
+                tool_name_for_field(*no).is_some(),
+                "ToolCall field {no} has no name"
+            );
+        }
+        for no in [54, 57, 59, 60] {
+            assert!(
+                tool_name_for_field(no).is_none(),
+                "ToolCall field {no} is not a tool"
+            );
+        }
+    }
+
+    /// Calls of variants newer than the table's first version reach the
+    /// history as named cards rather than vanishing.
+    #[test]
+    fn a_newer_tool_variant_reaches_the_history() {
+        let conn = Connection::open_in_memory().unwrap();
+        let state = DecodedState::default();
+        for (no, name) in [(81, "generate_video"), (94, "start_project_updates")] {
+            let mut args = Vec::new();
+            field_str(1, "x", &mut args);
+            let mut call = Vec::new();
+            field_bytes(1, &args, &mut call);
+            let mut tool = Vec::new();
+            field_bytes(no, &call, &mut tool);
+            field_str(57, &format!("tc-{no}"), &mut tool);
+            let mut blocks = Vec::new();
+            decode_tool_call(&conn, &tool, &state, &mut blocks);
+            match &blocks[..] {
+                [ContentBlock::ToolUse {
+                    tool_use_id,
+                    tool_name,
+                    ..
+                }, ContentBlock::ToolResult { .. }] => {
+                    assert_eq!(tool_name, name);
+                    assert_eq!(tool_use_id.as_deref(), Some(format!("tc-{no}").as_str()));
+                }
+                other => panic!("ToolCall field {no} decoded to {other:?}"),
+            }
+        }
     }
 }

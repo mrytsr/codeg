@@ -26,6 +26,7 @@ import { DelegationProvider } from "@/contexts/delegation-context"
 import { parsePermissionToolCall } from "@/lib/permission-request"
 import { subscribe } from "@/lib/platform"
 import { saveConfigPreference } from "@/lib/selector-prefs-storage"
+import { inferLiveToolName } from "@/lib/tool-call-normalization"
 import type { AttachHandlers } from "@/lib/transport/types"
 import {
   resetAppWorkspaceStore,
@@ -2066,6 +2067,285 @@ describe("AcpConnectionsProvider permission request details", () => {
       oldText: "const value = 1;",
       newText: "const value = 2;",
     })
+  })
+
+  it("tells a sandbox network request by the live call it is about", async () => {
+    // claude-agent-acp 0.98.0, recorded: the call is announced first, with
+    // its tool name; the request after it names only the host.
+    await mountProvider()
+
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1")
+    })
+
+    const handlers = latestAttachHandlers()
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "tool_call",
+      tool_call_id: "net-1",
+      title: "SandboxNetworkAccess",
+      kind: "other",
+      status: "pending",
+      content: null,
+      raw_input: JSON.stringify({ host: "example.com" }),
+      raw_output: null,
+      meta: { claudeCode: { toolName: "SandboxNetworkAccess" } },
+    })
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "permission_request",
+      request_id: "req-net",
+      tool_call: {
+        toolCallId: "net-1",
+        title: "example.com",
+        rawInput: { host: "example.com" },
+        _meta: { permission: { version: 1, title: "example.com" } },
+      },
+      options: [],
+    })
+
+    const parsed = parsePermissionToolCall(
+      h.store!.getConnection(TAB)!.pendingPermission?.tool_call
+    )
+    expect(parsed.networkHost).toBe("example.com")
+    // The request's own block is kept.
+    expect(parsed.description).toBe("example.com")
+  })
+
+  it("tells a sandbox network request whose call arrives after it", async () => {
+    const originalRaf = globalThis.requestAnimationFrame
+    const originalCancelRaf = globalThis.cancelAnimationFrame
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0)
+      return 1
+    })
+    vi.stubGlobal("cancelAnimationFrame", () => {})
+
+    try {
+      await mountProvider()
+
+      await act(async () => {
+        await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1")
+      })
+
+      const handlers = latestAttachHandlers()
+      emitAcpEvent(handlers, {
+        seq: 1,
+        connection_id: "spawned-conn",
+        type: "permission_request",
+        request_id: "req-net",
+        tool_call: {
+          toolCallId: "net-1",
+          title: "example.com",
+          rawInput: { host: "example.com" },
+        },
+        options: [],
+      })
+      expect(
+        parsePermissionToolCall(
+          h.store!.getConnection(TAB)!.pendingPermission?.tool_call
+        ).networkHost
+      ).toBeNull()
+
+      emitAcpEvent(handlers, {
+        seq: 2,
+        connection_id: "spawned-conn",
+        type: "tool_call",
+        tool_call_id: "net-1",
+        title: "SandboxNetworkAccess",
+        kind: "other",
+        status: "pending",
+        content: null,
+        raw_input: JSON.stringify({ host: "example.com" }),
+        raw_output: null,
+        meta: { claudeCode: { toolName: "SandboxNetworkAccess" } },
+      })
+
+      expect(
+        parsePermissionToolCall(
+          h.store!.getConnection(TAB)!.pendingPermission?.tool_call
+        ).networkHost
+      ).toBe("example.com")
+    } finally {
+      vi.stubGlobal("requestAnimationFrame", originalRaf)
+      vi.stubGlobal("cancelAnimationFrame", originalCancelRaf)
+    }
+  })
+
+  it("keeps the tool name of a call announced after its request drew it", async () => {
+    // Recorded in a browser against claude-agent-acp 0.98.0: in a turn, the
+    // request can reach the store first and draw a placeholder call; the
+    // announcement that follows is the only frame naming the tool.
+    const originalRaf = globalThis.requestAnimationFrame
+    const originalCancelRaf = globalThis.cancelAnimationFrame
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0)
+      return 1
+    })
+    vi.stubGlobal("cancelAnimationFrame", () => {})
+
+    try {
+      await mountProvider()
+
+      await act(async () => {
+        await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1")
+      })
+
+      const handlers = latestAttachHandlers()
+      emitAcpEvent(handlers, {
+        seq: 1,
+        connection_id: "spawned-conn",
+        type: "status_changed",
+        status: "prompting",
+      })
+      emitAcpEvent(handlers, {
+        seq: 2,
+        connection_id: "spawned-conn",
+        type: "permission_request",
+        request_id: "req-net",
+        tool_call: {
+          toolCallId: "net-2",
+          title: "example.org",
+          rawInput: { host: "example.org" },
+        },
+        options: [],
+      })
+      emitAcpEvent(handlers, {
+        seq: 3,
+        connection_id: "spawned-conn",
+        type: "tool_call",
+        tool_call_id: "net-2",
+        title: "SandboxNetworkAccess",
+        kind: "other",
+        status: "pending",
+        content: null,
+        raw_input: JSON.stringify({ host: "example.org" }),
+        raw_output: null,
+        meta: { claudeCode: { toolName: "SandboxNetworkAccess" } },
+      })
+
+      const conn = h.store!.getConnection(TAB)!
+      const block = conn.liveMessage?.content.find(
+        (b) => b.type === "tool_call" && b.info.tool_call_id === "net-2"
+      )
+      expect(block?.type === "tool_call" ? block.info.meta : null).toEqual({
+        claudeCode: { toolName: "SandboxNetworkAccess" },
+      })
+      expect(
+        parsePermissionToolCall(conn.pendingPermission?.tool_call).networkHost
+      ).toBe("example.org")
+    } finally {
+      vi.stubGlobal("requestAnimationFrame", originalRaf)
+      vi.stubGlobal("cancelAnimationFrame", originalCancelRaf)
+    }
+  })
+
+  it("keeps a Monitor a monitor through the frames that announce it", async () => {
+    // claude-agent-acp 0.98.0, recorded: the call is announced by its tool
+    // name with no input, and the input follows in an update that names no
+    // tool. That input's `command` alone would read as a shell command.
+    const originalRaf = globalThis.requestAnimationFrame
+    const originalCancelRaf = globalThis.cancelAnimationFrame
+    // Tool-call updates flush on the next frame; run frames by hand.
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      frames.push(cb)
+      return frames.length
+    })
+    vi.stubGlobal("cancelAnimationFrame", () => {})
+    const runFrames = () =>
+      act(() => {
+        while (frames.length > 0) frames.shift()!(0)
+      })
+
+    try {
+      await mountProvider()
+
+      await act(async () => {
+        await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1")
+      })
+
+      const handlers = latestAttachHandlers()
+      const liveCall = () => {
+        const block = h
+          .store!.getConnection(TAB)!
+          .liveMessage?.content.find(
+            (b) => b.type === "tool_call" && b.info.tool_call_id === "toolu_m"
+          )
+        return block?.type === "tool_call" ? block.info : null
+      }
+      const liveName = () => {
+        const call = liveCall()
+        return call
+          ? inferLiveToolName({
+              title: call.title,
+              kind: call.kind,
+              rawInput: call.raw_input,
+              meta: call.meta,
+            })
+          : null
+      }
+      emitAcpEvent(handlers, {
+        seq: 1,
+        connection_id: "spawned-conn",
+        type: "status_changed",
+        status: "prompting",
+      })
+      emitAcpEvent(handlers, {
+        seq: 2,
+        connection_id: "spawned-conn",
+        type: "tool_call",
+        tool_call_id: "toolu_m",
+        title: "Monitor",
+        kind: "other",
+        status: "pending",
+        content: null,
+        raw_input: null,
+        raw_output: null,
+        meta: { claudeCode: { toolName: "Monitor" } },
+      })
+      runFrames()
+      expect(liveName()).toBe("monitor")
+
+      emitAcpEvent(handlers, {
+        seq: 3,
+        connection_id: "spawned-conn",
+        type: "tool_call_update",
+        tool_call_id: "toolu_m",
+        title: null,
+        status: null,
+        content: null,
+        raw_input: JSON.stringify({
+          command: "for i in 1 2 3; do echo event-$i; sleep 2; done",
+          description: "probe monitor",
+        }),
+        raw_output: null,
+      })
+      runFrames()
+      expect(liveCall()?.raw_input).toContain("echo event-$i")
+      expect(liveName()).toBe("monitor")
+
+      emitAcpEvent(handlers, {
+        seq: 4,
+        connection_id: "spawned-conn",
+        type: "tool_call_update",
+        tool_call_id: "toolu_m",
+        title: null,
+        status: "completed",
+        content:
+          "Monitor started (task bttyx34fg, expires in 5m unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event.",
+        raw_input: null,
+        raw_output: null,
+      })
+      runFrames()
+      expect(liveCall()?.status).toBe("completed")
+      expect(liveName()).toBe("monitor")
+    } finally {
+      vi.stubGlobal("requestAnimationFrame", originalRaf)
+      vi.stubGlobal("cancelAnimationFrame", originalCancelRaf)
+    }
   })
 
   it("never lends a permission request another file's edit text", async () => {

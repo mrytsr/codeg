@@ -261,6 +261,56 @@ describe("buildMessageNavEntries", () => {
     ])
   })
 
+  it("lists an OpenCode code-mode delegation history above the window ran", () => {
+    // OpenCode 2.x runs MCP calls inside its `execute` tool: the block keeps
+    // that name and carries the real call in its `code` source.
+    const input = JSON.stringify({
+      code: 'await tools["codeg-mcp"].delegate_to_agent({ agent_type: "codex", task: `t` })',
+    })
+    const entries = buildMessageNavEntries({
+      earlierTurns: [
+        user("turn-0", "first"),
+        {
+          id: "turn-1",
+          role: "assistant",
+          blocks: [
+            {
+              type: "tool_use",
+              tool_use_id: "exec-ran",
+              tool_name: "execute",
+              input_preview: input,
+              meta: DELEGATION_META,
+            },
+            // Any other script is no delegation, whatever meta it carries.
+            {
+              type: "tool_use",
+              tool_use_id: "exec-other",
+              tool_name: "execute",
+              input_preview: JSON.stringify({ code: "return 1 + 1" }),
+              meta: DELEGATION_META,
+            },
+            // Nor is another tool's `code` argument shaped like the call.
+            {
+              type: "tool_use",
+              tool_use_id: "browser-1",
+              tool_name: "mcp__playwright__browser_run_code",
+              input_preview: input,
+              meta: DELEGATION_META,
+            },
+          ],
+          timestamp: "2026-10-01T08:00:01Z",
+        },
+      ],
+      earlierUserCount: 1,
+      loadedTurns: [],
+      threadIndexByTurnId: new Map(),
+    })
+    expect(entries[0].subAgents.map((s) => s.parentToolUseId)).toEqual([
+      "exec-ran",
+    ])
+    expect(entries[0].subAgents[0].input).toBe(input)
+  })
+
   it("collects a round's sub-agents across the window start", () => {
     const entries = buildMessageNavEntries({
       earlierTurns: [

@@ -18,7 +18,7 @@ import type { ToolStep } from "./explore-rows"
 /** `mcp · linear` — where the tool came from, not a status. */
 function McpChip({ server }: { server: string }) {
   return (
-    <span className="inline-flex shrink-0 items-center rounded-full bg-tone-mcp/12 px-2 font-mono text-xs leading-5 text-tone-mcp ws-msg-chip">
+    <span className="inline-flex shrink-0 items-center rounded-full bg-activity-accent/10 px-2 font-mono text-xs leading-5 text-activity-accent ws-msg-chip">
       mcp · {server}
     </span>
   )
@@ -115,7 +115,7 @@ export const McpRow = memo(function McpRow({ step }: { step: ToolStep }) {
           {tool.target?.text ?? tool.toolName}
         </span>
         {tool.detail ? (
-          <span className="min-w-0 truncate text-muted-foreground" dir="auto">
+          <span className="min-w-0 truncate text-activity-secondary" dir="auto">
             {tool.detail}
           </span>
         ) : null}

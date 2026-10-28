@@ -15,7 +15,12 @@ import {
   useWorkspaceView,
 } from "@/contexts/workspace-context"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { groupOfTab } from "@/stores/tab-store"
+import { useFolderTabsStore } from "@/stores/folder-tabs-store"
+import {
+  groupOfTab,
+  useVisibleConversationLayout,
+  useVisibleConversationTabs,
+} from "@/stores/tab-store"
 import {
   firstLeafId,
   leafIds,
@@ -54,7 +59,8 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
   // there is one (fusion) — the file strip's own button follows the same rule.
   // Mobile shows one pane at a time and has nothing to cover.
   const showMaximize = maximizeControl && mode === "fusion" && !isMobile
-  const tabs = useTabStore((s) => s.tabs)
+  const tabsFollowFolder = useFolderTabsStore((s) => s.enabled)
+  const tabs = useVisibleConversationTabs()
   const activeTabId = useTabStore((s) => s.activeTabId)
   const groupOf = useTabStore((s) => s.groupOf)
   const groupLayout = useTabStore((s) => s.groupLayout)
@@ -87,7 +93,11 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
   // The group this strip represents (unsplit strip = the single first leaf),
   // its tabs, and its displayed "active" tab: the GROUP's selected tab — for
   // the focused group (and the unsplit strip) that IS the global active tab.
-  const stripGroupId = groupId ?? firstLeafId(groupLayout)
+  const stripGroupId =
+    groupId ??
+    (tabs[0]
+      ? groupOfTab(groupOf, groupLayout, tabs[0].id)
+      : firstLeafId(groupLayout))
   const groupTabs = useMemo(
     () =>
       groupId == null
@@ -105,8 +115,12 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
     [toggleGroupTile, stripGroupId]
   )
 
-  // Split-group context-menu wiring, shared by every tab in this strip.
-  const orderedLeaves = useMemo(() => leafIds(groupLayout), [groupLayout])
+  // Split-group context-menu wiring, shared by every tab in this strip: the
+  // groups on screen are the split targets. While tabs follow the folder that
+  // is the folder's own layout, which the visible one narrows to its tabs
+  // before the tab set is known.
+  const visibleLayout = useVisibleConversationLayout()
+  const orderedLeaves = useMemo(() => leafIds(visibleLayout), [visibleLayout])
   const isSplit = orderedLeaves.length > 1
   const canSplitMove = groupTabs.length >= 2
   const moveTargets = useMemo<TabMoveTarget[]>(() => {
@@ -295,7 +309,11 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
     []
   )
 
-  if (groupTabs.length === 0) return null
+  // While tabs follow the folder, the unsplit strip stays up for a folder with
+  // nothing open: its "+" is how that folder gets its first conversation.
+  if (groupTabs.length === 0 && (groupId != null || !tabsFollowFolder)) {
+    return null
+  }
 
   const activeIndex = groupTabs.findIndex((tab) => tab.id === displayActiveId)
   // When the LAST tab is active, the trailing new-conversation wrapper is its
@@ -441,7 +459,7 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
             conversation column over the whole middle area with the file column
             hidden under it, and back. `mr-1.5` gives it the 6px inset from the
             strip's right edge it has above and below. */}
-        {showMaximize && (
+        {showMaximize && groupTabs.length > 0 && (
           <button
             type="button"
             onClick={toggleConversationMaximized}

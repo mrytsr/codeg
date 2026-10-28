@@ -8,22 +8,19 @@ function List({
   rows,
   live,
   foot = false,
-  end,
   body,
 }: {
   rows: string[]
   live: boolean
-  /** A last child the rows go in above, like a live reply's turning mark. */
+  /** A last child the rows go in above, like the capsule a list ends on. */
   foot?: boolean
-  /** A group's `data-end`: whether it is done. */
-  end?: "pending" | "reached"
   /** The row with a body beside its line (an open panel). */
   body?: string
 }) {
   const ref = useRef<HTMLUListElement>(null)
   useRailGrowth(ref, live)
   return (
-    <ul ref={ref} data-end={end}>
+    <ul ref={ref}>
       {rows.map((row) => (
         <li
           key={row}
@@ -102,21 +99,6 @@ describe("useRailGrowth", () => {
     expect(
       Object.values(await marks(view.container)).every((m) => m === "")
     ).toBe(true)
-  })
-
-  it("runs a done group's rail on from its end mark", async () => {
-    const view = render(<List rows={["a", "b"]} live end="reached" />)
-    view.rerender(<List rows={["a", "b", "c"]} live end="pending" />)
-    await act(async () => {})
-
-    const b = view.container.querySelector('[data-row="b"]')!
-    expect(b.getAttribute("data-rail-extend")).toBe("reached")
-
-    // Live all along, the group's last member ran to its own line.
-    view.rerender(<List rows={["a", "b", "c", "d"]} live end="pending" />)
-    await act(async () => {})
-    const c = view.container.querySelector('[data-row="c"]')!
-    expect(c.getAttribute("data-rail-extend")).toBe("")
   })
 
   it("notes a body beside the row a join extends, and keeps it while the body goes", async () => {

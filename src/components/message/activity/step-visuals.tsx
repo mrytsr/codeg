@@ -3,6 +3,7 @@
 import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import {
+  ActivityIcon as MonitorIcon,
   ArchiveIcon,
   BotIcon,
   BrainIcon,
@@ -15,6 +16,7 @@ import {
   FileXIcon,
   FolderTreeIcon,
   GlobeIcon,
+  GlobeLockIcon,
   ImageIcon,
   KeyboardIcon,
   LayersIcon,
@@ -42,6 +44,7 @@ import type {
   ToolStepKind,
 } from "@/lib/activity/types"
 import type { CommandExit } from "@/lib/activity/command"
+import type { ExitMeaning } from "@/lib/activity/exit-meaning"
 import { cn } from "@/lib/utils"
 import type { ActivityIcon } from "./rail-icon"
 
@@ -65,6 +68,11 @@ export function toolIcon(tool: ToolDescriptor): ActivityIcon {
       return BrainIcon
     case "command":
       return SquareTerminalIcon
+    // The same glyph as the monitor's row in the async-task strip.
+    case "monitor":
+      return MonitorIcon
+    case "network":
+      return GlobeLockIcon
     case "shell-session":
       return tool.command?.session?.verb === "stdin" ? KeyboardIcon : TimerIcon
     case "script":
@@ -135,30 +143,52 @@ export function useStatusText() {
   )
 }
 
+/** The word for what a command's exit says (`exit-meaning.ts`). */
+const EXIT_WORD = {
+  noMatch: "metric.noMatch",
+  false: "metric.conditionFalse",
+  differs: "metric.differs",
+  notFound: "metric.notFound",
+  commandNotFound: "metric.commandNotFound",
+  notExecutable: "metric.notExecutable",
+  timedOut: "metric.timedOut",
+} as const satisfies Record<ExitMeaning, string>
+
 /**
  * The end-column word for a step that did not simply succeed: `exit 1`,
- * `failed`, `declined`, `interrupted`, `needs you`. A running step shows
- * "running" only under reduced motion, where its ring stops turning.
+ * `failed`, `declined`, `interrupted`, `needs you`. A failed command says
+ * what its exit code names when it names something — `command not found`,
+ * `timed out`, `killed · SIGKILL` — the code itself on hover. A running step
+ * shows "running" only under reduced motion, where its ring stops turning.
  */
 export function StatusFigure({
   status,
   exit,
+  meaning,
 }: {
   status: StepStatus
   exit?: CommandExit | null
+  meaning?: ExitMeaning | null
 }) {
   const t = useTranslations("Folder.chat.activity")
   switch (status) {
-    case "failed":
+    case "failed": {
+      const code =
+        exit?.code != null ? t("metric.exit", { code: exit.code }) : null
+      const word = meaning
+        ? t(EXIT_WORD[meaning])
+        : exit?.signal
+          ? t("metric.signal", { signal: exit.signal })
+          : null
       return (
-        <span className="text-tone-danger">
-          {exit?.code != null
-            ? t("metric.exit", { code: exit.code })
-            : exit?.signal
-              ? t("metric.signal", { signal: exit.signal })
-              : t("metric.failed")}
+        <span
+          className="text-tone-danger"
+          title={word && code ? code : undefined}
+        >
+          {word ?? code ?? t("metric.failed")}
         </span>
       )
+    }
     case "rejected":
       return <span className="text-tone-danger">{t("metric.declined")}</span>
     case "cancelled":
@@ -218,10 +248,32 @@ export function DiffFigure({
   )
 }
 
-/** The end column of a tool row: a failure word outranks the metric. */
+/** The end column of a tool row: a failure word outranks the metric; a
+ *  command whose exit answered its question says the answer — `no matches`,
+ *  `false` — the code on hover. */
 export function ToolFigure({ tool }: { tool: ToolDescriptor }) {
+  const t = useTranslations("Folder.chat.activity")
   if (tool.status !== "succeeded") {
-    return <StatusFigure status={tool.status} exit={tool.exit} />
+    return (
+      <StatusFigure
+        status={tool.status}
+        exit={tool.exit}
+        meaning={tool.exitMeaning}
+      />
+    )
+  }
+  if (tool.exitMeaning) {
+    return (
+      <span
+        title={
+          tool.exit?.code != null
+            ? t("metric.exit", { code: tool.exit.code })
+            : undefined
+        }
+      >
+        {t(EXIT_WORD[tool.exitMeaning])}
+      </span>
+    )
   }
   return tool.metric ? <MetricFigure metric={tool.metric} /> : null
 }
@@ -243,7 +295,7 @@ export function ToolNotes({ notes }: { notes: ToolNote[] }) {
     })
     .join(" · ")
   return (
-    <span className="min-w-0 shrink truncate font-sans text-muted-foreground">
+    <span className="min-w-0 shrink truncate font-sans text-activity-secondary">
       {text}
     </span>
   )

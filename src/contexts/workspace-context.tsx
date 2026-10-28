@@ -1,20 +1,30 @@
 "use client"
 
 import {
+  openingScope,
+  fileOpeningScope,
+  useFolderTabsStore,
+  type TabScope,
+} from "@/stores/folder-tabs-store"
+
+import {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
+  type SetStateAction,
 } from "react"
 import { useTranslations } from "next-intl"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useBrowserBackWindow } from "@/contexts/workspace-window-history"
+import { MonacoModelProvider } from "@/contexts/monaco-model-context"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
-import { useTabStore } from "@/stores/tab-store"
+import { useTabStore, isTabInScope } from "@/stores/tab-store"
 import { browserTabBackendId, buildFileTabId } from "@/lib/file-tab-id"
 import {
   gitDiff,
@@ -216,7 +226,7 @@ export interface WorkspaceActionsValue {
   activateConversationPane: () => void
   activateFilePane: () => void
   switchFileTab: (tabId: string) => void
-  closeFileTab: (tabId: string) => void
+  closeFileTab: (tabId: string, options?: { allScopes?: boolean }) => void
   closeOtherFileTabs: (tabId: string) => void
   /** Returns false when the user vetoes the dirty-tabs confirm, so the
    *  browser-back integration can restore the history entry it consumed. */
@@ -404,6 +414,8 @@ interface WorkspaceViewValue {
 }
 
 interface WorkspaceFileTabsValue {
+  /** Complete buffers for lifecycle/persistence consumers; strips use fileTabs. */
+  allFileTabs?: FileWorkspaceTab[]
   fileTabs: FileWorkspaceTab[]
   activeFileTabId: string | null
   activeFileTab: FileWorkspaceTab | null
@@ -475,6 +487,32 @@ function normalizePath(path: string): string {
 function fileName(path: string): string {
   const index = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"))
   return (index >= 0 ? path.slice(index + 1) : path) || path
+}
+
+/**
+ * The folder scope's selected buffer. While a just-closed selection is
+ * still referenced (its references are dropped after the close commits), the
+ * buffer `removeFile` will pick — the next open one in the scope's order, else
+ * the previous — so the editor does not flash the scope's first tab.
+ */
+function pickScopeSelection(
+  refs: readonly string[],
+  selected: string | null,
+  visible: readonly FileWorkspaceTab[]
+): string | null {
+  const open = new Set(visible.map((tab) => tab.id))
+  if (selected != null && open.has(selected)) return selected
+  const at = selected == null ? -1 : refs.indexOf(selected)
+  if (at >= 0) {
+    for (let i = at + 1; i < refs.length; i++) {
+      if (open.has(refs[i])) return refs[i]
+    }
+    for (let i = at - 1; i >= 0; i--) {
+      if (open.has(refs[i])) return refs[i]
+    }
+    return null
+  }
+  return visible[0]?.id ?? null
 }
 
 function isDirtyFileTab(tab: FileWorkspaceTab): boolean {
@@ -717,7 +755,111 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const [activePane, setActivePaneState] =
     useState<WorkspacePane>("conversation")
   const [fileTabs, setFileTabs] = useState<FileWorkspaceTab[]>([])
-  const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null)
+  const [normalActiveFileTabId, setNormalActiveFileTabId] = useState<
+    string | null
+  >(null)
+  const tabsFollowFolder = useFolderTabsStore((s) => s.enabled)
+  const tabScope = useFolderTabsStore((s) => s.scope)
+  const scopeFileRefs = useFolderTabsStore((s) => s.fileRefs)
+  const scopeFileSelection = useFolderTabsStore((s) => s.fileSelection)
+  const visibleFileTabs = useMemo(() => {
+    if (!tabsFollowFolder) return fileTabs
+    const byId = new Map(fileTabs.map((tab) => [tab.id, tab]))
+    return (scopeFileRefs[tabScope] ?? []).flatMap((id) => {
+      const tab = byId.get(id)
+      return tab ? [tab] : []
+    })
+  }, [fileTabs, tabsFollowFolder, tabScope, scopeFileRefs])
+  const activeFileTabId = tabsFollowFolder
+    ? pickScopeSelection(
+        scopeFileRefs[tabScope] ?? [],
+        scopeFileSelection[tabScope] ?? null,
+        visibleFileTabs
+      )
+    : normalActiveFileTabId == null
+      ? null
+      : (fileTabs.find((tab) => tab.id === normalActiveFileTabId)?.id ??
+        fileTabs[0]?.id ??
+        null)
+  const selectedFileIdRef = useRef(activeFileTabId)
+  useEffect(() => {
+    selectedFileIdRef.current = activeFileTabId
+  }, [activeFileTabId])
+  const setActiveFileTabId = useCallback(
+    (update: SetStateAction<string | null>) => {
+      const id =
+        typeof update === "function"
+          ? update(selectedFileIdRef.current)
+          : update
+      const state = useFolderTabsStore.getState()
+      // Async opens in another scope can finish without stealing this selection.
+      if (
+        state.enabled &&
+        id != null &&
+        !state.fileRefs[state.scope]?.includes(id)
+      )
+        return
+      selectedFileIdRef.current = id
+      // Only folder-tabs mode reads the per-scope selection; normal mode never
+      // writes it, so this stays safe to call from the updaters below.
+      if (state.enabled) state.selectFile(id)
+      setNormalActiveFileTabId(id)
+    },
+    []
+  )
+  // Scope references of buffers that left `fileTabs`, dropped once that
+  // removal has committed. A `setFileTabs` updater must not write the store
+  // itself: React may run it during render, or again — and a replayed
+  // dirty-close confirm answered "cancel" would leave a buffer that no scope
+  // references, invisible while tabs follow the folder.
+  const pendingForgetRef = useRef<Set<string>>(new Set())
+  const committedMembershipRef = useRef("")
+  useLayoutEffect(() => {
+    const pending = pendingForgetRef.current
+    const membership = fileTabs.map((tab) => tab.id).join("\n")
+    if (pending.size === 0 && membership === committedMembershipRef.current) {
+      return
+    }
+    committedMembershipRef.current = membership
+    const live = new Set(fileTabs.map((tab) => tab.id))
+    for (const id of [...pending]) {
+      if (live.has(id)) continue
+      pending.delete(id)
+      useFolderTabsStore.getState().forgetFile(id)
+    }
+    // A committed buffer no scope references would be invisible, and
+    // unclosable, while tabs follow the folder. Every opener registers its scope in the
+    // same tick as its insert; restored pages join their folder's scope here,
+    // once the merge has committed — deciding earlier could skip a page whose
+    // duplicate a queued close is about to remove.
+    const referenced = new Set(
+      Object.values(useFolderTabsStore.getState().fileRefs).flat()
+    )
+    for (const tab of fileTabs) {
+      if (referenced.has(tab.id)) continue
+      useFolderTabsStore
+        .getState()
+        .addFile(tab.id, openingScope(tab.folderId), false)
+    }
+  }, [fileTabs])
+  // Turning folder tabs on keeps the file the user is looking at, when the new
+  // scope references it, instead of whatever that scope selected last; turning
+  // it off keeps the scope's file rather than normal mode's last pick.
+  useEffect(
+    () =>
+      useFolderTabsStore.subscribe((next, previous) => {
+        if (next.enabled === previous.enabled) return
+        const current = selectedFileIdRef.current
+        if (!next.enabled) {
+          setNormalActiveFileTabId(current)
+          return
+        }
+        if (current != null && next.fileRefs[next.scope]?.includes(current)) {
+          useFolderTabsStore.getState().selectFile(current)
+        }
+      }),
+    []
+  )
   const [pendingFileReveal, setPendingFileReveal] = useState<{
     requestId: number
     path: string
@@ -888,9 +1030,12 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     []
   )
 
-  const mode: WorkspaceMode = fileTabs.length > 0 ? "fusion" : "conversation"
+  const mode: WorkspaceMode =
+    visibleFileTabs.length > 0 ? "fusion" : "conversation"
   // Low-frequency: flips only when the conversation strip empties or refills.
-  const hasConversationTabs = useTabStore((s) => s.tabs.length > 0)
+  const hasConversationTabs = useTabStore((s) =>
+    s.tabs.some((tab) => !tabsFollowFolder || isTabInScope(tab))
+  )
   const effectiveFilesMaximized = mode === "fusion" && maximizedPane === "files"
   const effectiveConversationMaximized =
     mode === "fusion" && maximizedPane === "conversation" && hasConversationTabs
@@ -903,14 +1048,14 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   useEffect(() => {
     if (maximizedPane === null) return
     if (
-      fileTabs.length === 0 ||
+      visibleFileTabs.length === 0 ||
       (maximizedPane === "conversation" && !hasConversationTabs)
     ) {
       /* eslint-disable react-hooks/set-state-in-effect */
       setMaximizedPane(null)
       /* eslint-enable react-hooks/set-state-in-effect */
     }
-  }, [fileTabs.length, hasConversationTabs, maximizedPane])
+  }, [visibleFileTabs.length, hasConversationTabs, maximizedPane])
 
   // Latest-state mirror for `closeFileTab`, a stable callback (see the refs
   // above).
@@ -967,8 +1112,17 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   // the board mounts would rearrange a workspace the user isn't even looking
   // at. It still claims the selection when nothing holds it, so "tabs exist
   // but none is active" never becomes reachable.
+  // `scope` defaults in the body, not the parameter list: a call there stops
+  // the React Compiler lint from checking this whole provider.
   const activateTab = useCallback(
-    (tabId: string, background = false) => {
+    (tabId: string, background = false, requestedScope?: TabScope) => {
+      const scope = requestedScope ?? openingScope()
+      useFolderTabsStore.getState().addFile(tabId, scope, !background)
+      if (
+        useFolderTabsStore.getState().enabled &&
+        scope !== useFolderTabsStore.getState().scope
+      )
+        return
       if (background) {
         setActiveFileTabId((prev) => prev ?? tabId)
         return
@@ -976,14 +1130,21 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       setActiveFileTabId(tabId)
       activateFilePane()
     },
-    [activateFilePane]
+    [setActiveFileTabId, activateFilePane]
   )
 
   // Insert a freshly created (loading, empty) tab at `index` (clamped), or at
   // the end. Caller has verified no tab with this id exists. If a race
   // introduced one, leave it alone.
   const seedLoadingTab = useCallback(
-    (nextTab: FileWorkspaceTab, background = false, index?: number) => {
+    (
+      nextTab: FileWorkspaceTab,
+      background = false,
+      index?: number,
+      requestedScope?: TabScope
+    ) => {
+      const scope = requestedScope ?? openingScope(nextTab.folderId)
+      useFolderTabsStore.getState().addFile(nextTab.id, scope, !background)
       setFileTabs((prev) => {
         if (prev.some((tab) => tab.id === nextTab.id)) return prev
         const at =
@@ -992,8 +1153,13 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
             : Math.max(0, Math.min(index, prev.length))
         return [...prev.slice(0, at), nextTab, ...prev.slice(at)]
       })
-      if (background) {
-        setActiveFileTabId((prev) => prev ?? nextTab.id)
+      if (
+        background ||
+        (useFolderTabsStore.getState().enabled &&
+          scope !== useFolderTabsStore.getState().scope)
+      ) {
+        if (scope === openingScope())
+          setActiveFileTabId((prev) => prev ?? nextTab.id)
       } else {
         setActiveFileTabId(nextTab.id)
         activateFilePane()
@@ -1016,7 +1182,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         })
       }
     },
-    [activateFilePane]
+    [setActiveFileTabId, activateFilePane]
   )
 
   const browserTabRecord = useCallback(
@@ -1079,6 +1245,18 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       const opener = options?.openerTabId
         ? fileTabsRef.current.find((tab) => tab.id === options.openerTabId)
         : undefined
+      const state = useFolderTabsStore.getState()
+      const targetScope =
+        options?.folderId != null
+          ? openingScope(options.folderId)
+          : options?.openerTabId
+            ? fileOpeningScope(
+                options.openerTabId,
+                openingScope(opener?.folderId)
+              )
+            : state.enabled
+              ? state.scope
+              : openingScope(activeFolderRef.current?.id)
       // A caller that says settles it — "open it on this computer" is a
       // person's decision. Otherwise a tab opened from a remote tab is
       // remote, and so is any address of the remote host however it came to
@@ -1126,23 +1304,32 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
                 normalizeUrlForDedupe(tab.browser.initialUrl) === normalized
             )
       if (existing) {
-        if (activate === "tab") setActiveFileTabId(existing.id)
-        else activateTab(existing.id, activate === false)
+        useFolderTabsStore
+          .getState()
+          .addFile(existing.id, targetScope, activate !== false)
+        if (activate === "tab") {
+          // Selected in its target scope by `addFile` above. A tab shared with
+          // the current scope must not also take over the current selection
+          // for an open aimed at another folder.
+          if (!state.enabled || targetScope === state.scope) {
+            setActiveFileTabId(existing.id)
+          }
+        } else activateTab(existing.id, activate === false, targetScope)
         return existing.id
       }
       const record = browserTabRecord(
         randomUUID(),
         url,
-        options?.folderId ??
-          opener?.folderId ??
-          activeFolderRef.current?.id ??
-          null,
+        typeof targetScope === "number" ? targetScope : null,
         opener?.id ?? null,
         profile,
         null,
         remote,
         options?.device
       )
+      useFolderTabsStore
+        .getState()
+        .addFile(record.id, targetScope, activate !== false)
       const insert = (prev: FileWorkspaceTab[]) => {
         if (prev.some((tab) => tab.id === record.id)) return prev
         const idx = opener ? prev.findIndex((tab) => tab.id === opener.id) : -1
@@ -1171,13 +1358,19 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       } else if (opener) {
         setFileTabs(insert)
         setActiveFileTabId(record.id)
-        activateFilePane()
+        if (!state.enabled || targetScope === state.scope) activateFilePane()
       } else {
-        seedLoadingTab(record, false, options?.index)
+        seedLoadingTab(record, false, options?.index, targetScope)
       }
       return record.id
     },
-    [activateFilePane, activateTab, browserTabRecord, seedLoadingTab]
+    [
+      setActiveFileTabId,
+      activateFilePane,
+      activateTab,
+      browserTabRecord,
+      seedLoadingTab,
+    ]
   )
 
   const adoptBrowserTab = useCallback(
@@ -1193,13 +1386,17 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         id: params.openerBackendTabId,
       })
       const opener = fileTabsRef.current.find((tab) => tab.id === openerId)
+      const targetScope = fileOpeningScope(
+        openerId,
+        openingScope(opener?.folderId ?? activeFolderRef.current?.id)
+      )
       // A popup shares its opener's data store on the backend whatever is
       // said here; the record says the same so the toolbar shows it. The
       // backend's word comes first — the opener record may be gone by now.
       const record = browserTabRecord(
         params.backendTabId,
         params.url,
-        opener?.folderId ?? activeFolderRef.current?.id ?? null,
+        typeof targetScope === "number" ? targetScope : null,
         openerId,
         params.profile ??
           (opener?.kind === "browser"
@@ -1221,58 +1418,71 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       })
       // A popup is what the user just clicked for: show it, like a browser
       // would, and the opener stays one tab to the left.
+      useFolderTabsStore.getState().addFile(record.id, targetScope)
       setActiveFileTabId(record.id)
-      activateFilePane()
+      if (
+        !useFolderTabsStore.getState().enabled ||
+        targetScope === useFolderTabsStore.getState().scope
+      )
+        activateFilePane()
       return record.id
     },
-    [activateFilePane, browserTabRecord]
+    [setActiveFileTabId, activateFilePane, browserTabRecord]
   )
 
   const restoreBrowserTabs = useCallback(
     (entries: RestorableBrowserTab[]) => {
       if (entries.length === 0) return
+      // Same one-tab-per-URL rule as `openBrowserTab`, so a page already open
+      // is not duplicated.
+      const keyOf = (tab: FileWorkspaceTab) =>
+        tab.kind === "browser"
+          ? `${tab.browser.remote === true ? "remote" : tab.browser.profile} ${normalizeUrlForDedupe(tab.browser.initialUrl) ?? ""}`
+          : null
+      // Records are built once, outside the updater, so a replayed updater
+      // inserts the same ids.
+      const candidates: { key: string; record: FileWorkspaceTab }[] = []
+      const prefs = getBrowserPrefs()
+      for (const entry of entries) {
+        const normalized = normalizeUrlForDedupe(entry.url)
+        if (!normalized) continue
+        // An address of the remote host comes back as a remote tab even
+        // if its record did not say so (a page that walked there on its
+        // own): never as a page of this computer.
+        const remote = entry.remote === true || isRemoteHostAddress(entry.url)
+        const profile =
+          !remote && browserProfileExists(prefs, entry.profile)
+            ? entry.profile
+            : DEFAULT_BROWSER_PROFILE_ID
+        candidates.push({
+          key: `${remote ? "remote" : profile} ${normalized}`,
+          record: browserTabRecord(
+            randomUUID(),
+            entry.url,
+            entry.folderId,
+            null,
+            profile,
+            entry.title,
+            remote,
+            entry.device
+          ),
+        })
+      }
+      if (candidates.length === 0) return
+      // No scope registration here: the updater must not write the store
+      // (React may run it during render, or again), and only the merge knows
+      // which records land. Committed records join their folder's scope in
+      // the provider's post-commit pass.
       setFileTabs((prev) => {
         // Merge, never replace: a tab opened before the restore ran (a deep
         // link, an agent request — the capability probe is a round trip) must
-        // not cost the user the whole stored set. Same one-tab-per-URL rule
-        // as `openBrowserTab`, so a page already open is not duplicated.
-        const open = new Set(
-          prev.flatMap((tab) =>
-            tab.kind === "browser"
-              ? [
-                  `${tab.browser.remote === true ? "remote" : tab.browser.profile} ${normalizeUrlForDedupe(tab.browser.initialUrl) ?? ""}`,
-                ]
-              : []
-          )
-        )
+        // not cost the user the whole stored set.
+        const open = new Set(prev.flatMap((tab) => keyOf(tab) ?? []))
         const records: FileWorkspaceTab[] = []
-        const prefs = getBrowserPrefs()
-        for (const entry of entries) {
-          const normalized = normalizeUrlForDedupe(entry.url)
-          if (!normalized) continue
-          // An address of the remote host comes back as a remote tab even
-          // if its record did not say so (a page that walked there on its
-          // own): never as a page of this computer.
-          const remote = entry.remote === true || isRemoteHostAddress(entry.url)
-          const profile =
-            !remote && browserProfileExists(prefs, entry.profile)
-              ? entry.profile
-              : DEFAULT_BROWSER_PROFILE_ID
-          const key = `${remote ? "remote" : profile} ${normalized}`
+        for (const { key, record } of candidates) {
           if (open.has(key)) continue
           open.add(key)
-          records.push(
-            browserTabRecord(
-              randomUUID(),
-              entry.url,
-              entry.folderId,
-              null,
-              profile,
-              entry.title,
-              remote,
-              entry.device
-            )
-          )
+          records.push(record)
         }
         // Records only; not activated, so no surface is created until the
         // user switches to one. The pane state is left exactly as it was.
@@ -1323,7 +1533,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
               continue
             }
             const key = normalizeUrlForDedupe(tab.browser.initialUrl) ?? ""
-            if (inDefault.has(key)) continue
+            if (inDefault.has(key)) {
+              pendingForgetRef.current.add(tab.id)
+              continue
+            }
             inDefault.add(key)
             next.push({
               ...tab,
@@ -1339,71 +1552,83 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     []
   )
 
-  const suspendBrowserTab = useCallback((tabId: string) => {
-    const tab = fileTabsRef.current.find((t) => t.id === tabId)
-    if (!tab || tab.kind !== "browser") return false
-    const state = getBrowserTabState(tabId)
-    if (!state) return false
-    // Re-checked here, not just by the caller: the surface host may have
-    // mounted (the user switched to this tab) between the caller picking it
-    // and this call. `null` means "on screen right now", `undefined` "never
-    // shown by this document" — releasing either would blank a live pane.
-    if (typeof browserTabHiddenAt(tabId) !== "number") return false
-    const url = state.url || state.requestedUrl || tab.browser.initialUrl
-    const title = state.title || tab.title
-    // Move the record to where the page got to before letting the surface
-    // go: the tab strip keeps showing the page's title, and the surface
-    // created when the tab is next shown loads that page, not the address
-    // the tab was opened with. History and scroll position are lost, as in
-    // a browser's discarded tab. A profile deleted while the tab was loaded
-    // is left behind here too: the dormant record must not name it — and if
-    // the default profile already shows that page, the record goes rather
-    // than becoming a duplicate (one tab per page and profile).
-    const profile = browserProfileExists(getBrowserPrefs(), tab.browser.profile)
-      ? tab.browser.profile
-      : DEFAULT_BROWSER_PROFILE_ID
-    // Decided inside the updater, against the list as it is when the update
-    // applies (a queued insert may land first); the active pointer moves to
-    // the neighbouring survivor the way `closeFileTab` does — a suspended
-    // tab is off screen, but the file pane may be hidden with it selected.
-    const normalized = normalizeUrlForDedupe(url)
-    setFileTabs((prev) => {
-      const duplicate =
-        profile !== tab.browser.profile &&
-        prev.some(
-          (t) =>
-            t.kind === "browser" &&
-            t.id !== tabId &&
-            t.browser.remote !== true &&
-            t.browser.profile === profile &&
-            normalizeUrlForDedupe(t.browser.initialUrl) === normalized
-        )
-      if (!duplicate) {
-        return prev.map((t) =>
-          t.id === tabId && t.kind === "browser"
-            ? {
-                ...t,
-                title,
-                browser: { ...t.browser, initialUrl: url, profile },
-              }
-            : t
-        )
-      }
-      const idx = prev.findIndex((t) => t.id === tabId)
-      const next = prev.filter((t) => t.id !== tabId)
-      setActiveFileTabId((current) => {
-        if (current !== tabId) return current
-        if (next.length === 0) return null
-        return next[Math.min(Math.max(idx, 0), next.length - 1)].id
+  const suspendBrowserTab = useCallback(
+    (tabId: string) => {
+      const tab = fileTabsRef.current.find((t) => t.id === tabId)
+      if (!tab || tab.kind !== "browser") return false
+      const state = getBrowserTabState(tabId)
+      if (!state) return false
+      // Re-checked here, not just by the caller: the surface host may have
+      // mounted (the user switched to this tab) between the caller picking it
+      // and this call. `null` means "on screen right now", `undefined` "never
+      // shown by this document" — releasing either would blank a live pane.
+      if (typeof browserTabHiddenAt(tabId) !== "number") return false
+      const url = state.url || state.requestedUrl || tab.browser.initialUrl
+      const title = state.title || tab.title
+      // Move the record to where the page got to before letting the surface
+      // go: the tab strip keeps showing the page's title, and the surface
+      // created when the tab is next shown loads that page, not the address
+      // the tab was opened with. History and scroll position are lost, as in
+      // a browser's discarded tab. A profile deleted while the tab was loaded
+      // is left behind here too: the dormant record must not name it — and if
+      // the default profile already shows that page, the record goes rather
+      // than becoming a duplicate (one tab per page and profile).
+      const profile = browserProfileExists(
+        getBrowserPrefs(),
+        tab.browser.profile
+      )
+        ? tab.browser.profile
+        : DEFAULT_BROWSER_PROFILE_ID
+      // Decided inside the updater, against the list as it is when the update
+      // applies (a queued insert may land first); the active pointer moves to
+      // the neighbouring survivor the way `closeFileTab` does — a suspended
+      // tab is off screen, but the file pane may be hidden with it selected.
+      const normalized = normalizeUrlForDedupe(url)
+      // Folder-tabs selection is per scope and derived from its references
+      // until the committed removal drops them (see `pendingForgetRef`).
+      const followsFolder = useFolderTabsStore.getState().enabled
+      setFileTabs((prev) => {
+        const duplicate =
+          profile !== tab.browser.profile &&
+          prev.some(
+            (t) =>
+              t.kind === "browser" &&
+              t.id !== tabId &&
+              t.browser.remote !== true &&
+              t.browser.profile === profile &&
+              normalizeUrlForDedupe(t.browser.initialUrl) === normalized
+          )
+        if (!duplicate) {
+          return prev.map((t) =>
+            t.id === tabId && t.kind === "browser"
+              ? {
+                  ...t,
+                  title,
+                  browser: { ...t.browser, initialUrl: url, profile },
+                }
+              : t
+          )
+        }
+        const idx = prev.findIndex((t) => t.id === tabId)
+        const next = prev.filter((t) => t.id !== tabId)
+        pendingForgetRef.current.add(tabId)
+        if (!followsFolder) {
+          setActiveFileTabId((current) => {
+            if (current !== tabId) return current
+            if (next.length === 0) return null
+            return next[Math.min(Math.max(idx, 0), next.length - 1)].id
+          })
+        }
+        return next
       })
-      return next
-    })
-    // The surface goes, the tab stays — so what the person answered for the
-    // sites it has been on stays with it, and the `browser://closed` the
-    // backend emits for this is about the surface. Only a close ends a tab.
-    releaseBrowserTab(tabId, { suspending: true })
-    return true
-  }, [])
+      // The surface goes, the tab stays — so what the person answered for the
+      // sites it has been on stays with it, and the `browser://closed` the
+      // backend emits for this is about the surface. Only a close ends a tab.
+      releaseBrowserTab(tabId, { suspending: true })
+      return true
+    },
+    [setActiveFileTabId]
+  )
 
   const setBrowserTabDevice = useCallback(
     (tabId: string, device: "desktop" | EmulatedBrowserDevice) => {
@@ -1477,6 +1702,9 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   // the final content.
   const replaceTabContent = useCallback(
     (nextTab: FileWorkspaceTab) => {
+      useFolderTabsStore
+        .getState()
+        .addFile(nextTab.id, openingScope(nextTab.folderId))
       setFileTabs((prev) => {
         const idx = prev.findIndex((tab) => tab.id === nextTab.id)
         if (idx < 0) return [...prev, nextTab]
@@ -1487,7 +1715,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       setActiveFileTabId(nextTab.id)
       activateFilePane()
     },
-    [activateFilePane]
+    [setActiveFileTabId, activateFilePane]
   )
 
   // Orchestrates the "I want to start (or restart) a load for this tab" flow.
@@ -1506,14 +1734,16 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       seed: FileWorkspaceTab,
       reload: boolean,
       background = false,
-      index?: number
+      index?: number,
+      requestedScope?: TabScope
     ): LoadDecision => {
+      const scope = requestedScope ?? openingScope(seed.folderId)
       // Dedup synchronously. inFlightLoadsRef is updated immediately on
       // generation start, so rapid re-clicks within a single event loop
       // turn collapse here — unlike fileTabsRef.current, which only
       // reflects state after React flushes a render.
       if (inFlightLoadsRef.current.has(seed.id)) {
-        activateTab(seed.id, background)
+        activateTab(seed.id, background, scope)
         return { kind: "skip" }
       }
 
@@ -1523,11 +1753,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         // e.g. the user closed it while a watcher-driven reload was in
         // flight — do not resurrect it as a phantom tab.
         if (reload) return { kind: "skip" }
-        seedLoadingTab(seed, background, index)
+        seedLoadingTab(seed, background, index, scope)
         return { kind: "fetch", gen: beginFetchGeneration(seed.id) }
       }
 
-      activateTab(existing.id, background)
+      activateTab(existing.id, background, scope)
 
       if (existing.saveState === "error") {
         markErrorRetry(existing.id, existing.kind)
@@ -1966,7 +2196,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         index?: number
       }
     ) => {
-      const absPath = await resolveOpenAbsolutePath(rawPath, options?.folderId)
+      const targetScope = openingScope(options?.folderId)
+      const targetFolderId =
+        options?.folderId ??
+        (typeof targetScope === "number" ? targetScope : undefined)
+      const absPath = await resolveOpenAbsolutePath(rawPath, targetFolderId)
       if (!absPath) return null
       const io = splitAbsPath(absPath)
       if (!io) return null
@@ -1976,7 +2210,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       // elsewhere (the transcript's file viewer drawer) need it to find the
       // tab this call created.
       await (async () => {
-        const background = options?.background === true
+        const background =
+          options?.background === true ||
+          (useFolderTabsStore.getState().enabled &&
+            useFolderTabsStore.getState().scope !== targetScope)
         const requestedLine =
           typeof options?.line === "number" && Number.isFinite(options.line)
             ? Math.max(1, Math.floor(options.line))
@@ -2009,11 +2246,15 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           binary ?? (office ? "office" : languageFromPath(absPath))
         )
 
+        useFolderTabsStore
+          .getState()
+          .addFile(tabId, targetScope, options?.background !== true)
         const decision = decideLoad(
           seed,
           options?.reload ?? false,
           background,
-          options?.index
+          options?.index,
+          targetScope
         )
         if (decision.kind === "skip") return
         const { gen } = decision
@@ -3138,6 +3379,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 
   const switchFileTab = useCallback(
     (tabId: string) => {
+      // Explicit handoffs (canvas and drawers) may own a shared buffer that
+      // this scope has not referenced yet. Never acquire a closed/stale id.
+      if (!fileTabsRef.current.some((tab) => tab.id === tabId)) return
+      useFolderTabsStore.getState().addFile(tabId, openingScope())
       const activeId = activeFileTabIdRef.current
       if (activeId && activeId !== tabId) {
         void saveFileTab(activeId)
@@ -3145,11 +3390,32 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       setActiveFileTabId(tabId)
       activateFilePane()
     },
-    [activateFilePane, saveFileTab]
+    [setActiveFileTabId, activateFilePane, saveFileTab]
   )
 
   const closeFileTab = useCallback(
-    (tabId: string) => {
+    (tabId: string, options?: { allScopes?: boolean }) => {
+      const folderTabs = useFolderTabsStore.getState()
+      if (
+        folderTabs.enabled &&
+        !options?.allScopes &&
+        folderTabs.fileRefs[folderTabs.scope]?.includes(tabId)
+      ) {
+        const shared = Object.entries(folderTabs.fileRefs).some(
+          ([scope, ids]) =>
+            scope !== String(folderTabs.scope) && ids.includes(tabId)
+        )
+        if (shared) {
+          folderTabs.removeFile(tabId, folderTabs.scope)
+          return
+        }
+      }
+      // Folder-tabs selection is per scope and lives in the store, which the
+      // updater below must not write: it is derived from the scope's
+      // references until the committed close drops them (`pendingForgetRef`).
+      const scopeRefs = folderTabs.enabled
+        ? (folderTabs.fileRefs[folderTabs.scope] ?? [])
+        : null
       setFileTabs((prev) => {
         const idx = prev.findIndex((tab) => tab.id === tabId)
         if (idx < 0) return prev
@@ -3173,27 +3439,40 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           releaseBrowserTab(tab.id)
         }
 
+        pendingForgetRef.current.add(tabId)
         const next = prev.filter((candidate) => candidate.id !== tabId)
 
-        setActiveFileTabId((current) => {
-          if (current !== tabId) return current
-          if (next.length === 0) {
-            activateConversationPane()
-            return null
+        if (scopeRefs) {
+          // Same pane rules as below, judged by what this scope still shows.
+          if (selectedFileIdRef.current === tabId) {
+            const scopeKeepsTabs = scopeRefs.some(
+              (id) =>
+                id !== tabId && next.some((candidate) => candidate.id === id)
+            )
+            if (!scopeKeepsTabs) activateConversationPane()
+            else if (!conversationMaximizedRef.current) activateFilePane()
           }
-          const nextIdx = Math.min(idx, next.length - 1)
-          // Closing the active file tab (via its X) keeps the user in the file
-          // column, so focus the files pane — mirroring the conversation
-          // closeTab. The section pointer-capture used to do this; the tab strip
-          // now sits outside the pane-activation wrapper, so do it explicitly.
-          // Not while a maximized conversation covers the column: the strip
-          // is hidden then, so the close came from elsewhere (an agent closing
-          // its page, a page closing itself), the user is not in the file
-          // column, and activating it would pull the column out from under
-          // the conversation they are reading.
-          if (!conversationMaximizedRef.current) activateFilePane()
-          return next[nextIdx].id
-        })
+        } else {
+          setActiveFileTabId((current) => {
+            if (current !== tabId) return current
+            if (next.length === 0) {
+              activateConversationPane()
+              return null
+            }
+            const nextIdx = Math.min(idx, next.length - 1)
+            // Closing the active file tab (via its X) keeps the user in the file
+            // column, so focus the files pane — mirroring the conversation
+            // closeTab. The section pointer-capture used to do this; the tab strip
+            // now sits outside the pane-activation wrapper, so do it explicitly.
+            // Not while a maximized conversation covers the column: the strip
+            // is hidden then, so the close came from elsewhere (an agent closing
+            // its page, a page closing itself), the user is not in the file
+            // column, and activating it would pull the column out from under
+            // the conversation they are reading.
+            if (!conversationMaximizedRef.current) activateFilePane()
+            return next[nextIdx].id
+          })
+        }
 
         setPreviewFileTabIds((prev) => {
           if (!prev.has(tabId)) return prev
@@ -3209,11 +3488,85 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         return next
       })
     },
+    [setActiveFileTabId, activateConversationPane, activateFilePane, t]
+  )
+
+  // Folder-tabs "close others" / "close all": ONE operation over the active
+  // scope's references, decided before any state changes. A buffer another
+  // folder still references only leaves this scope (nothing is lost, so it
+  // asks nothing); the rest close behind a single confirmation when any of
+  // them has unsaved edits — cancelling closes nothing, as in normal mode.
+  const closeScopeFileTabs = useCallback(
+    (keepId: string | null) => {
+      const folderTabs = useFolderTabsStore.getState()
+      const scope = folderTabs.scope
+      const ids = (folderTabs.fileRefs[scope] ?? []).filter(
+        (id) => id !== keepId
+      )
+      if (ids.length === 0) return
+      const elsewhere = (id: string) =>
+        Object.entries(folderTabs.fileRefs).some(
+          ([other, refs]) => other !== String(scope) && refs.includes(id)
+        )
+      const closing = new Set(ids.filter((id) => !elsewhere(id)))
+      if (
+        fileTabsRef.current.some(
+          (tab) => closing.has(tab.id) && isDirtyFileTab(tab)
+        ) &&
+        !window.confirm(
+          t(
+            keepId == null
+              ? "confirmCloseAllDirtyTabs"
+              : "confirmCloseOtherDirtyTabs"
+          )
+        )
+      ) {
+        return
+      }
+      for (const id of ids) {
+        if (!closing.has(id)) folderTabs.removeFile(id, scope)
+      }
+      if (keepId == null) {
+        activateConversationPane()
+      } else {
+        useFolderTabsStore.getState().selectFile(keepId)
+        activateFilePane()
+      }
+      if (closing.size === 0) return
+      for (const id of closing) pendingForgetRef.current.add(id)
+      setFileTabs((prev) => {
+        if (!prev.some((tab) => closing.has(tab.id))) return prev
+        // `pushClosedTab` is idempotent per tab id, which is what makes this
+        // safe inside an updater React may invoke more than once.
+        for (const [tab, slot] of batchCloseSlots(prev, (tab) =>
+          closing.has(tab.id)
+        )) {
+          const closed = snapshotFileTab(tab, slot)
+          if (closed) pushClosedTab(closed)
+          if (tab.kind === "browser") {
+            pushClosedTab(closedBrowserTab(tab, slot))
+            releaseBrowserTab(tab.id)
+          }
+          inFlightLoadsRef.current.delete(tab.id)
+        }
+        return prev.filter((tab) => !closing.has(tab.id))
+      })
+      setPreviewFileTabIds((prev) => {
+        if (![...closing].some((id) => prev.has(id))) return prev
+        const updated = new Set(prev)
+        for (const id of closing) updated.delete(id)
+        return updated
+      })
+    },
     [activateConversationPane, activateFilePane, t]
   )
 
   const closeOtherFileTabs = useCallback(
     (tabId: string) => {
+      if (useFolderTabsStore.getState().enabled) {
+        closeScopeFileTabs(tabId)
+        return
+      }
       setFileTabs((prev) => {
         const remaining = prev.filter((tab) => tab.id === tabId)
         if (remaining.length === 0) return prev
@@ -3234,6 +3587,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
             pushClosedTab(closedBrowserTab(closing, slot))
             releaseBrowserTab(closing.id)
           }
+          pendingForgetRef.current.add(closing.id)
           inFlightLoadsRef.current.delete(closing.id)
         }
 
@@ -3242,10 +3596,14 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         return remaining
       })
     },
-    [activateFilePane, t]
+    [setActiveFileTabId, activateFilePane, closeScopeFileTabs, t]
   )
 
   const closeAllFileTabs = useCallback((): boolean => {
+    if (useFolderTabsStore.getState().enabled) {
+      closeScopeFileTabs(null)
+      return true
+    }
     // Confirm outside the state updater: the browser-back handler needs the
     // veto synchronously to decide whether to restore the history entry.
     if (fileTabsRef.current.some(isDirtyFileTab)) {
@@ -3263,6 +3621,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         }
       }
 
+      for (const tab of prev) pendingForgetRef.current.add(tab.id)
       inFlightLoadsRef.current.clear()
       setActiveFileTabId(null)
       setPreviewFileTabIds(new Set())
@@ -3270,7 +3629,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       return []
     })
     return true
-  }, [activateConversationPane, t])
+  }, [setActiveFileTabId, activateConversationPane, closeScopeFileTabs, t])
 
   useBrowserBackWindow({
     open: fileTabs.length > 0,
@@ -3279,6 +3638,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   })
 
   const reorderFileTabs = useCallback((tabs: FileWorkspaceTab[]) => {
+    const folderTabs = useFolderTabsStore.getState()
+    if (folderTabs.enabled) {
+      folderTabs.reorderFiles(tabs.map((tab) => tab.id))
+      return
+    }
     setFileTabs(tabs)
   }, [])
 
@@ -3494,7 +3858,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 
   const fileTabsValue = useMemo<WorkspaceFileTabsValue>(
     () => ({
-      fileTabs,
+      fileTabs: visibleFileTabs,
+      allFileTabs: fileTabs,
       activeFileTabId,
       activeFileTab,
       activeFilePath,
@@ -3502,6 +3867,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       pendingFileReveal,
     }),
     [
+      visibleFileTabs,
       fileTabs,
       activeFileTabId,
       activeFileTab,
@@ -3535,7 +3901,9 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           value={externalConflictValue}
         >
           <WorkspaceFileTabsContext.Provider value={fileTabsValue}>
-            {children}
+            <MonacoModelProvider fileTabs={fileTabs}>
+              {children}
+            </MonacoModelProvider>
           </WorkspaceFileTabsContext.Provider>
         </WorkspaceExternalConflictContext.Provider>
       </WorkspaceViewContext.Provider>

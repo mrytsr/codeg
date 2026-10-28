@@ -575,6 +575,10 @@ jobs:
           # Skip the duplicate beforeBuildCommand sidecar pass so cross builds
           # do not fall back to the runner host triple.
           CODEG_SKIP_SIDECAR: "1"
+          # beforeBuildCommand runs `next build`, whose type-check needs more
+          # than the 2 GB heap Node defaults to on these 7 GB runners; 4 GB is
+          # what Node already gets on the 16 GB Linux and Windows runners.
+          NODE_OPTIONS: --max-old-space-size=4096
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -809,6 +813,12 @@ jobs:
           cache: "pnpm"
 
       - name: Build frontend
+        env:
+          # The `next build` type-check needs more than the 2 GB heap Node
+          # defaults to on the 7 GB macOS runners. 4 GB is what Node already
+          # gets on the 16 GB Linux and Windows runners, so it changes nothing
+          # there.
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           pnpm install --frozen-lockfile
           pnpm build
@@ -830,6 +840,189 @@ jobs:
           cargo build --release --bin codeg-mcp --no-default-features --features mcp-bin --target ${{ matrix.target }}
           cargo build --release --bin codeg-computer-helper --no-default-features --features computer-helper --target ${{ matrix.target }}
           cargo build --release --bin codeg-cli --no-default-features --features cli-bin --target ${{ matrix.target }}
+
+      # macOS holds what a person grants the server — Full Disk Access and the
+      # other privacy permissions — to its designated requirement. Rust leaves
+      # the arm64 binary linker-signed (ad-hoc), which makes that requirement
+      # the one build's cdhash: every update, which puts another build at the
+      # same path, took the grant back (#1035). The x86_64 binary is not
+      # signed at all. Signed with the release's Developer ID under a fixed
+      # identifier, both carry a requirement naming the identifier and the
+      # Team ID, which every release keeps, as the desktop's executables do.
+      # The certificate goes into a temporary keychain the way build-tauri
+      # does it, after everything is built, and the keychain is deleted again
+      # before anything else runs, so no build script or tool sees it
+      # unlocked. No notarization credentials: these binaries are not
+      # notarized.
+      - name: Import Apple Developer ID certificate (macOS)
+        if: contains(matrix.target, 'apple-darwin')
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            KEYCHAIN_PASSWORD \
+            APPLE_TEAM_ID; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf '::error::Missing required Apple signing secret(s): %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+          keychain_path="$RUNNER_TEMP/codeg-signing.keychain-db"
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_search_list_path="$RUNNER_TEMP/codeg-keychains.txt"
+          original_default_keychain="$(
+            security default-keychain -d user \
+              | sed -e 's/^[[:space:]]*//' -e 's/^"//' -e 's/"$//'
+          )"
+          security list-keychains -d user \
+            | sed -e 's/^[[:space:]]*//' -e 's/^"//' -e 's/"$//' \
+            > "$keychain_search_list_path"
+
+          echo "APPLE_KEYCHAIN_PATH=$keychain_path" >> "$GITHUB_ENV"
+          echo "APPLE_CERTIFICATE_PATH=$certificate_path" >> "$GITHUB_ENV"
+          echo "APPLE_KEYCHAIN_SEARCH_LIST_PATH=$keychain_search_list_path" >> "$GITHUB_ENV"
+          echo "APPLE_ORIGINAL_DEFAULT_KEYCHAIN=$original_default_keychain" >> "$GITHUB_ENV"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          existing_keychains=()
+          while IFS= read -r existing_keychain; do
+            if [ -n "$existing_keychain" ]; then
+              existing_keychains+=("$existing_keychain")
+            fi
+          done < "$keychain_search_list_path"
+          if [ "${#existing_keychains[@]}" -eq 0 ]; then
+            security list-keychains -d user -s "$keychain_path"
+          else
+            security list-keychains -d user -s "$keychain_path" "${existing_keychains[@]}"
+          fi
+          security default-keychain -s "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -t 21600 -u "$keychain_path"
+          security import "$certificate_path" \
+            -k "$keychain_path" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path"
+
+      - name: Resolve Apple Developer ID identity (macOS)
+        if: contains(matrix.target, 'apple-darwin')
+        shell: bash
+        run: |
+          set -euo pipefail
+          cert_info="$(
+            security find-identity -v -p codesigning "$APPLE_KEYCHAIN_PATH" \
+              | grep "Developer ID Application" \
+              | head -n 1 \
+              || true
+          )"
+
+          if [ -z "$cert_info" ]; then
+            echo "::error::No Developer ID Application signing identity found in imported keychain."
+            security find-identity -v -p codesigning "$APPLE_KEYCHAIN_PATH" || true
+            exit 1
+          fi
+
+          cert_id="$(echo "$cert_info" | awk -F'"' '{print $2}')"
+          echo "APPLE_SIGNING_IDENTITY=$cert_id" >> "$GITHUB_ENV"
+          echo "Using Apple signing identity: $cert_id"
+
+      # Each executable is signed under its file name as its identifier (the
+      # names the desktop bundle signs codeg-mcp and codeg-cli under), with
+      # the hardened runtime, a secure timestamp and no entitlements. A grant
+      # that outlives an update must not be borrowable by loading code into
+      # the server — DYLD_* variables, a library it did not ship — and a
+      # signature without a secure timestamp stops validating once the
+      # certificate expires. Then each is checked against the requirement
+      # macOS records for it. codeg-computer-helper stays ad-hoc: a helper
+      # carrying a Team ID refuses to start unless codeg's designated
+      # requirement was compiled into it (computer/helper/mod.rs), and this
+      # build pins none. Last, the signed server is run once (`--version`) to
+      # show it still launches under the hardened runtime.
+      - name: Sign the server's executables with the Developer ID (macOS)
+        if: contains(matrix.target, 'apple-darwin')
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          dir="src-tauri/target/${{ matrix.target }}/release"
+          anchor="anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = \"${APPLE_TEAM_ID}\""
+          for bin in codeg-server codeg-mcp codeg-cli; do
+            codesign --force --options runtime --timestamp \
+              --identifier "$bin" \
+              --sign "$APPLE_SIGNING_IDENTITY" "$dir/$bin"
+            codesign --verify --strict -R="identifier \"$bin\" and ${anchor}" "$dir/$bin"
+            info="$(codesign -dv --verbose=2 "$dir/$bin" 2>&1)"
+            if ! grep -q 'flags=0x[0-9a-f]*(runtime)' <<< "$info"; then
+              echo "FATAL: $bin is not signed with the hardened runtime"
+              exit 1
+            fi
+            if ! grep -q '^Timestamp=' <<< "$info"; then
+              echo "FATAL: $bin carries no secure timestamp"
+              exit 1
+            fi
+            entitlements="$(codesign -d --entitlements - --xml "$dir/$bin" 2>/dev/null)"
+            if grep -q '<key>' <<< "$entitlements"; then
+              echo "FATAL: $bin carries entitlements; the server's executables must carry none"
+              exit 1
+            fi
+            grep -E '^(Identifier|TeamIdentifier|Timestamp)=' <<< "$info"
+          done
+          "$dir/codeg-server" --version
+
+      - name: Delete Apple signing keychain (macOS)
+        if: always() && contains(matrix.target, 'apple-darwin')
+        shell: bash
+        run: |
+          if [ -n "${APPLE_ORIGINAL_DEFAULT_KEYCHAIN:-}" ]; then
+            security default-keychain -s "$APPLE_ORIGINAL_DEFAULT_KEYCHAIN" || true
+          fi
+
+          if [ -n "${APPLE_KEYCHAIN_SEARCH_LIST_PATH:-}" ] && \
+             [ -f "$APPLE_KEYCHAIN_SEARCH_LIST_PATH" ]; then
+            restored_keychains=()
+            while IFS= read -r restored_keychain; do
+              if [ -n "$restored_keychain" ]; then
+                restored_keychains+=("$restored_keychain")
+              fi
+            done < "$APPLE_KEYCHAIN_SEARCH_LIST_PATH"
+
+            if [ "${#restored_keychains[@]}" -ne 0 ]; then
+              security list-keychains -d user -s "${restored_keychains[@]}" || true
+            fi
+          fi
+
+          if [ -n "${APPLE_KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$APPLE_KEYCHAIN_PATH" || true
+          fi
+
+          for path in \
+            "${APPLE_CERTIFICATE_PATH:-}" \
+            "${APPLE_KEYCHAIN_SEARCH_LIST_PATH:-}"; do
+            if [ -n "$path" ]; then
+              rm -f "$path"
+            fi
+          done
 
       - name: Package (Unix)
         if: runner.os != 'Windows'

@@ -1,7 +1,7 @@
 import { type ReactElement } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import enMessages from "@/i18n/messages/en.json"
 import { EMPTY_TOOL_APPROVALS } from "@/lib/activity/approval"
@@ -101,7 +101,7 @@ describe("CompletedTurnContent with nothing left to show", () => {
     // now — but with no toggle that could hide the reply.
     expect(screen.getByText("Activity")).toBeInTheDocument()
     // The time follows the step count on the same line.
-    const header = document.querySelector(".ws-msg-chip")!
+    const header = document.querySelector("div.activity-capsule")!
     expect(header.textContent).toMatch(/5s$/)
     expect(queryToggle()).toBeNull()
     expect(screen.getByText("Wrapping up.")).toBeInTheDocument()
@@ -161,7 +161,7 @@ describe("CompletedTurnContent", () => {
       />
     )
 
-    expect(document.querySelector(".ws-msg-chip")!.textContent).toMatch(
+    expect(document.querySelector("div.activity-capsule")!.textContent).toMatch(
       /1m 9s$/
     )
     const trigger = toggle()
@@ -381,6 +381,11 @@ describe("CompletedTurnContent: the turning mark while the agent works", () => {
     container.querySelectorAll('[data-marker="working"]')
   const onRail = (container: HTMLElement) =>
     container.querySelector('.activity-timeline > [data-marker="working"]')
+  /** The row that folds the open steps, at their foot. */
+  const fold = (container: HTMLElement) =>
+    container.querySelector<HTMLElement>(
+      '.activity-timeline > [data-marker="foot"] > button'
+    )
 
   it("hangs it off the rail while the timeline ends the reply", () => {
     const { container } = renderWithIntl(
@@ -402,9 +407,11 @@ describe("CompletedTurnContent: the turning mark while the agent works", () => {
     const turning = mark!.querySelector(".animate-spin")
     expect(turning?.tagName).toBe("SPAN")
     expect(turning?.childElementCount).toBe(0)
+    // A single ring: no fold row while the agent works.
+    expect(fold(container)).toBeNull()
   })
 
-  it("puts it under the answer being written", () => {
+  it("keeps it at the foot of the rail above the answer being written", () => {
     const { container } = renderWithIntl(
       <CompletedTurnContent
         parts={freshCompletedParts()}
@@ -413,12 +420,13 @@ describe("CompletedTurnContent: the turning mark while the agent works", () => {
       />
     )
 
+    // Not a second mark under the answer: the ring at the foot of the steps,
+    // where the fold row will stand once the reply is done.
     expect(marks(container)).toHaveLength(1)
-    expect(onRail(container)).toBeNull()
+    const mark = onRail(container)!
     const answer = screen.getByText("The fix is complete.")
     expect(
-      answer.compareDocumentPosition(marks(container)[0]!) &
-        Node.DOCUMENT_POSITION_FOLLOWING
+      mark.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
   })
 
@@ -462,6 +470,41 @@ describe("CompletedTurnContent: the turning mark while the agent works", () => {
     expect(onRail(container)).toBeNull()
   })
 
+  it("never turns two marks while the folding steps slide shut", () => {
+    // jsdom runs no animations: report the fold's exit, which keeps the steps
+    // mounted until it ends — the mark under the reply is there by then.
+    const computed = window.getComputedStyle
+    const spy = vi
+      .spyOn(window, "getComputedStyle")
+      .mockImplementation((element, pseudo) =>
+        element.classList.contains("reply-fold-body") &&
+        element.getAttribute("data-state") === "closed"
+          ? ({
+              animationName: "reply-fold-close",
+              animationDuration: "0.16s",
+              animationDelay: "0s",
+            } as CSSStyleDeclaration)
+          : computed(element, pseudo)
+      )
+    try {
+      const { container } = renderWithIntl(
+        <CompletedTurnContent
+          parts={RUNNING_PARTS()}
+          durationMs={null}
+          completed={false}
+        />
+      )
+      fireEvent.click(toggle())
+      // Still sliding shut, its steps in view...
+      expect(container.querySelector(".activity-timeline > li")).not.toBeNull()
+      // ...with one turning mark, under the reply.
+      expect(marks(container)).toHaveLength(1)
+      expect(onRail(container)).toBeNull()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it.each([
     ["a permission request about one of its calls", "call-run"],
     ["a question or a plan to approve", null],
@@ -483,24 +526,27 @@ describe("CompletedTurnContent: the turning mark while the agent works", () => {
     )
 
     expect(marks(container)).toHaveLength(0)
+    // Nothing at work: the steps end on the row that folds them.
+    expect(fold(container)).not.toBeNull()
   })
 
-  it("drops it once the reply is done", () => {
+  it("stops once the reply is done, the ring giving way to the fold row", () => {
+    const parts = freshCompletedParts()
     const view = renderWithIntl(
       <CompletedTurnContent
-        parts={RUNNING_PARTS()}
+        parts={parts}
         durationMs={null}
         completed={false}
         currentRound
         roundOpen
       />
     )
-    expect(marks(view.container)).toHaveLength(1)
+    expect(onRail(view.container)).not.toBeNull()
 
     view.rerender(
       <NextIntlClientProvider locale="en" messages={enMessages}>
         <CompletedTurnContent
-          parts={RUNNING_PARTS()}
+          parts={parts}
           durationMs={4_000}
           completed
           currentRound
@@ -509,5 +555,8 @@ describe("CompletedTurnContent: the turning mark while the agent works", () => {
       </NextIntlClientProvider>
     )
     expect(marks(view.container)).toHaveLength(0)
+    const row = fold(view.container)!
+    expect(row).toHaveAccessibleName("Collapse 1 step · 4s")
+    expect(row.querySelector("svg.lucide-chevron-up")).toBeTruthy()
   })
 })

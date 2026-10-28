@@ -1668,6 +1668,137 @@ fn serialize_preview(value: &serde_json::Value, max_chars: usize) -> Option<Stri
     (!text.is_empty()).then(|| truncate_str(&text, max_chars))
 }
 
+/// What a persisted MCP result over 64 KiB became in codex 0.164: codex's
+/// rollout policy swaps it for ONE text block holding the result's own JSON
+/// serialization, cut in the middle with codex's `…N chars truncated…` marker
+/// (`truncate_mcp_tool_result`), drops `structuredContent` and keeps
+/// `isError`. Read as text, that block is JSON: an image-only result's
+/// preview went from the 4,000-character fallback below to 65,000 characters
+/// of escaped base64, and a text result came back JSON-escaped.
+///
+/// The preview of such a stand-in: the text of the text blocks the
+/// serialization opens on, decoded out of their JSON strings and joined the
+/// way an MCP result's text always is
+/// ([`crate::parsers::pi::tool_result_content_text`]), then codex's marker —
+/// unless the cut fell after the whole `content` array (inside the dropped
+/// `structuredContent`, say), so that no text was lost. Reading stops at the
+/// cut, at a block that is not text, and at a shape it does not know. A
+/// stand-in with no text to show — one opening on an image, a resource or an
+/// empty `content` — is capped like a result that answered in blocks alone.
+/// `None` when `result` is not the stand-in.
+fn codex_truncated_mcp_result_preview(result: &serde_json::Value) -> Option<String> {
+    static MARKER: OnceLock<Regex> = OnceLock::new();
+    let result = result.as_object()?;
+    if result.contains_key("structuredContent") {
+        return None;
+    }
+    let [block] = result.get("content")?.as_array()?.as_slice() else {
+        return None;
+    };
+    if block.get("type").and_then(serde_json::Value::as_str) != Some("text") {
+        return None;
+    }
+    let text = block.get("text")?.as_str()?;
+    if !text.starts_with(r#"{"content":["#) {
+        return None;
+    }
+    let marker = MARKER
+        .get_or_init(|| Regex::new(r"…\d+ chars truncated…").expect("valid marker regex"))
+        .find(text)?;
+    let mut rest = &text[r#"{"content":["#.len()..marker.start()];
+    let mut shown = String::new();
+    let mut whole = false;
+    while let Some(string) = [r#"{"type":"text","text":""#, r#"{"text":""#]
+        .iter()
+        .find_map(|opening| rest.strip_prefix(opening))
+    {
+        let (decoded, after) = decode_json_string_prefix(string);
+        shown.push_str(&decoded);
+        // `None`: the cut fell inside this text.
+        let Some(after) = after else {
+            break;
+        };
+        // A block written `{"text":…,"type":"text"}` closes after its type.
+        let after = after.strip_prefix(r#","type":"text""#).unwrap_or(after);
+        if let Some(next) = after.strip_prefix("},") {
+            rest = next;
+            continue;
+        }
+        whole = after.starts_with("}]");
+        break;
+    }
+    if shown.is_empty() {
+        return Some(truncate_str(text, MCP_RESULT_FALLBACK_CAP));
+    }
+    Some(if whole {
+        shown
+    } else {
+        format!("{shown}{}", marker.as_str())
+    })
+}
+
+/// `s` read as the inside of a JSON string literal whose end may have been cut
+/// off: the decoded text up to the closing quote, with what follows the quote,
+/// or up to the end of `s` with `None`, an escape the cut left unfinished
+/// dropped. An escape JSON does not have ends the text there too (`None`). A
+/// `\u` surrogate with no partner decodes to U+FFFD.
+fn decode_json_string_prefix(s: &str) -> (String, Option<&str>) {
+    fn hex4(chars: &mut std::str::Chars<'_>) -> Option<u32> {
+        let digits: String = chars.by_ref().take(4).collect();
+        (digits.len() == 4 && digits.chars().all(|c| c.is_ascii_hexdigit()))
+            .then(|| u32::from_str_radix(&digits, 16).ok())
+            .flatten()
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return (out, Some(chars.as_str())),
+            '\\' => {
+                let decoded = match chars.next() {
+                    Some('"') => '"',
+                    Some('\\') => '\\',
+                    Some('/') => '/',
+                    Some('b') => '\u{8}',
+                    Some('f') => '\u{c}',
+                    Some('n') => '\n',
+                    Some('r') => '\r',
+                    Some('t') => '\t',
+                    Some('u') => {
+                        let Some(unit) = hex4(&mut chars) else {
+                            break;
+                        };
+                        if (0xD800..0xDC00).contains(&unit) {
+                            let mut lookahead = chars.clone();
+                            let low = (lookahead.next() == Some('\\')
+                                && lookahead.next() == Some('u'))
+                            .then(|| hex4(&mut lookahead))
+                            .flatten()
+                            .filter(|low| (0xDC00..0xE000).contains(low));
+                            match low {
+                                Some(low) => {
+                                    chars = lookahead;
+                                    char::from_u32(
+                                        0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00),
+                                    )
+                                    .unwrap_or('\u{FFFD}')
+                                }
+                                None => '\u{FFFD}',
+                            }
+                        } else {
+                            char::from_u32(unit).unwrap_or('\u{FFFD}')
+                        }
+                    }
+                    _ => break,
+                };
+                out.push(decoded);
+            }
+            c => out.push(c),
+        }
+    }
+    (out, None)
+}
+
 fn completed_mcp_call(payload: &serde_json::Value) -> Option<CompletedMcpCall> {
     let item = payload.get("item")?;
     if item.get("type").and_then(|v| v.as_str()) != Some("McpToolCall") {
@@ -1690,10 +1821,16 @@ fn completed_mcp_call(payload: &serde_json::Value) -> Option<CompletedMcpCall> {
     // `status` inside it (`infer_output_text_is_error`), and truncating valid
     // JSON makes that parse fail silently, settling a call that reported
     // failure GREEN. So the cut branch also hands back the value it cut, and
-    // the outcome is read from that instead.
+    // the outcome is read from that instead. codex 0.164's stand-in for an
+    // oversized result goes first: its one text block is JSON, not the
+    // result's text (`codex_truncated_mcp_result_preview`).
     let output_preview = result
-        .and_then(|result| result.get("content"))
-        .and_then(crate::parsers::pi::tool_result_content_text)
+        .and_then(codex_truncated_mcp_result_preview)
+        .or_else(|| {
+            result
+                .and_then(|result| result.get("content"))
+                .and_then(crate::parsers::pi::tool_result_content_text)
+        })
         .or_else(|| {
             result
                 .and_then(|result| result.get("structuredContent"))
@@ -7823,7 +7960,9 @@ mod tests {
     use super::extract_turn_usage_from_codex_usage;
     use super::codex_usage_counters;
     use super::codex_line_ordinal;
+    use super::codex_truncated_mcp_result_preview;
     use super::completed_mcp_call;
+    use super::decode_json_string_prefix;
     use super::serialize_preview;
     use super::truncate_str;
     use super::BudgetedSink;
@@ -13861,6 +14000,170 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    /// codex 0.164's stand-in for an MCP result over 64 KiB, shaped like the
+    /// one a live 0.164.0 rollout holds for a 100,000-character text result
+    /// (codex's `truncate_mcp_tool_result`: the result's JSON cut in the middle,
+    /// `structuredContent` dropped, `isError` kept).
+    fn truncated_result(serialized: &str) -> serde_json::Value {
+        serde_json::json!({
+            "content": [{"type": "text", "text": serialized}],
+            "isError": false,
+        })
+    }
+
+    #[test]
+    fn a_truncated_text_result_reads_as_its_text_up_to_the_cut() {
+        let stub = truncated_result(
+            r#"{"content":[{"type":"text","text":"big-head BIGDATA-BIGDATA-B…34680 chars truncated…IGDATA-BIGDATA-"}],"structuredContent":{"size":100000,"status":"ok"},"isError":false}"#,
+        );
+        assert_eq!(
+            codex_truncated_mcp_result_preview(&stub).as_deref(),
+            Some("big-head BIGDATA-BIGDATA-B…34680 chars truncated…")
+        );
+
+        // Escapes are text again, and one the cut left unfinished is dropped.
+        let stub = truncated_result(
+            r#"{"content":[{"type":"text","text":"line 1\nsaid \"hi\" \\ café 😀 \u00…99 chars truncated…ignored"}],"isError":false}"#,
+        );
+        assert_eq!(
+            codex_truncated_mcp_result_preview(&stub).as_deref(),
+            Some("line 1\nsaid \"hi\" \\ café 😀 …99 chars truncated…")
+        );
+
+        // Text blocks are joined the way an MCP result's text always is, up
+        // to the cut, whichever order a server writes a block's keys in.
+        let stub = truncated_result(
+            r#"{"content":[{"text":"first ","type":"text"},{"type":"text","text":"x…10 chars truncated…y"}],"isError":false}"#,
+        );
+        assert_eq!(
+            codex_truncated_mcp_result_preview(&stub).as_deref(),
+            Some("first x…10 chars truncated…")
+        );
+
+        // A cut after the whole `content` array lost none of the text.
+        let stub = truncated_result(
+            r#"{"content":[{"type":"text","text":"all "},{"type":"text","text":"of it"}],"structuredContent":{"blob":"aaa…5 chars truncated…bb"},"isError":false}"#,
+        );
+        assert_eq!(
+            codex_truncated_mcp_result_preview(&stub).as_deref(),
+            Some("all of it")
+        );
+
+        // A block that is not text ends the reading, and the marker says that
+        // something after it was cut.
+        let stub = truncated_result(
+            r#"{"content":[{"type":"text","text":"caption"},{"type":"image","data":"AAAA…9 chars truncated…B","mimeType":"image/png"}],"isError":false}"#,
+        );
+        assert_eq!(
+            codex_truncated_mcp_result_preview(&stub).as_deref(),
+            Some("caption…9 chars truncated…")
+        );
+
+        // Nothing to show as text is never an empty preview.
+        let serialized = r#"{"content":[{"type":"text","text":""},{"type":"image","data":"AAAA…9 chars truncated…B","mimeType":"image/png"}],"isError":false}"#;
+        assert_eq!(
+            codex_truncated_mcp_result_preview(&truncated_result(serialized)).as_deref(),
+            Some(serialized)
+        );
+    }
+
+    #[test]
+    fn a_truncated_result_of_other_blocks_is_capped_like_any_block_result() {
+        let serialized = format!(
+            r#"{{"content":[{{"type":"image","data":"{}…71177 chars truncated…{}","mimeType":"image/png"}}],"isError":false}}"#,
+            "A".repeat(30_000),
+            "B".repeat(30_000)
+        );
+        let preview = codex_truncated_mcp_result_preview(&truncated_result(&serialized))
+            .expect("the stand-in");
+        assert_eq!(preview, truncate_str(&serialized, MCP_RESULT_FALLBACK_CAP));
+        assert!(preview.chars().count() <= MCP_RESULT_FALLBACK_CAP + 3);
+    }
+
+    /// Only codex's stand-in: one text block opening on the result's own
+    /// JSON with codex's marker in it, and no `structuredContent` beside it.
+    #[test]
+    fn a_result_that_only_resembles_the_stand_in_is_left_alone() {
+        let cut = r#"{"content":[{"type":"text","text":"a…5 chars truncated…b"}],"isError":false}"#;
+        for result in [
+            // No marker: a tool that answers with JSON of its own.
+            truncated_result(r#"{"content":[{"type":"text","text":"whole"}],"isError":false}"#),
+            // The stand-in never keeps `structuredContent`.
+            serde_json::json!({
+                "content": [{"type": "text", "text": cut}],
+                "structuredContent": {"ok": true},
+            }),
+            // Nor more than one block.
+            serde_json::json!({
+                "content": [{"type": "text", "text": cut}, {"type": "text", "text": "more"}],
+            }),
+            // Nor a block of another kind.
+            serde_json::json!({"content": [{"type": "resource", "text": cut}]}),
+            // And it opens on the result's `content`.
+            truncated_result(&format!("prefix {cut}")),
+        ] {
+            assert_eq!(
+                codex_truncated_mcp_result_preview(&result),
+                None,
+                "{result}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cut_json_string_decodes_as_far_as_it_goes() {
+        assert_eq!(
+            decode_json_string_prefix(r#"done" tail"#),
+            ("done".into(), Some(" tail"))
+        );
+        assert_eq!(decode_json_string_prefix("cut \\"), ("cut ".into(), None));
+        assert_eq!(
+            decode_json_string_prefix("cut \\u12"),
+            ("cut ".into(), None)
+        );
+        assert_eq!(
+            decode_json_string_prefix("bad \\x tail"),
+            ("bad ".into(), None)
+        );
+        assert_eq!(
+            decode_json_string_prefix("plus \\u+123"),
+            ("plus ".into(), None)
+        );
+        assert_eq!(
+            decode_json_string_prefix("lone \\ud800 x"),
+            ("lone \u{FFFD} x".into(), None)
+        );
+        assert_eq!(
+            decode_json_string_prefix("pair \\ud83d\\ude00!\""),
+            ("pair 😀!".into(), Some(""))
+        );
+        assert_eq!(
+            decode_json_string_prefix("ctl \\u0001\\b\\f\\r\\t\\/"),
+            ("ctl \u{1}\u{8}\u{c}\r\t/".into(), None)
+        );
+    }
+
+    /// End to end: the semantic MCP call recovered from a code-mode script
+    /// shows the stand-in's text and keeps the outcome codex stated.
+    #[test]
+    fn a_truncated_mcp_call_keeps_its_text_and_its_outcome() {
+        let call = completed_mcp_call(&serde_json::json!({
+            "item": {
+                "type": "McpToolCall", "id": "i", "server": "s", "tool": "t",
+                "status": "completed",
+                "result": truncated_result(
+                    r#"{"content":[{"type":"text","text":"Error: looks bad…9 chars truncated…"}],"isError":false}"#,
+                ),
+            }
+        }))
+        .expect("well-formed item");
+        assert_eq!(
+            call.output_preview.as_deref(),
+            Some("Error: looks bad…9 chars truncated…")
+        );
+        assert!(!call.is_error, "codex kept `isError: false`");
     }
 
     /// The marker search reads a block's own outcome fields and stops there.

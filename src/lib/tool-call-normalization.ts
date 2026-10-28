@@ -80,6 +80,16 @@ const EXACT_TOOL_NAME_ALIASES: Record<string, string> = {
   context7_query_docs: "context7_query-docs",
   context7_resolve_library_id: "context7_resolve-library-id",
   agent: "agent",
+  // Claude Code's `Monitor`: a script (or a WebSocket) watched in the
+  // background, each line it prints a notification to the model. Its live
+  // `rawInput` carries `command`, which the input-shape rule reads as a shell
+  // command, so the live path resolves it from the meta name first
+  // (`META_NAMED_TOOLS`); the transcript keeps the raw name, which lands here.
+  monitor: "monitor",
+  // claude-agent-acp's tool call for a sandbox network request
+  // (`SandboxNetworkAccess {host}`): the permission Claude Code asks before a
+  // sandboxed command reaches a new host. Live only — no transcript records it.
+  sandboxnetworkaccess: "sandboxnetworkaccess",
   // Gemini CLI
   searchtext: "grep",
   search_text: "grep",
@@ -149,6 +159,13 @@ const EXACT_TOOL_NAME_ALIASES: Record<string, string> = {
   "mcp__codeg-mcp__check_user_feedback": "check_user_feedback",
   mcp__codeg__check_user_feedback: "check_user_feedback",
   // OpenCode
+  // OpenCode 2 renamed `apply_patch` to `patch` (the edit tool its `gpt-*`
+  // models get instead of edit/write) and `task` to `subagent`
+  // (packages/core/src/tool/plugin/{patch,subagent}.ts, 2.2.0). The live
+  // opening frame states the new name (`_meta.opencode.toolName`), so without
+  // these a patch drew a generic row and a sub-agent launch no Agent card.
+  patch: "apply_patch",
+  subagent: "agent",
   delegate_task: "task",
   call_omo_agent: "agent",
   ast_grep_search: "grep",
@@ -160,6 +177,11 @@ const EXACT_TOOL_NAME_ALIASES: Record<string, string> = {
   question: "question",
   ask_user_question: "question",
   askuserquestion: "question",
+  // Google Antigravity's native ask tool, as its history parser names the call.
+  // Bare name only, on purpose: a host-prefixed `*ask_question` is someone
+  // else's MCP tool (DeepWiki's `ask_question` takes `{repoName, question}`),
+  // which the question card cannot render.
+  ask_question: "question",
   // codeg-mcp ask-user-question companion tool (server prefix varies by host;
   // the suffix rule in `normalizeToolName` covers the other separators)
   "mcp__codeg-mcp__ask_user_question": "question",
@@ -270,6 +292,29 @@ function tryParseInputObject(rawInput: string | null | undefined) {
   } catch {
     return null
   }
+}
+
+/**
+ * `_meta` key naming the tool call that launched the sub-agent a call belongs
+ * to — the agent-neutral twin of Claude's `claudeCode.parentToolUseId`, which
+ * the backend stamps where the agent states the link some other way (OpenCode
+ * 2: only the child SESSION a sub-agent's call ran in; see
+ * `opencode_frame_route` in `src-tauri/src/acp/connection.rs`).
+ */
+export const PARENT_TOOL_CALL_META_KEY = "codeg.parentToolCallId"
+
+/** The title (live) and tool name (history) of OpenCode's code-mode tool. */
+const CODE_MODE_TOOL_TITLE = "execute"
+
+/** A frame of OpenCode's code-mode tool: titled `execute`, with a `{code}`
+ *  script for input. */
+function isCodeModeExecuteFrame(
+  title: string | null | undefined,
+  rawInput: string | null | undefined
+): boolean {
+  if ((title ?? "").trim().toLowerCase() !== CODE_MODE_TOOL_TITLE) return false
+  if (!rawInput || !rawInput.includes('"code"')) return false
+  return typeof tryParseInputObject(rawInput)?.code === "string"
 }
 
 function hasAnyKey(obj: Record<string, unknown>, keys: string[]): boolean {
@@ -655,6 +700,17 @@ const DELEGATION_COMPANION_TOOLS: ReadonlySet<string> = new Set([
   "resume_delegation",
 ])
 
+// Built-in tools whose meta name outranks their input shape, for the same
+// reason as the companions above: the shape names another tool. Claude Code's
+// `Monitor` input carries `command`, so `inferFromInput` would make it a shell
+// command while it ran and a monitor on reload (the transcript keeps the raw
+// name). `SandboxNetworkAccess` is here so its `{host}` input can never be
+// read as something else.
+const META_NAMED_TOOLS: ReadonlySet<string> = new Set([
+  "monitor",
+  "sandboxnetworkaccess",
+])
+
 export function inferLiveToolName(params: {
   title?: string | null
   kind?: string | null
@@ -714,6 +770,7 @@ export function inferLiveToolName(params: {
     if (!candidate) continue
     const normalizedMeta = normalizeToolName(candidate)
     if (DELEGATION_COMPANION_TOOLS.has(normalizedMeta)) return normalizedMeta
+    if (META_NAMED_TOOLS.has(normalizedMeta)) return normalizedMeta
   }
 
   // The delegation broker stamps `meta["codeg.delegation"]` onto the parent's
@@ -780,6 +837,17 @@ export function inferLiveToolName(params: {
   // placement, and reason, as OpenCode's above.
   const kiroToolName = extractKiroToolName(params.meta)
   if (kiroToolName) return normalizeToolName(kiroToolName)
+
+  // OpenCode 2.x code mode: the `execute` tool's input is `{code: "<JS>"}`, a
+  // script that can say anything — a delegated task quoting a patch reads as
+  // `apply_patch` to the input heuristics below. OpenCode titles a non-shell
+  // tool by its name on every frame, and the backend registers code-mode
+  // delegations on that title (`is_delegation_invocation`), so take it here.
+  // Live frames carry the stamped name above; a `session/load` replay opens
+  // with the input already present, so it is never stamped.
+  if (isCodeModeExecuteFrame(params.title, params.rawInput)) {
+    return normalizeToolName(CODE_MODE_TOOL_TITLE)
+  }
 
   // Input-shape detection runs FIRST so cross-agent heuristics (Claude Code
   // `Task` tool routed via `subagent_type`, OpenCode sub-agent calls, etc.)
@@ -859,7 +927,9 @@ export function inferLiveToolName(params: {
   return "tool"
 }
 
-function extractClaudeCodeToolName(
+/** Claude Code's own name for a tool call, `_meta.claudeCode.toolName`
+ *  (claude-agent-acp sets it on every live call). */
+export function extractClaudeCodeToolName(
   meta: Record<string, unknown> | null | undefined
 ): string | null {
   if (!meta || typeof meta !== "object") return null

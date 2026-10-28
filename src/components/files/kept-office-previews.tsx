@@ -65,7 +65,12 @@ function sameIds(a: readonly string[], b: readonly string[]): boolean {
  * body renders nothing for an office tab; both decide with `isOfficeFileTab`.
  */
 export function KeptOfficePreviews() {
-  const { activeFileTab, fileTabs } = useWorkspaceFileTabs()
+  const {
+    activeFileTab,
+    fileTabs: visibleFileTabs,
+    allFileTabs,
+  } = useWorkspaceFileTabs()
+  const fileTabs = allFileTabs ?? visibleFileTabs
   const activeId =
     activeFileTab && isOfficeFileTab(activeFileTab) ? activeFileTab.id : null
   const paths = new Map<string, string | null>()
