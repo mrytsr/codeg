@@ -262,7 +262,10 @@ describe("ForgeSettingsDialog global scope", () => {
     await user.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("disk is full"))
     expect(onSaved).not.toHaveBeenCalled()
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+    // The toast goes up before the render that releases the button.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+    )
   })
 })
 

@@ -6,6 +6,7 @@ import { FileTypeIcon } from "@/components/files/file-type-icon"
 import { useTranslations } from "next-intl"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useOpenFileTarget } from "@/hooks/use-open-file-target"
+import { useArrivedOnCompletion } from "@/hooks/use-chat-motion"
 import {
   CommitFileAdditions,
   CommitFileDeletions,
@@ -88,6 +89,7 @@ export const ReplyArtifacts = memo(function ReplyArtifacts({
     }
     return { addedFiles, changedFiles }
   }, [files])
+  const arrived = useArrivedOnCompletion(isResponseComplete)
 
   if (!isResponseComplete) return null
   if (files.length === 0) return null
@@ -127,7 +129,7 @@ export const ReplyArtifacts = memo(function ReplyArtifacts({
   const totalDeletions = changedFiles.reduce((sum, f) => sum + f.deletions, 0)
 
   return (
-    <div className="mt-2 space-y-2">
+    <div className={cn("mt-2 space-y-2", arrived && "chat-enter")}>
       {addedFiles.length > 0 && (
         <div className="overflow-hidden rounded-lg border border-border bg-card/40 text-card-foreground">
           <button

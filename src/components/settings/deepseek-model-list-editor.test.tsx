@@ -491,7 +491,7 @@ describe("importing the endpoint's models", () => {
       keyHeader: null,
     })
     const dialog = await screen.findByRole("dialog")
-    const row = within(dialog).getByText("gw-new").closest("label")!
+    const row = (await within(dialog).findByText("gw-new")).closest("label")!
     await user.click(within(row).getByRole("checkbox"))
     await user.click(
       within(dialog).getByRole("button", { name: "Use 4 models" })

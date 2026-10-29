@@ -4275,6 +4275,7 @@
         "cardResultPending": "Resultado ainda não retornou"
       },
       "asyncTasks": {
+        "title": "Tarefas em segundo plano",
         "openOutput": "Saída",
         "stop": "Parar",
         "tokens": "{count} tokens",

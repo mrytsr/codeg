@@ -241,8 +241,13 @@ describe("WorkspaceBackgroundMarketDialog", () => {
       Promise.resolve({ items: [ITEM], page: Math.min(page, 2), lastPage: 5 })
     )
     renderDialog()
-    const next = () =>
-      userEvent.click(screen.getByRole("button", { name: `${NS}.nextPage` }))
+    // The label names a page as soon as it is asked for, but "next" stays
+    // locked until that page lands.
+    const next = async () => {
+      const button = screen.getByRole("button", { name: `${NS}.nextPage` })
+      await waitFor(() => expect(button).toBeEnabled())
+      await userEvent.click(button)
+    }
     await waitFor(() =>
       expect(
         screen.getByText(`${NS}.pageInfo(page=1,lastPage=5)`)

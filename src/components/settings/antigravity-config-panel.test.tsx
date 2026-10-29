@@ -812,8 +812,11 @@ describe("AntigravityConfigPanel", () => {
       expect(String(vi.mocked(toast.error).mock.calls[0]?.[0])).toContain(
         "Google Antigravity is not installed."
       )
-      // Still offering to try again, not stuck in a spinner.
-      expect(screen.getByRole("button", { name: h.start })).toBeEnabled()
+      // Still offering to try again, not stuck in a spinner. The toast goes up
+      // before the render that releases the button.
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: h.start })).toBeEnabled()
+      )
     })
   })
 
@@ -911,7 +914,10 @@ describe("AntigravityConfigPanel", () => {
       expect(String(vi.mocked(toast.error).mock.calls[0]?.[0])).toContain(
         "Google Antigravity is not installed."
       )
-      expect(screen.getByRole("button", { name: s.action })).toBeEnabled()
+      // The toast goes up before the render that releases the button.
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: s.action })).toBeEnabled()
+      )
     })
   })
   /**

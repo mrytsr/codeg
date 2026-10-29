@@ -401,7 +401,7 @@ describe("Pi custom provider models", () => {
     })
     const dialog = await screen.findByRole("dialog")
     for (const id of ["new-model", "old"]) {
-      const row = within(dialog).getByText(id).closest("label")!
+      const row = (await within(dialog).findByText(id)).closest("label")!
       await user.click(within(row).getByRole("checkbox"))
     }
     await user.click(

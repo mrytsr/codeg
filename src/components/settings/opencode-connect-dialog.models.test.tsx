@@ -62,7 +62,7 @@ describe("OpenCodeCustomProviderDialog — the provider's models", () => {
     )
     const dialogs = await screen.findAllByRole("dialog")
     const picker = dialogs[dialogs.length - 1]
-    const kimi = within(picker).getByText("kimi-k3").closest("label")!
+    const kimi = (await within(picker).findByText("kimi-k3")).closest("label")!
     await user.click(within(kimi).getByRole("checkbox"))
     await user.click(
       within(picker).getByRole("button", { name: "Use 2 models" })

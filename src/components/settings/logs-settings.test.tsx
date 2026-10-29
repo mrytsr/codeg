@@ -473,7 +473,7 @@ describe("LogsSettings", () => {
     })
     expect(rafScheduleCount).toBe(1)
 
-    fireEvent.click(screen.getByRole("button", { name: M.pause }))
+    fireEvent.click(await screen.findByRole("button", { name: M.pause }))
     fireEvent.click(screen.getByRole("button", { name: M.resume }))
     await waitFor(() => expect(mockSubAppended).toHaveBeenCalledTimes(2))
 

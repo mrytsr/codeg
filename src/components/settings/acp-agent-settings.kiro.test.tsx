@@ -124,9 +124,13 @@ describe("AcpAgentSettings — the Kiro panel and the enable switch", () => {
       OTHER: "keep",
     })
 
-    await user.click(
-      screen.getByRole("switch", { name: "Kiro CLI enable switch" })
-    )
+    // The switch stays locked until the save lands; a click before then is
+    // dropped.
+    const toggle = screen.getByRole("switch", {
+      name: "Kiro CLI enable switch",
+    })
+    await waitFor(() => expect(toggle).toBeEnabled())
+    await user.click(toggle)
     await waitFor(() => expect(acpUpdateAgentEnv).toHaveBeenCalledTimes(2))
     const [, toggled] = vi.mocked(acpUpdateAgentEnv).mock.calls[1]
     expect(toggled.enabled).toBe(false)

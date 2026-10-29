@@ -78,6 +78,18 @@ function renderWithIntl() {
   )
 }
 
+/**
+ * Waits for the first load to land. Every control is on screen from the first
+ * render, showing the defaults and locked, so finding one says nothing about
+ * the load, and a click on a locked one is dropped. Only the load locks the
+ * switch. The agent list, answered at once here too, lands in the same render.
+ */
+function loaded() {
+  return waitFor(() =>
+    expect(screen.getByLabelText("Enable delegation")).toBeEnabled()
+  )
+}
+
 function settings(
   overrides: Partial<DelegationSettings> = {}
 ): DelegationSettings {
@@ -110,7 +122,8 @@ describe("DelegationSettingsSection", () => {
     mockGetDelegationSettings.mockResolvedValue(settings({ enabled: false }))
     mockSetDelegationSettings.mockImplementation(async (v) => v)
     renderWithIntl()
-    const toggle = await screen.findByLabelText("Enable delegation")
+    await loaded()
+    const toggle = screen.getByLabelText("Enable delegation")
     expect(toggle).toHaveAttribute("data-state", "unchecked")
 
     act(() => delegationHandler?.(settings({ enabled: true, depth_limit: 1 })))
@@ -129,7 +142,8 @@ describe("DelegationSettingsSection", () => {
     mockGetDelegationSettings.mockResolvedValue(settings({ enabled: false }))
     mockSetDelegationSettings.mockImplementation(async (v) => v)
     renderWithIntl()
-    const toggle = await screen.findByLabelText("Enable delegation")
+    await loaded()
+    const toggle = screen.getByLabelText("Enable delegation")
 
     fireEvent.click(toggle)
     await waitFor(() => expect(toggle).toHaveAttribute("data-state", "checked"))
@@ -180,7 +194,7 @@ describe("DelegationSettingsSection", () => {
 
     renderWithIntl()
 
-    await screen.findByLabelText("Enable delegation")
+    await loaded()
     expect(
       screen.queryByText(/will not get the delegation tools/)
     ).not.toBeInTheDocument()
@@ -194,7 +208,7 @@ describe("DelegationSettingsSection", () => {
 
     renderWithIntl()
 
-    await screen.findByLabelText("Enable delegation")
+    await loaded()
     expect(
       screen.queryByText(/will not get the delegation tools/)
     ).not.toBeInTheDocument()
@@ -205,10 +219,9 @@ describe("DelegationSettingsSection", () => {
     mockSetDelegationSettings.mockImplementation(async (next) => next)
 
     renderWithIntl()
+    await loaded()
 
-    const cacheInput = await screen.findByLabelText(
-      "Completed-result cache (MB)"
-    )
+    const cacheInput = screen.getByLabelText("Completed-result cache (MB)")
     fireEvent.change(cacheInput, { target: { value: "0" } })
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
@@ -229,10 +242,9 @@ describe("DelegationSettingsSection", () => {
     mockSetDelegationSettings.mockImplementation(async (next) => next)
 
     renderWithIntl()
+    await loaded()
 
-    const cacheInput = await screen.findByLabelText(
-      "Completed-result cache (MB)"
-    )
+    const cacheInput = screen.getByLabelText("Completed-result cache (MB)")
     fireEvent.change(cacheInput, { target: { value: "" } })
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
@@ -253,8 +265,9 @@ describe("DelegationSettingsSection", () => {
     mockSetDelegationSettings.mockImplementation(async (next) => next)
 
     renderWithIntl()
+    await loaded()
 
-    const depthInput = await screen.findByLabelText("Maximum delegation depth")
+    const depthInput = screen.getByLabelText("Maximum delegation depth")
     fireEvent.change(depthInput, { target: { value: "5" } })
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
@@ -277,10 +290,11 @@ describe("DelegationSettingsSection", () => {
     mockGetDelegationSettings.mockResolvedValue(settings())
 
     renderWithIntl()
+    await loaded()
 
-    const depthInput = (await screen.findByLabelText(
+    const depthInput = screen.getByLabelText(
       "Maximum delegation depth"
-    )) as HTMLInputElement
+    ) as HTMLInputElement
     const enableSwitch = screen.getByLabelText(
       "Enable delegation"
     ) as HTMLButtonElement
@@ -316,7 +330,7 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
     mockGetDelegationSettings.mockResolvedValue(settings({ enabled: false }))
     const user = userEvent.setup()
     renderWithIntl()
-    await screen.findByLabelText("Enable delegation")
+    await loaded()
 
     await user.click(tab(/^Agent defaults/))
     const notice = /Turn it on to edit these defaults/
@@ -334,7 +348,8 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
     mockGetDelegationSettings.mockResolvedValue(settings({ enabled: true }))
     const user = userEvent.setup()
     renderWithIntl()
-    const depth = await screen.findByLabelText("Maximum delegation depth")
+    await loaded()
+    const depth = screen.getByLabelText("Maximum delegation depth")
     expect(dotOn(/^General/)).toBeNull()
 
     fireEvent.change(depth, { target: { value: "4" } })
@@ -360,7 +375,8 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
     mockGetDelegationSettings.mockResolvedValue(settings({ enabled: true }))
     const user = userEvent.setup()
     renderWithIntl()
-    const toggle = await screen.findByLabelText("Enable delegation")
+    await loaded()
+    const toggle = screen.getByLabelText("Enable delegation")
 
     // Switched off but not saved: assistants can still be delegated to.
     fireEvent.click(toggle)
@@ -419,7 +435,8 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
     )
     const user = userEvent.setup()
     renderWithIntl()
-    const depth = await screen.findByLabelText("Maximum delegation depth")
+    await loaded()
+    const depth = screen.getByLabelText("Maximum delegation depth")
     fireEvent.change(depth, { target: { value: "5" } })
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
@@ -455,7 +472,8 @@ describe("DelegationSettingsSection — tabs and the saved record", () => {
     )
     const user = userEvent.setup()
     renderWithIntl()
-    const depth = await screen.findByLabelText("Maximum delegation depth")
+    await loaded()
+    const depth = screen.getByLabelText("Maximum delegation depth")
     fireEvent.change(depth, { target: { value: "3" } })
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 

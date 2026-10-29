@@ -263,8 +263,11 @@ describe("CommitMessageSettingsDialog", () => {
     expect(api.deleteCommitMessageSettings).toHaveBeenCalledWith(FOLDER.id)
     expect(api.setCommitMessageSettings).not.toHaveBeenCalled()
 
-    // Its own settings start from the global ones.
-    await user.click(screen.getByRole("tab", { name: "Custom" }))
+    // Its own settings start from the global ones. The save above locks the
+    // tabs until it lands, and a click on a locked tab is dropped.
+    const own = screen.getByRole("tab", { name: "Custom" })
+    await waitFor(() => expect(own).toBeEnabled())
+    await user.click(own)
     await waitFor(() => expect(trigger("Effort")).toHaveTextContent("Max"))
     expect(trigger("Model")).toHaveTextContent("Model B")
     expect(screen.getByLabelText("Instructions")).toHaveValue(
