@@ -1,8 +1,8 @@
-import { useRef, type ReactNode } from "react"
+import { useLayoutEffect, useRef, type ReactNode } from "react"
 import { render } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { ReplyMotion } from "./reply-motion"
+import { ReplyMotion, takesPendingPlace } from "./reply-motion"
 
 /**
  * jsdom lays nothing out: each element says where it is drawn (`data-x`,
@@ -380,6 +380,43 @@ describe("ReplyMotion", () => {
         </Reply>
       )
       expect(played).toHaveLength(0)
+    } finally {
+      scope.remove()
+    }
+  })
+
+  it("tells what mounts inside the reply taking the pending one's place that it does", () => {
+    // Asked from inside the reply as it mounts, before the reply's own mount
+    // takes the pending reply's layout; a reply after that takes nothing.
+    const scope = document.createElement("div")
+    scope.className = "chat-motion-scope"
+    document.body.append(scope)
+    const told: boolean[] = []
+    function Row() {
+      const ref = useRef<HTMLDivElement>(null)
+      useLayoutEffect(() => {
+        told.push(takesPendingPlace(ref.current!))
+      }, [])
+      return <div ref={ref} />
+    }
+    try {
+      const view = render(
+        <Reply shape="pending" handoff="give">
+          <div data-motion-key="working" data-y="44" />
+        </Reply>,
+        { container: scope }
+      )
+      view.rerender(
+        <Reply shape="reply" key="the-reply" handoff="take">
+          <Row />
+        </Reply>
+      )
+      view.rerender(
+        <Reply shape="reply" key="another" handoff="take">
+          <Row />
+        </Reply>
+      )
+      expect(told).toEqual([true, false])
     } finally {
       scope.remove()
     }

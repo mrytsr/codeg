@@ -1,4 +1,4 @@
-import { type ReactElement } from "react"
+import { StrictMode, type ReactElement } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { describe, expect, it, vi } from "vitest"
@@ -579,12 +579,15 @@ describe("CompletedTurnContent: the turning mark while the agent works", () => {
     expect(queryToggle()).toBeNull()
   })
 
-  it("puts it under the words of a reply that has no step to hang them on", () => {
-    // Prose with no step before it is no list: the words sit under the
-    // header as an answer does, the mark under them, no rail.
+  it("hangs a reply's first words on that rail, the mark under them", () => {
+    // Words with no step before them are a step while they are written, as
+    // the words after a step are: the list that stood under the header takes
+    // them in above its ring.
     const view = renderWithIntl(
       <CompletedTurnContent parts={[]} durationMs={null} completed={false} />
     )
+    const list = view.container.querySelector(".activity-timeline")!
+    const mark = onRail(view.container)!
 
     view.rerender(
       <NextIntlClientProvider locale="en" messages={enMessages}>
@@ -595,15 +598,143 @@ describe("CompletedTurnContent: the turning mark while the agent works", () => {
         />
       </NextIntlClientProvider>
     )
+    expect(view.container.querySelector(".activity-timeline")).toBe(list)
     expect(marks(view.container)).toHaveLength(1)
-    expect(onRail(view.container)).toBeNull()
-    expect(view.container.querySelector(".activity-timeline")).toBeNull()
-    expect(
+    expect(onRail(view.container)).toBe(mark)
+    expect(screen.getAllByText(writing("Let me look."))).toHaveLength(1)
+    const words = screen
+      .getByText(writing("Let me look."))
+      .closest(".activity-timeline > li")
+    expect(words).toHaveAttribute("data-marker", "dot")
+    expect(list.firstElementChild).toBe(words)
+    expect(words!.nextElementSibling).toBe(mark)
+    expect(list).not.toHaveAttribute("aria-hidden")
+    // Still nothing to fold, and words are no step to count.
+    expect(queryToggle()).toBeNull()
+    expect(view.container.querySelector(".activity-capsule")).toHaveTextContent(
+      /^Working$/
+    )
+  })
+
+  it("grows the rail down to the first words of the reply that takes the pending reply's place", () => {
+    // The pending reply stood as that list, its ring alone. The reply in its
+    // place mounts with its first words, and they join the list as words
+    // that came later would; a reply that mounts on its own (opened
+    // mid-stream) draws its rail as it stands. In Strict Mode, as in
+    // development: the effects run over again once the reply has taken the
+    // pending reply's place.
+    const thread = (pending: boolean) => (
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <div className="chat-motion-scope">
+          {pending ? (
+            <CompletedTurnContent
+              key="pending"
+              parts={[]}
+              completed={false}
+              pending
+            />
+          ) : (
+            <CompletedTurnContent
+              key="reply"
+              parts={[{ type: "text", text: "Let me look." }]}
+              durationMs={null}
+              completed={false}
+            />
+          )}
+        </div>
+      </NextIntlClientProvider>
+    )
+    const words = () =>
       screen
         .getByText(writing("Let me look."))
-        .compareDocumentPosition(marks(view.container)[0]!) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
+        .closest(".activity-timeline > li")
+    const view = render(thread(true), { wrapper: StrictMode })
+    view.rerender(thread(false))
+    expect(words()).toHaveAttribute("data-rail-enter")
+    view.unmount()
+
+    render(thread(false), { wrapper: StrictMode })
+    expect(words()).not.toHaveAttribute("data-rail-enter")
+  })
+
+  it("keeps those words where they were written as the first step joins under them", () => {
+    const words: AdaptedContentPart = { type: "text", text: "Let me look." }
+    const view = renderWithIntl(
+      <CompletedTurnContent
+        parts={[words]}
+        durationMs={null}
+        completed={false}
+      />
+    )
+    const row = screen
+      .getByText(writing("Let me look."))
+      .closest(".activity-timeline > li")!
+
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <CompletedTurnContent
+          parts={[
+            words,
+            {
+              type: "tool-call",
+              toolCallId: "call-first",
+              toolName: "Read",
+              input: '{"file_path":"src/next.tsx"}',
+              state: "input-available",
+            },
+          ]}
+          durationMs={null}
+          completed={false}
+        />
+      </NextIntlClientProvider>
+    )
+
+    expect(
+      screen.getByText("Let me look.").closest(".activity-timeline > li")
+    ).toBe(row)
+    const next = screen
+      .getByText("src/next.tsx")
+      .closest(".activity-timeline > li")!
+    expect(row.nextElementSibling).toBe(next)
+    expect(next.nextElementSibling).toBe(onRail(view.container))
+    // Now there is a step to fold.
+    expect(toggle()).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("lifts a reply of words alone off the rail once it is done", () => {
+    const parts: AdaptedContentPart[] = [
+      { type: "text", text: "Just an answer." },
+    ]
+    const view = renderWithIntl(
+      <CompletedTurnContent
+        parts={parts}
+        durationMs={null}
+        completed={false}
+        currentRound
+        roundOpen
+      />
+    )
+    expect(
+      screen.getByText(writing("Just an answer.")).closest(".activity-timeline")
+    ).not.toBeNull()
+
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <CompletedTurnContent
+          parts={parts}
+          durationMs={3_000}
+          completed
+          currentRound
+          roundOpen
+        />
+      </NextIntlClientProvider>
+    )
+    // Under its header as the answer, once, with no rail left over.
+    expect(marks(view.container)).toHaveLength(0)
+    expect(view.container.querySelector(".activity-timeline")).toBeNull()
+    expect(screen.getAllByText("Just an answer.")).toHaveLength(1)
+    expect(screen.getByText("Reply")).toBeInTheDocument()
+    expect(queryToggle()).toBeNull()
   })
 
   it("moves it under the header when the reader folds the reply", () => {
@@ -739,6 +870,33 @@ describe("CompletedTurnContent: the turning mark while the agent works", () => {
 
     expect(marks(container)).toHaveLength(0)
     expect(container.querySelector(".activity-timeline")).toBeNull()
+  })
+
+  it("leaves a reply's first words on the rail while the agent waits on the user, nothing under them", () => {
+    // No ring, and no row to fold steps it does not have.
+    const { container } = renderWithIntl(
+      <ActivityLiveProvider
+        value={{
+          awaitingToolCallId: null,
+          awaitingUser: true,
+          approvals: EMPTY_TOOL_APPROVALS,
+        }}
+      >
+        <CompletedTurnContent
+          parts={[{ type: "text", text: "Let me look." }]}
+          durationMs={null}
+          completed={false}
+        />
+      </ActivityLiveProvider>
+    )
+
+    expect(marks(container)).toHaveLength(0)
+    expect(fold(container)).toBeNull()
+    const words = screen
+      .getByText(writing("Let me look."))
+      .closest(".activity-timeline > li")
+    expect(words).toHaveAttribute("data-marker", "dot")
+    expect([...words!.parentElement!.children]).toEqual([words])
   })
 
   it("stops once the reply is done, the ring giving way to the fold row", () => {

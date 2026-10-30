@@ -2372,8 +2372,9 @@
    stopped. The rows one join touched take their turn top to bottom (the hook
    holds each one's growth back a little longer), so the rail draws down
    through them. The rail up to the header is the list's own and stands as
-   it is. Transform and clip only, so no row changes size under the virtual
-   list. */
+   it is; a reply's first words, joining under it, grow their dot's incoming
+   segment on from it. Transform and clip only, so no row changes size under
+   the virtual list. */
 @keyframes activity-rail-grow {
   from {
     transform: scaleY(0);
@@ -2389,6 +2390,8 @@
 @media (prefers-reduced-motion: no-preference) {
   .activity-item[data-rail-enter]::before,
   .activity-item[data-rail-enter][data-marker="dot"]:not(:first-child)::after,
+  .activity-timeline[data-headed]
+    > .activity-item[data-rail-enter][data-marker="dot"]:first-child::after,
   .activity-item[data-rail-extend]:not(
       [data-rail-enter],
       [data-rail-body]

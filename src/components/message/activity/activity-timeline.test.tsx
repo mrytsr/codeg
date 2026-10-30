@@ -1267,6 +1267,44 @@ describe("activity timeline: where the rail ends", () => {
     expect(first).toHaveAttribute("data-rail-enter")
   })
 
+  it("keeps that list and its ring as the reply's first words join above the ring", async () => {
+    const live = (parts: AdaptedContentPart[]) => (
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <StaticConnectionStoreProvider store={STORE}>
+          <StaticDelegationProvider value={DELEGATION}>
+            <StaticWorkspaceActionsProvider value={WORKSPACE}>
+              <CurrentRound parts={parts} completed={false} />
+            </StaticWorkspaceActionsProvider>
+          </StaticDelegationProvider>
+        </StaticConnectionStoreProvider>
+      </NextIntlClientProvider>
+    )
+    const view = render(live([]))
+    const standing = list()
+    const working = workingOf(standing)!
+
+    view.rerender(live([{ type: "text", text: "Let me look at the page." }]))
+
+    // The words go on the rail as a step would, a dot where the ring was.
+    expect(list()).toBe(standing)
+    expect(workingOf(standing)).toBe(working)
+    const first = standing.firstElementChild!
+    expect(first).toHaveAttribute("data-marker", "dot")
+    expect(first).toHaveTextContent("Let me look at the page.")
+    expect(first.nextElementSibling).toBe(working)
+    expect(standing).not.toHaveAttribute("aria-hidden")
+    // The rail grows on from the header's into the dot, and from the dot
+    // down to the ring.
+    await act(async () => {})
+    expect(first).toHaveAttribute("data-rail-enter")
+    const incoming =
+      '.activity-timeline[data-headed] > .activity-item[data-rail-enter][data-marker="dot"]:first-child::after'
+    expect(globalsDecl(incoming, "animation")).toMatch(/^activity-rail-grow /)
+    expect(globalsDecl(incoming, "animation")).toBe(
+      globalsDecl(".activity-item[data-rail-enter]::before", "animation")
+    )
+  })
+
   it("ends an open group's members on a row that folds the group", () => {
     renderSettled(partsOf(MOCKUP_ASSISTANT_TURN))
     const group = rowOf("Explored")

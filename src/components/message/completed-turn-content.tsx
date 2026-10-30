@@ -204,11 +204,13 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
   // turning ring under it. Until the reply ends there is no telling an aside
   // ("Checking the tests next.") from its closing words; drawn as the answer,
   // the words being written sat under the ring, cut off from the steps they
-  // follow, until the next call pulled them up into the steps. Once the reply
-  // is done its closing prose is lifted out under the steps as the answer.
-  // Folded, there is no rail to put it on: it stays under the header, as the
-  // answer does.
-  const proseOnRail = isStreaming && foldable && open
+  // follow, until the next call pulled them up into the steps. So are a
+  // reply's first words, before it has any step: on the rail under the
+  // header, where they stay as the steps join under them. Once the reply is
+  // done its closing prose is lifted out under the steps as the answer — a
+  // reply of words alone, out under its header. Folded, there is no rail to
+  // put it on: it stays under the header, as the answer does.
+  const proseOnRail = isStreaming && bodyOpen
 
   const bodyId = useId()
   const turnRef = useRef<HTMLDivElement | null>(null)
@@ -239,17 +241,16 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
   // while it waits on the user to answer a permission request — that is the
   // turning ring, under whatever it is writing; otherwise a row that folds
   // the steps away, saying what it folds: `Collapse 14 steps · 3m 34s`. A
-  // reply with nothing in it yet — no step, no words — is that list with its
-  // foot alone: the turning ring hangs under the header on the rail from it,
-  // where the first step will go, and the steps join above it. A live reply
-  // with no foot in view (its steps folded, or words but no step it can
-  // fold) ends on the turning mark under whatever does end it instead.
+  // reply with no step yet ends on the ring too while its agent is at work,
+  // under its first words on the rail — with nothing in it yet, on the rail
+  // from the header alone, where the first step will go; the steps join
+  // above it. It has nothing to fold, so no row once the agent stops. A live
+  // reply with its steps folded ends on the turning mark under whatever does
+  // end it instead.
   const { awaitingUser } = useActivityLive()
   const working = isStreaming && !awaitingUser
-  const unstarted =
-    working && activity.items.length === 0 && !hasVisibleAnswer(split.answer)
   const footShown =
-    bodyOpen && (unstarted || (foldable && activity.items.length > 0))
+    bodyOpen && (working || (foldable && activity.items.length > 0))
   const tActivity = useTranslations("Folder.chat.activity")
   const headerRef = useRef<HTMLDivElement | null>(null)
   const foldBack = useFoldBack()
@@ -317,12 +318,12 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
   }
 
   // One tree for every shape the reply takes, so its header and its steps
-  // stay the same elements as it changes shape: the first step arriving under
-  // prose that had no rail, the reply ending with nothing to fold. A reply
-  // that cannot fold — all process (stopped on a tool call, or ended on a card
-  // that is its answer), or no steps at all — shows its rows as an open fold
-  // does, hung under the header, its answer under them; the header's failure
-  // link looks for its row in here.
+  // stay the same elements as it changes shape: words alone gaining a first
+  // step to fold, the reply ending with nothing to fold. A reply that cannot
+  // fold — all process (stopped on a tool call, or ended on a card that is
+  // its answer), or no steps at all — shows its rows as an open fold does,
+  // hung under the header, its answer under them; the header's failure link
+  // looks for its row in here.
   const answerShown = split.answer.length > 0 && !proseOnRail
   // What moves the layout (see `ReplyMotion`): not the words of the prose
   // being written, which only lengthen it.
@@ -384,7 +385,7 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
               <ActivityParts
                 model={activity}
                 isStreaming={isStreaming}
-                foot={foldable || unstarted ? foot : undefined}
+                foot={foldable || working ? foot : undefined}
                 headed
               />
             </div>

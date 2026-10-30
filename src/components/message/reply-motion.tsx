@@ -54,6 +54,17 @@ function scopeOf(root: Element): Element | null {
   return root.closest(".chat-motion-scope")
 }
 
+/** Whether `element`, mounting now, comes with a reply that takes the pending
+ *  reply's place (`handoff`): what the reply mounts with arrives, as rows that
+ *  join a list do, rather than standing there. Asked from inside the reply as
+ *  it mounts — the reply's own mount, which runs after, takes the pending
+ *  reply's layout and forgets it. */
+export function takesPendingPlace(element: Element): boolean {
+  const scope = scopeOf(element)
+  const left = scope ? handoffs.get(scope) : undefined
+  return left !== undefined && performance.now() - left.at <= HANDOFF_MS
+}
+
 /** Where each keyed element sits now, from the root's top-left corner — as it
  *  is drawn, mid-glide included. */
 function measure(root: HTMLElement): Layout {

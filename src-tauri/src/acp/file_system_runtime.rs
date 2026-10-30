@@ -80,6 +80,8 @@ pub struct FsAccessPolicy {
     /// exist yet reads as empty instead of failing (see [`is_kimi_plan_file`]).
     /// Empty for every other agent, and under `strict`.
     kimi_sessions_roots: Vec<PathBuf>,
+    /// The most text one read may return (see [`read_response_limit`]).
+    read_response_limit: usize,
 }
 
 impl FsAccessPolicy {
@@ -91,6 +93,7 @@ impl FsAccessPolicy {
             read_roots: roots.clone(),
             write_roots: roots,
             kimi_sessions_roots: Vec::new(),
+            read_response_limit: FS_MAX_READ_RESPONSE_BYTES,
         }
     }
 
@@ -100,6 +103,7 @@ impl FsAccessPolicy {
             read_roots: Vec::new(),
             write_roots: Vec::new(),
             kimi_sessions_roots: Vec::new(),
+            read_response_limit: FS_MAX_READ_RESPONSE_BYTES,
         }
     }
 
@@ -128,6 +132,7 @@ impl FsAccessPolicy {
             read_roots: Vec::new(),
             write_roots,
             kimi_sessions_roots: kimi_sessions_roots(agent_type, runtime_env),
+            read_response_limit: read_response_limit(agent_type),
         }
     }
 
@@ -146,9 +151,15 @@ impl FsAccessPolicy {
             None | Some("") | Some("default") => {
                 Self::permissive(workspace_root, agent_type, runtime_env)
             }
-            Some("strict") => Self::strict(workspace_root),
+            // The read limit is about how an agent reads, not where, so it
+            // holds under every policy; the Kimi plan exception is about where.
+            Some("strict") => Self {
+                read_response_limit: read_response_limit(agent_type),
+                ..Self::strict(workspace_root)
+            },
             Some("unrestricted") => Self {
                 kimi_sessions_roots: kimi_sessions_roots(agent_type, runtime_env),
+                read_response_limit: read_response_limit(agent_type),
                 ..Self::unrestricted()
             },
             Some(other) => {
@@ -285,6 +296,24 @@ fn agent_data_roots(agent_type: AgentType, runtime_env: &BTreeMap<String, String
         .iter()
         .filter_map(|slot| resolve_root_slot(slot, runtime_env))
         .collect()
+}
+
+/// The most text one `fs/read_text_file` answer may carry for `agent_type`.
+///
+/// Every agent gets [`FS_MAX_READ_RESPONSE_BYTES`], and a bigger read fails
+/// with a hint to narrow it with `line` / `limit`. Google Antigravity cannot
+/// narrow it: from 1.4.4 its `client_view_file` asks for the whole file and
+/// slices out the requested lines itself, because its output header shows the
+/// file's line count, which an answer does not carry. Under the common limit
+/// even a few lines of a file over 2 MiB would fail to read. Its whole file
+/// may therefore fill the [`FS_MAX_FILE_SIZE_BYTES`] any read is held to. Its
+/// stdio transport takes such an answer as one line: past its buffer limit it
+/// reads the line in pieces instead of refusing it.
+fn read_response_limit(agent_type: AgentType) -> usize {
+    match agent_type {
+        AgentType::Antigravity => usize::try_from(FS_MAX_FILE_SIZE_BYTES).unwrap_or(usize::MAX),
+        _ => FS_MAX_READ_RESPONSE_BYTES,
+    }
 }
 
 /// `<KIMI_CODE_HOME>/sessions` (else `~/.kimi-code/sessions`) for the Kimi Code
@@ -896,8 +925,8 @@ fn agent_root_slots(agent_type: AgentType) -> &'static [RootSlot] {
         // 0.209.1), so its `~/.trae` never needs to be a write root either.
         // Command Code is the same case: codeg's transcript is its history,
         // and its tools never go through `fs/*` (verified against 1.84.0,
-        // 1.86.3, 1.88.0 and 1.88.1). So is MiniMax Code: its tools run
-        // in-process and it sends codeg no `fs/*` or `terminal/*` request
+        // 1.86.3, 1.88.0, 1.88.1 and 1.88.2). So is MiniMax Code: its tools
+        // run in-process and it sends codeg no `fs/*` or `terminal/*` request
         // (verified against 0.7.0).
         AgentType::Custom(_)
         | AgentType::ZCode
@@ -1087,8 +1116,8 @@ fn read_text_file_impl(
     let mut taken = 0usize;
     let mut out = String::with_capacity(
         usize::try_from(metadata.len())
-            .unwrap_or(FS_MAX_READ_RESPONSE_BYTES)
-            .min(FS_MAX_READ_RESPONSE_BYTES),
+            .unwrap_or(policy.read_response_limit)
+            .min(policy.read_response_limit),
     );
     let mut line_buf = String::new();
 
@@ -1108,10 +1137,10 @@ fn read_text_file_impl(
                 }
             }
 
-            if out.len().saturating_add(line_buf.len()) > FS_MAX_READ_RESPONSE_BYTES {
+            if out.len().saturating_add(line_buf.len()) > policy.read_response_limit {
                 return Err(FileSystemRuntimeError::InvalidParams(format!(
                     "read result too large (limit {} bytes). Narrow with line/limit.",
-                    FS_MAX_READ_RESPONSE_BYTES
+                    policy.read_response_limit
                 )));
             }
 
@@ -1367,6 +1396,7 @@ mod tests {
             read_roots: Vec::new(),
             write_roots: vec![canonical_root(workspace)],
             kimi_sessions_roots: Vec::new(),
+            read_response_limit: FS_MAX_READ_RESPONSE_BYTES,
         }
     }
 
@@ -1766,6 +1796,97 @@ mod tests {
 
         let _ = fs::remove_dir_all(workspace);
         let _ = fs::remove_dir_all(kimi_home);
+    }
+
+    /// A file over the 2 MiB most reads may return: 32,000 lines of 103 bytes.
+    fn file_over_the_read_limit(workspace: &Path) -> (PathBuf, String) {
+        let content: String = (1..=32_000)
+            .map(|i| format!("line {i:06} {}\n", "x".repeat(90)))
+            .collect();
+        assert!(content.len() > FS_MAX_READ_RESPONSE_BYTES);
+        let file = workspace.join("big.txt");
+        fs::write(&file, &content).expect("write big file");
+        (file, content)
+    }
+
+    /// Antigravity reads the whole file for every `client_view_file` and slices
+    /// the lines itself (see `read_response_limit`), so its read of a file over
+    /// 2 MiB must succeed, under every policy, up to the file size limit.
+    #[tokio::test(flavor = "current_thread")]
+    async fn antigravity_reads_whole_files_up_to_the_file_size_limit() {
+        let workspace = temp_workspace();
+        let (file, content) = file_over_the_read_limit(&workspace);
+
+        for policy in ["default", "strict", "unrestricted"] {
+            let env = BTreeMap::from([(FS_POLICY_ENV.to_string(), policy.to_string())]);
+            let runtime = FileSystemRuntime::with_policy(FsAccessPolicy::from_env(
+                &workspace,
+                AgentType::Antigravity,
+                &env,
+            ));
+            let response = runtime
+                .read_text_file(ReadTextFileRequest::new("sid", &file))
+                .await
+                .unwrap_or_else(|error| panic!("{policy}: whole-file read failed: {error:?}"));
+            assert!(
+                response.content == content,
+                "{policy}: the read returned other text"
+            );
+        }
+
+        // A file over the size limit still fails.
+        let huge = workspace.join("huge.txt");
+        File::create(&huge)
+            .and_then(|file| file.set_len(FS_MAX_FILE_SIZE_BYTES + 1))
+            .expect("create a file over the size limit");
+        let antigravity = FileSystemRuntime::with_policy(FsAccessPolicy::permissive(
+            &workspace,
+            AgentType::Antigravity,
+            &BTreeMap::new(),
+        ));
+        let message = read_error(&antigravity, &huge).await;
+        assert!(message.contains("file too large"), "{message}");
+
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    /// Every other agent keeps the 2 MiB answer limit: the same whole-file read
+    /// fails with the hint to narrow it, and the narrowed read still works.
+    #[tokio::test(flavor = "current_thread")]
+    async fn other_agents_keep_the_read_limit() {
+        let workspace = temp_workspace();
+        let (file, _) = file_over_the_read_limit(&workspace);
+        let expected = format!("read result too large (limit {FS_MAX_READ_RESPONSE_BYTES} bytes)");
+
+        for agent_type in [
+            AgentType::Codex,
+            AgentType::ClaudeCode,
+            AgentType::CodeBuddy,
+        ] {
+            let runtime = FileSystemRuntime::with_policy(FsAccessPolicy::permissive(
+                &workspace,
+                agent_type,
+                &BTreeMap::new(),
+            ));
+            let message = read_error(&runtime, &file).await;
+            assert!(message.contains(&expected), "{agent_type:?}: {message}");
+
+            let response = runtime
+                .read_text_file(ReadTextFileRequest::new("sid", &file).line(2).limit(1))
+                .await
+                .expect("a narrowed read");
+            assert_eq!(
+                response.content,
+                format!("line 000002 {}\n", "x".repeat(90))
+            );
+        }
+
+        // `strict` without an agent keeps it too.
+        let strict = FileSystemRuntime::with_policy(FsAccessPolicy::strict(&workspace));
+        let message = read_error(&strict, &file).await;
+        assert!(message.contains(&expected), "{message}");
+
+        let _ = fs::remove_dir_all(workspace);
     }
 
     /// `KIMI_CODE_HOME` through a link: Kimi may name the plan by the real
@@ -2448,6 +2569,7 @@ mod tests {
             read_roots: Vec::new(),
             write_roots: vec![canonical_root(&workspace)],
             kimi_sessions_roots: Vec::new(),
+            read_response_limit: FS_MAX_READ_RESPONSE_BYTES,
         });
         assert!(runtime
             .write_text_file(WriteTextFileRequest::new(

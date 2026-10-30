@@ -192,10 +192,9 @@ export function TurningRing({ className }: { className?: string }) {
 }
 
 /** The turning mark on its own, under a live reply whose steps are folded
- *  away, or whose words have no step yet to put them on a rail (see
- *  `TurningRing`): placed for a 1.5rem slot, its centre on the rail's line.
- *  The same mark, for the reply's motion, as the ring at the foot of its
- *  steps. */
+ *  away (see `TurningRing`): placed for a 1.5rem slot, its centre on the
+ *  rail's line. The same mark, for the reply's motion, as the ring at the
+ *  foot of its steps. */
 export function WorkingMark() {
   return (
     <div

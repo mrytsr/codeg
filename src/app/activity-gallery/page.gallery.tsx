@@ -928,7 +928,10 @@ const MARKDOWN_TURN: MessageTurn = {
  * starts over: prose that ends the reply and then turns into a note, a read,
  * commands that gather into a group one by one, an edit. `&interval=` sets the
  * beat in ms, `&beat=` holds it on one beat (`window.__setStreamBeat` moves
- * it).
+ * it). `&lead=prose` opens it on words rather than a thought, `&beats=` ends
+ * it after that many (`&lead=prose&beats=1`: a reply of words alone), and
+ * `&pending=1` draws its beat 0 as the pending reply, which gives way to the
+ * reply as a send's does.
  */
 const STREAM_BEATS: MessageTurn["blocks"][] = [
   [
@@ -968,6 +971,23 @@ const STREAM_BEATS: MessageTurn["blocks"][] = [
 /** Beats the settled reply stays up for before it starts over. */
 const STREAM_SETTLED_BEATS = 3
 
+/** The beats as the page asks for them (see `STREAM_BEATS`). */
+const STREAM = ((): MessageTurn["blocks"][] => {
+  const beats: MessageTurn["blocks"][] =
+    params.get("lead") === "prose"
+      ? [
+          [
+            {
+              type: "text",
+              text: "Looking at the page first, then its styles.",
+            },
+          ],
+          ...STREAM_BEATS.slice(1),
+        ]
+      : STREAM_BEATS
+  return beats.slice(0, Number(params.get("beats") ?? beats.length))
+})()
+
 function StreamScenario() {
   const interval = Number(params.get("interval") ?? 1400)
   const held = params.get("beat")
@@ -978,15 +998,14 @@ function StreamScenario() {
     if (held) return
     const id = window.setInterval(
       () =>
-        setBeat((b) =>
-          b >= STREAM_BEATS.length + STREAM_SETTLED_BEATS ? 1 : b + 1
-        ),
+        setBeat((b) => (b >= STREAM.length + STREAM_SETTLED_BEATS ? 1 : b + 1)),
       interval
     )
     return () => window.clearInterval(id)
   }, [held, interval])
+  const pending = params.get("pending") === "1" && beat === 0
   const scenario = useMemo<Scenario>(() => {
-    const blocks = STREAM_BEATS.slice(0, beat).flat()
+    const blocks = STREAM.slice(0, beat).flat()
     const answered = new Set(
       blocks.flatMap((b) =>
         b.type === "tool_result" && b.tool_use_id ? [b.tool_use_id] : []
@@ -1002,7 +1021,7 @@ function StreamScenario() {
         duration_ms: 21000,
         blocks,
       },
-      live: beat <= STREAM_BEATS.length,
+      live: beat <= STREAM.length,
       inProgress: blocks.flatMap((b) =>
         b.type === "tool_use" && b.tool_use_id && !answered.has(b.tool_use_id)
           ? [b.tool_use_id]
@@ -1010,7 +1029,14 @@ function StreamScenario() {
       ),
     }
   }, [beat])
-  return <ScenarioView scenario={scenario} />
+  // Two replies, as in the thread: the pending one goes, the reply comes.
+  return (
+    <ScenarioView
+      key={pending ? "pending" : "reply"}
+      scenario={scenario}
+      pending={pending}
+    />
+  )
 }
 
 /**
@@ -1314,7 +1340,14 @@ const SCENARIOS: Scenario[] = [
   { id: "markdown", title: "Markdown", turn: MARKDOWN_TURN },
 ]
 
-function ScenarioView({ scenario }: { scenario: Scenario }) {
+function ScenarioView({
+  scenario,
+  pending = false,
+}: {
+  scenario: Scenario
+  /** Drawn as the pending reply (see `CompletedTurnContent`). */
+  pending?: boolean
+}) {
   const [roundOpen, setRoundOpen] = useState(true)
   const adapted = useMemo(
     () =>
@@ -1349,6 +1382,7 @@ function ScenarioView({ scenario }: { scenario: Scenario }) {
               currentRound
               roundOpen={roundOpen}
               onRoundOpenChange={setRoundOpen}
+              pending={pending}
             />
           </MessageContent>
         </Message>

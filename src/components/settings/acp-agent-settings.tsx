@@ -662,6 +662,41 @@ export function setHostToolsAgentMode(
   })
 }
 
+/**
+ * How Claude Code shows its thinking. Claude Code asks the API for
+ * `display: "updates"` by default, so a thinking block carries only the notes
+ * Claude writes between tool calls; `summarized` adds summaries of the
+ * reasoning itself. Display decides what comes back, not what is billed.
+ *
+ * claude-agent-acp (0.99.0 and later) reads this variable from ITS OWN
+ * environment, so it belongs in `env_json`, which is the adapter's launch env.
+ * The native settings.json `env` reaches only the Claude Code process the
+ * adapter starts, where the variable does nothing. An older adapter ignores it.
+ */
+const CLAUDE_THINKING_DISPLAY_ENV = "CLAUDE_CODE_THINKING_DISPLAY"
+const CLAUDE_THINKING_DISPLAY_SUMMARIZED = "summarized"
+
+/** Whether this agent's env draft asks Claude Code for thinking summaries. */
+export function claudeThinkingSummariesEnabled(envText: string): boolean {
+  return (
+    parseEnvText(envText)[CLAUDE_THINKING_DISPLAY_ENV] ===
+    CLAUDE_THINKING_DISPLAY_SUMMARIZED
+  )
+}
+
+/** Turn thinking summaries on, or remove the key so Claude Code's own default
+ *  applies again. */
+export function setClaudeThinkingSummaries(
+  envText: string,
+  enabled: boolean
+): string {
+  return patchEnvText(envText, {
+    [CLAUDE_THINKING_DISPLAY_ENV]: enabled
+      ? CLAUDE_THINKING_DISPLAY_SUMMARIZED
+      : undefined,
+  })
+}
+
 interface ImportantEnvKeys {
   apiBaseUrl: string[]
   apiKey: string[]
@@ -8965,6 +9000,33 @@ export function AcpAgentSettings() {
                       aria-label={t("hostTools.label")}
                     />
                   </div>
+                  {selectedAgent.agent_type === "claude_code" && (
+                    <div className="flex items-start justify-between gap-3 rounded-md border bg-muted/10 p-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium">
+                          {t("claude.thinkingSummaries")}
+                        </label>
+                        <p className="text-2xs text-muted-foreground">
+                          {t("claude.thinkingSummariesHint")}
+                        </p>
+                      </div>
+                      <Switch
+                        checked={claudeThinkingSummariesEnabled(
+                          selectedDraft.envText
+                        )}
+                        onCheckedChange={(checked) => {
+                          updateSelectedDraft((current) => ({
+                            ...current,
+                            envText: setClaudeThinkingSummaries(
+                              current.envText,
+                              checked
+                            ),
+                          }))
+                        }}
+                        aria-label={t("claude.thinkingSummaries")}
+                      />
+                    </div>
+                  )}
                   <div className="flex justify-end">
                     <Button
                       size="sm"
