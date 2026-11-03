@@ -382,6 +382,10 @@
     "giteaDescription": "Gerencie contas do Gitea (e Forgejo) para autenticação. Os tokens são armazenados localmente.",
     "giteaTokenHint": "Crie um token de acesso com os escopos write:repository, write:issue e read:user em Gitea → Settings → Applications.",
     "giteaNoAccounts": "Ainda não há conta do Gitea",
+    "cnbTitle": "Contas CNB",
+    "cnbDescription": "Gerencie contas CNB (cnb.cool) para autenticação. Os tokens são armazenados localmente.",
+    "cnbTokenHint": "Crie um token de acesso em CNB → Configurações pessoais → Tokens de acesso com os escopos account-profile:r, repo-issue:rw, repo-pr:rw, repo-notes:rw e repo-code:rw. Sem account-profile:r, o CNB não informa a qual usuário o token pertence e a conta não pode ser adicionada.",
+    "cnbNoAccounts": "Ainda não há conta CNB",
     "noAccounts": "Nenhuma conta do GitHub configurada.",
     "addAccount": "Adicionar conta",
     "serverUrl": "URL do servidor",
@@ -763,6 +767,12 @@
     "emptyNoAgent": "Nenhum agente disponível.",
     "configManagement": "Gerenciamento de configuração",
     "envVars": "Variáveis de ambiente",
+    "systemInstructions": {
+      "label": "Instruções do sistema",
+      "hint": "Configure as instruções globais do sistema para este agente e salve-as no arquivo global de instruções.",
+      "placeholder": "Insira instruções globais do sistema no formato Markdown, como definições de funções, diretrizes e padrões de programação...",
+      "filePath": "Caminho do arquivo"
+    },
     "hostTools": {
       "label": "Deixar o agente cuidar de arquivos e comandos",
       "description": "O codeg deixa de atender o acesso a arquivos e os comandos de terminal, de modo que o agente os executa no próprio processo — onde o sandbox e as regras de permissão dele realmente se aplicam. A delegação a outros agentes também é desativada, pois levaria o mesmo trabalho de volta ao codeg. O codeg não adiciona sandbox algum, então ative isto apenas se o agente tiver um configurado."
@@ -890,6 +900,7 @@
       }
     },
     "actions": {
+      "saveSystemInstructions": "Salvar instruções do sistema",
       "dragSort": "Arraste para reordenar",
       "dragSortAgent": "Arraste para reordenar {name}",
       "refreshCheck": "Atualizar verificação",
@@ -1417,7 +1428,7 @@
         "hints": {
           "subagentDepth": "Quantos níveis os subagentes podem aninhar (experimental.subagent_depth). 1 impede um subagente de iniciar outro.",
           "preserveRecentTokens": "Orçamento de tokens dos turnos recentes mantidos literalmente após uma compactação (compaction.keep.tokens). Padrão 15000.",
-          "reserved": "Janela deixada livre para que uma compactação nunca estoure o contexto (compaction.buffer). Sem valor, reserva 15% da janela, no mínimo 16K.",
+          "reserved": "Espaço deixado livre na janela de contexto antes da compactação automática (compaction.buffer): um número de tokens como <code>20000</code> ou uma parte da janela de <code>1%</code> a <code>99%</code>, como <code>20%</code>. Sem valor, <code>15%</code> da janela ficam livres, no mínimo <code>16000</code> tokens.",
           "maxLines": "Saída maior que isso vai para o disco e é substituída por uma prévia. Padrão 2000.",
           "maxBytes": "Saída maior que isso vai para o disco e é substituída por uma prévia. Padrão 51200."
         }
@@ -1615,6 +1626,8 @@
       "authRecoveredStructured": "auth.json é inválido; redefinido para configuração estruturada"
     },
     "toasts": {
+      "systemInstructionsSaved": "Instruções do sistema salvas",
+      "saveSystemInstructionsFailed": "Falha ao salvar as instruções do sistema",
       "agentActionCompleted": "{name} {action} concluído",
       "agentActionFailed": "{name} {action} falhou",
       "localVersion": "Versão local: {version}",
@@ -4008,15 +4021,6 @@
           "webSearches": "{count, plural, one {# busca na web} other {# buscas na web}}",
           "memories": "{count, plural, one {# consulta à memória} other {# consultas à memória}}"
         },
-        "verb": {
-          "read": "ler",
-          "search": "grep",
-          "glob": "glob",
-          "list": "listar",
-          "fetch": "obter",
-          "webSearch": "web",
-          "memory": "memória"
-        },
         "stepVerb": {
           "read": "Leu",
           "search": "Buscou",
@@ -4597,6 +4601,8 @@
       "questionRequestDesc": "Quando um agente faz uma pergunta",
       "userPromptSent": "Mensagem do usuário",
       "userPromptSentDesc": "Quando você envia uma mensagem (o texto da mensagem é incluído na notificação)",
+      "topLevelOnly": "Apenas sessões principais",
+      "topLevelOnlyDesc": "Subsessões iniciadas por delegação não enviam Turno concluído nem Erro do agente; o agente que delegou informa o resultado quando terminar. Suas solicitações de permissão e perguntas continuam sendo notificadas, porque o agente está esperando por você. Vale para canais e webhooks.",
       "saved": "Filtro de eventos atualizado.",
       "saveFailed": "Falha ao salvar o filtro de eventos.",
       "loadFailed": "Falha ao carregar as configurações.",
@@ -6253,6 +6259,10 @@
     "actionStart": "Iniciar",
     "actionSchedule": "Agendar",
     "actionCancel": "Cancelar",
+    "actionCancelTask": "Cancelar tarefa",
+    "actionRespond": "Responder",
+    "actionRespondHint": "Abre a conversa para tratar o pedido de permissão, a pergunta ou o plano do agente",
+    "awaitingInputHint": "O agente está pausado aguardando você tratar um pedido de permissão, responder a uma pergunta ou revisar um plano. Responda na conversa e a tarefa continua sozinha.",
     "actionRetry": "Tentar novamente",
     "actionRequeue": "Reenfileirar",
     "actionViewSession": "Ver conversa",
@@ -7029,7 +7039,7 @@
     "noRemote": "Esta pasta não tem um remoto reconhecível (origin)",
     "errors": {
       "noAccount": "Nenhuma conta {provider} configurada para {host}. Adicione uma em Configurações → Controle de versão para carregar este repositório.",
-      "unsupportedHost": "O painel do repositório só oferece suporte a GitHub, GitLab e Gitea, e {host} não é reconhecido como nenhum deles. Se for uma instância auto-hospedada do GitHub Enterprise, GitLab, Gitea ou Forgejo, adicione uma conta para ela em Configurações → Controle de versão.",
+      "unsupportedHost": "O painel do repositório só oferece suporte a GitHub, GitLab, Gitea e CNB, e {host} não é reconhecido como nenhum deles. Se for uma instância auto-hospedada do GitHub Enterprise, GitLab, Gitea, Forgejo ou CNB, adicione uma conta para ela em Configurações → Controle de versão.",
       "wrongForge": "{host} é um {provider}, não a forja com que estava classificado. A detecção foi corrigida — recarregue para tentar novamente."
     },
     "addAccount": "Adicionar uma conta",

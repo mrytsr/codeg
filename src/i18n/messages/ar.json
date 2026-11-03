@@ -382,6 +382,10 @@
     "giteaDescription": "إدارة حسابات Gitea (و Forgejo) للمصادقة. يتم تخزين الرموز محليًا.",
     "giteaTokenHint": "أنشئ رمز وصول بنطاقات write:repository و write:issue و read:user من Gitea → Settings → Applications.",
     "giteaNoAccounts": "لا يوجد حساب Gitea بعد",
+    "cnbTitle": "حسابات CNB",
+    "cnbDescription": "أدر حسابات CNB (cnb.cool) للمصادقة. تُخزَّن الرموز محليًا.",
+    "cnbTokenHint": "أنشئ رمز وصول من CNB ← الإعدادات الشخصية ← رموز الوصول مع النطاقات account-profile:r و repo-issue:rw و repo-pr:rw و repo-notes:rw و repo-code:rw. بدون account-profile:r لن يخبر CNB عن المستخدم الذي يخصه الرمز، ولن يمكن إضافة الحساب.",
+    "cnbNoAccounts": "لا يوجد حساب CNB بعد",
     "noAccounts": "لا توجد حسابات GitHub مكوّنة.",
     "addAccount": "إضافة حساب",
     "serverUrl": "عنوان الخادم",
@@ -763,6 +767,12 @@
     "emptyNoAgent": "لا يوجد وكيل متاح.",
     "configManagement": "إدارة الإعدادات",
     "envVars": "متغيرات البيئة",
+    "systemInstructions": {
+      "label": "تعليمات النظام",
+      "hint": "اضبط تعليمات النظام العامة لهذا الوكيل واحفظها في ملف تعليماته العام.",
+      "placeholder": "أدخل تعليمات النظام العامة بتنسيق Markdown، مثل تعريف الدور والإرشادات ومعايير البرمجة...",
+      "filePath": "مسار الملف"
+    },
     "hostTools": {
       "label": "دع الوكيل يتولى الملفات والأوامر بنفسه",
       "description": "يتوقف codeg عن تنفيذ الوصول إلى الملفات وأوامر الطرفية، فينفّذها الوكيل داخل عمليته الخاصة — وعندها فقط تُطبَّق البيئة المعزولة وقواعد الأذونات الخاصة به. كما يُعطَّل التفويض إلى وكلاء آخرين، لأنه سيعيد العمل نفسه عبر codeg. لا يضيف codeg بيئة معزولة من عنده، لذا فعّل هذا الخيار فقط إذا كان الوكيل قد أُعِدّت له واحدة."
@@ -890,6 +900,7 @@
       }
     },
     "actions": {
+      "saveSystemInstructions": "حفظ تعليمات النظام",
       "dragSort": "اسحب لإعادة الترتيب",
       "dragSortAgent": "اسحب لإعادة ترتيب {name}",
       "refreshCheck": "تحديث الفحص",
@@ -1417,7 +1428,7 @@
         "hints": {
           "subagentDepth": "عدد مستويات تداخل الوكلاء الفرعيين (experimental.subagent_depth). القيمة 1 تمنع الوكيل الفرعي من تشغيل وكيل آخر.",
           "preserveRecentTokens": "ميزانية الرموز للأدوار الأخيرة التي تُحفظ حرفيًا بعد الضغط (compaction.keep.tokens). الافتراضي 15000.",
-          "reserved": "نافذة تُترك فارغة كي لا يتجاوز الضغط السياق أبدًا (compaction.buffer). عند عدم التعيين تُحجز 15% من النافذة، بحد أدنى 16K.",
+          "reserved": "المساحة التي تُترك فارغة في نافذة السياق قبل الضغط التلقائي (compaction.buffer): عدد رموز مثل <code>20000</code>، أو نسبة من النافذة من <code>1%</code> إلى <code>99%</code> مثل <code>20%</code>. عند عدم التعيين تبقى <code>15%</code> من النافذة فارغة، بحد أدنى <code>16000</code> رمز.",
           "maxLines": "المخرجات الأطول من ذلك تُكتب إلى القرص ويُستبدل بها معاينة. الافتراضي 2000.",
           "maxBytes": "المخرجات الأكبر من ذلك تُكتب إلى القرص ويُستبدل بها معاينة. الافتراضي 51200."
         }
@@ -1615,6 +1626,8 @@
       "authRecoveredStructured": "ملف auth.json غير صالح؛ تمت إعادة التعيين إلى إعداد مُهيكل"
     },
     "toasts": {
+      "systemInstructionsSaved": "تم حفظ تعليمات النظام",
+      "saveSystemInstructionsFailed": "تعذر حفظ تعليمات النظام",
       "agentActionCompleted": "اكتمل {action} لـ {name}",
       "agentActionFailed": "فشل {action} لـ {name}",
       "localVersion": "الإصدار المحلي: {version}",
@@ -4008,15 +4021,6 @@
           "webSearches": "{count, plural, zero {لا عمليات بحث على الويب} one {بحث واحد على الويب} two {بحثان على الويب} few {# عمليات بحث على الويب} many {# عملية بحث على الويب} other {# عملية بحث على الويب}}",
           "memories": "{count, plural, zero {لا استرجاع للذاكرة} one {استرجاع واحد للذاكرة} two {استرجاعان للذاكرة} few {# عمليات استرجاع للذاكرة} many {# عملية استرجاع للذاكرة} other {# عملية استرجاع للذاكرة}}"
         },
-        "verb": {
-          "read": "قراءة",
-          "search": "بحث",
-          "glob": "مطابقة",
-          "list": "سرد",
-          "fetch": "جلب",
-          "webSearch": "ويب",
-          "memory": "ذاكرة"
-        },
         "stepVerb": {
           "read": "قرأ",
           "search": "بحث",
@@ -4597,6 +4601,8 @@
       "questionRequestDesc": "عندما يطرح أحد الوكلاء سؤالاً عليك",
       "userPromptSent": "رسالة المستخدم",
       "userPromptSentDesc": "عند إرسالك رسالة — يُضمَّن نص الرسالة في الإشعار",
+      "topLevelOnly": "الجلسات الرئيسية فقط",
+      "topLevelOnlyDesc": "لا ترسل الجلسات الفرعية التي بدأت بالتفويض «اكتمال الدور» أو «خطأ الوكيل»، ويُبلغ الوكيل المفوِّض بنتيجتها عند انتهائه. تظل طلبات الإذن والأسئلة من الجلسات الفرعية تُرسل إشعارًا لأن الوكيل ينتظرك. ينطبق على القنوات وWebhooks.",
       "saved": "تم تحديث فلتر الأحداث.",
       "saveFailed": "فشل حفظ فلتر الأحداث.",
       "loadFailed": "فشل تحميل الإعدادات.",
@@ -6253,6 +6259,10 @@
     "actionStart": "بدء",
     "actionSchedule": "جدولة",
     "actionCancel": "إلغاء",
+    "actionCancelTask": "إلغاء المهمة",
+    "actionRespond": "الرد",
+    "actionRespondHint": "افتح المحادثة للتعامل مع طلب الإذن أو السؤال أو الخطة من الوكيل",
+    "awaitingInputHint": "توقف الوكيل مؤقتًا بانتظار أن تتعامل مع طلب إذن أو تجيب عن سؤال أو تراجع خطة. رُدّ في المحادثة وستتابع المهمة تلقائيًا.",
     "actionRetry": "إعادة المحاولة",
     "actionRequeue": "إعادة الإدراج",
     "actionViewSession": "عرض المحادثة",
@@ -7029,7 +7039,7 @@
     "noRemote": "لا يحتوي هذا المجلد على remote معروف (origin)",
     "errors": {
       "noAccount": "لا يوجد حساب {provider} مُهيّأ للمضيف {host}. أضف حسابًا من الإعدادات ← التحكم بالإصدارات لتحميل هذا المستودع.",
-      "unsupportedHost": "لوحة المستودع تدعم GitHub و GitLab و Gitea فقط، و{host} لا يُعرَف كأي منها. إذا كان مثيلًا مستضافًا ذاتيًا من GitHub Enterprise أو GitLab أو Gitea أو Forgejo، فأضف له حسابًا من الإعدادات ← التحكم بالإصدارات.",
+      "unsupportedHost": "لوحة المستودع تدعم GitHub و GitLab و Gitea و CNB فقط، و{host} لا يُعرَف كأي منها. إذا كان مثيلًا مستضافًا ذاتيًا من GitHub Enterprise أو GitLab أو Gitea أو Forgejo أو CNB، فأضف له حسابًا من الإعدادات ← التحكم بالإصدارات.",
       "wrongForge": "{host} هو {provider}، وليس المنصة التي كان مصنّفًا ضمنها. تم تصحيح الاكتشاف — أعد التحميل للمحاولة مجددًا."
     },
     "addAccount": "إضافة حساب",

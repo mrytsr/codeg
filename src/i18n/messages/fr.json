@@ -382,6 +382,10 @@
     "giteaDescription": "Gérez les comptes Gitea (et Forgejo) pour l'authentification. Les jetons sont stockés localement.",
     "giteaTokenHint": "Créez un jeton d'accès avec les portées write:repository, write:issue et read:user dans Gitea → Settings → Applications.",
     "giteaNoAccounts": "Aucun compte Gitea pour l'instant",
+    "cnbTitle": "Comptes CNB",
+    "cnbDescription": "Gérez les comptes CNB (cnb.cool) pour l'authentification. Les jetons sont stockés localement.",
+    "cnbTokenHint": "Créez un jeton d'accès dans CNB → Paramètres personnels → Jetons d'accès avec les portées account-profile:r, repo-issue:rw, repo-pr:rw, repo-notes:rw et repo-code:rw. Sans account-profile:r, CNB n'indique pas à quel utilisateur appartient le jeton et le compte ne peut pas être ajouté.",
+    "cnbNoAccounts": "Aucun compte CNB pour l'instant",
     "noAccounts": "Aucun compte GitHub configuré.",
     "addAccount": "Ajouter un compte",
     "serverUrl": "URL du serveur",
@@ -763,6 +767,12 @@
     "emptyNoAgent": "Aucun agent disponible.",
     "configManagement": "Gestion de configuration",
     "envVars": "Variables d'environnement",
+    "systemInstructions": {
+      "label": "Instructions système",
+      "hint": "Configurez les instructions système globales de cet agent et enregistrez-les dans son fichier global d’instructions.",
+      "placeholder": "Saisissez les instructions système globales au format Markdown, par exemple des définitions de rôles, des directives et des normes de programmation...",
+      "filePath": "Chemin du fichier"
+    },
     "hostTools": {
       "label": "Laisser l'agent gérer les fichiers et les commandes",
       "description": "codeg cesse d'assurer l'accès aux fichiers et les commandes de terminal : l'agent les exécute dans son propre processus, là où son bac à sable et ses règles d'autorisation s'appliquent réellement. La délégation à d'autres agents est également désactivée, car elle ferait repasser le même travail par codeg. codeg n'ajoute aucun bac à sable, n'activez donc ceci que si l'agent en a un configuré."
@@ -890,6 +900,7 @@
       }
     },
     "actions": {
+      "saveSystemInstructions": "Enregistrer les instructions système",
       "dragSort": "Glisser pour réordonner",
       "dragSortAgent": "Glisser pour réordonner {name}",
       "refreshCheck": "Actualiser la vérification",
@@ -1417,7 +1428,7 @@
         "hints": {
           "subagentDepth": "Profondeur d’imbrication maximale des sous-agents (experimental.subagent_depth). 1 empêche un sous-agent d’en lancer un autre.",
           "preserveRecentTokens": "Budget de jetons des derniers tours conservés tels quels après une compaction (compaction.keep.tokens). Par défaut 15000.",
-          "reserved": "Fenêtre laissée libre pour qu’une compaction ne déborde jamais du contexte (compaction.buffer). Sans valeur, 15 % de la fenêtre sont réservés, au moins 16K.",
+          "reserved": "Espace laissé libre dans la fenêtre de contexte avant la compaction automatique (compaction.buffer) : un nombre de tokens comme <code>20000</code>, ou une part de la fenêtre de <code>1%</code> à <code>99%</code>, par exemple <code>20%</code>. Sans valeur, <code>15%</code> de la fenêtre restent libres, au moins <code>16000</code> tokens.",
           "maxLines": "Une sortie plus longue est écrite sur disque et remplacée par un aperçu. Par défaut 2000.",
           "maxBytes": "Une sortie plus grosse est écrite sur disque et remplacée par un aperçu. Par défaut 51200."
         }
@@ -1615,6 +1626,8 @@
       "authRecoveredStructured": "auth.json est invalide ; réinitialisé en configuration structurée"
     },
     "toasts": {
+      "systemInstructionsSaved": "Instructions système enregistrées",
+      "saveSystemInstructionsFailed": "Échec de l’enregistrement des instructions système",
       "agentActionCompleted": "{name} {action} terminé",
       "agentActionFailed": "{name} {action} échoué",
       "localVersion": "Version locale : {version}",
@@ -4008,15 +4021,6 @@
           "webSearches": "{count, plural, one {# recherche web} other {# recherches web}}",
           "memories": "{count, plural, one {# consultation de mémoire} other {# consultations de mémoire}}"
         },
-        "verb": {
-          "read": "lire",
-          "search": "grep",
-          "glob": "glob",
-          "list": "liste",
-          "fetch": "récup.",
-          "webSearch": "web",
-          "memory": "mémoire"
-        },
         "stepVerb": {
           "read": "Lu",
           "search": "Recherché",
@@ -4597,6 +4601,8 @@
       "questionRequestDesc": "Quand un agent vous pose une question",
       "userPromptSent": "Message de l'utilisateur",
       "userPromptSentDesc": "Lorsque vous envoyez un message (le texte du message est inclus dans la notification)",
+      "topLevelOnly": "Sessions principales uniquement",
+      "topLevelOnlyDesc": "Les sous-sessions lancées par délégation n'envoient ni « Tour terminé » ni « Erreur de l'agent » ; l'agent qui a délégué rend compte du résultat quand il a fini. Leurs demandes d'autorisation et questions restent notifiées, car l'agent vous attend. S'applique aux canaux et aux webhooks.",
       "saved": "Filtre d'événements mis à jour.",
       "saveFailed": "Échec de l'enregistrement du filtre d'événements.",
       "loadFailed": "Échec du chargement des paramètres.",
@@ -6253,6 +6259,10 @@
     "actionStart": "Démarrer",
     "actionSchedule": "Planifier",
     "actionCancel": "Annuler",
+    "actionCancelTask": "Annuler la tâche",
+    "actionRespond": "Répondre",
+    "actionRespondHint": "Ouvre la conversation pour traiter la demande d'autorisation, la question ou le plan de l'agent",
+    "awaitingInputHint": "L'agent est en pause et attend que vous traitiez une demande d'autorisation, répondiez à une question ou examiniez un plan. Répondez dans la conversation et la tâche reprendra d'elle-même.",
     "actionRetry": "Réessayer",
     "actionRequeue": "Remettre en file",
     "actionViewSession": "Voir la conversation",
@@ -7029,7 +7039,7 @@
     "noRemote": "Ce dossier n'a pas de remote reconnaissable (origin)",
     "errors": {
       "noAccount": "Aucun compte {provider} n'est configuré pour {host}. Ajoutez-en un dans Paramètres → Contrôle de version pour charger ce dépôt.",
-      "unsupportedHost": "Le panneau du dépôt ne prend en charge que GitHub, GitLab et Gitea, et {host} n'est reconnu comme aucun d'entre eux. S'il s'agit d'une instance auto-hébergée de GitHub Enterprise, GitLab, Gitea ou Forgejo, ajoutez-y un compte dans Paramètres → Contrôle de version.",
+      "unsupportedHost": "Le panneau du dépôt ne prend en charge que GitHub, GitLab, Gitea et CNB, et {host} n'est reconnu comme aucun d'entre eux. S'il s'agit d'une instance auto-hébergée de GitHub Enterprise, GitLab, Gitea, Forgejo ou CNB, ajoutez-y un compte dans Paramètres → Contrôle de version.",
       "wrongForge": "{host} est un {provider}, et non la forge sous laquelle il était classé. La détection a été corrigée — rechargez pour réessayer."
     },
     "addAccount": "Ajouter un compte",

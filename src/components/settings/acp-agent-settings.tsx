@@ -249,6 +249,11 @@ type ClaudeAuthMode = (typeof CLAUDE_AUTH_MODES)[number]
 interface AgentDraft {
   enabled: boolean
   envText: string
+  systemInstructionsText: string
+  /** The instructions file's content when the draft was built (or last
+   *  saved): the shared save sends the text only when it differs, so an
+   *  untouched draft never writes the agent's file. */
+  systemInstructionsBaseline: string
   configText: string
   apiBaseUrl: string
   apiKey: string
@@ -525,6 +530,28 @@ function parseEnvText(envText: string): Record<string, string> {
     map[key] = value
   }
   return map
+}
+
+/**
+ * Re-read on refresh: the instructions file is often edited outside codeg (by
+ * hand, or by the agent's own CLI), so an untouched editor shows what is on
+ * disk now instead of the text it was first loaded with.
+ */
+export function rebaseSystemInstructionsDraft(
+  draft: AgentDraft,
+  agent: AcpAgentInfo
+): AgentDraft {
+  // An unsaved edit is kept as typed; an untouched editor follows the file.
+  if (draft.systemInstructionsText !== draft.systemInstructionsBaseline) {
+    return draft
+  }
+  const next = agent.system_instructions_content ?? ""
+  if (next === draft.systemInstructionsBaseline) return draft
+  return {
+    ...draft,
+    systemInstructionsText: next,
+    systemInstructionsBaseline: next,
+  }
 }
 
 /**
@@ -1781,26 +1808,6 @@ const OPENCODE_PROVIDER_NPM_OPTIONS = [
     label: "@ai-sdk/deepseek",
   },
 ] as const
-
-function buildOpenCodeModelOptions(
-  config: OpenCodeConfigView | null
-): OpenCodeModelOptionGroup[] {
-  if (!config) return []
-  const groups: OpenCodeModelOptionGroup[] = []
-  for (const providerId of config.providerIds) {
-    const provider = config.providers[providerId]
-    if (!provider || provider.modelIds.length === 0) continue
-    groups.push({
-      providerId,
-      label: provider.name || providerId,
-      models: provider.modelIds.map((modelId) => ({
-        value: `${providerId}/${modelId}`,
-        label: modelId,
-      })),
-    })
-  }
-  return groups
-}
 
 function OpenCodeModelCombobox({
   value,
@@ -3841,6 +3848,8 @@ function buildAgentDraft(agent: AcpAgentInfo): AgentDraft {
   return {
     enabled: agent.enabled,
     envText,
+    systemInstructionsText: agent.system_instructions_content ?? "",
+    systemInstructionsBaseline: agent.system_instructions_content ?? "",
     configText,
     apiBaseUrl:
       agent.agent_type === "hermes"
@@ -4906,6 +4915,9 @@ export function AcpAgentSettings() {
   const [modelProviderSources, setModelProviderSources] = useState<
     Partial<Record<AgentType, boolean>>
   >({})
+  const [savingInstructions, setSavingInstructions] = useState<
+    Partial<Record<AgentType, boolean>>
+  >({})
   const [modelProviders, setModelProviders] = useState<ModelProviderInfo[]>([])
   const [uninstallConfirmAgent, setUninstallConfirmAgent] =
     useState<AcpAgentInfo | null>(null)
@@ -5086,6 +5098,13 @@ export function AcpAgentSettings() {
           const existing = updated[agent.agent_type]
           if (agent.agent_type === "deepseek" && existing) {
             updated[agent.agent_type] = rebaseDeepSeekDraft(existing, agent)
+          }
+          const current = updated[agent.agent_type]
+          if (current) {
+            updated[agent.agent_type] = rebaseSystemInstructionsDraft(
+              current,
+              agent
+            )
           }
         }
         return updated
@@ -5445,11 +5464,69 @@ export function AcpAgentSettings() {
     [reportAffectedSessions]
   )
 
+  // The file now holds `content`: an editor still showing it is clean again,
+  // and one the user kept typing in stays dirty against the new baseline.
+  const markSystemInstructionsSaved = useCallback(
+    (agentType: AgentType, content: string) => {
+      setDrafts((prev) => {
+        const draft = prev[agentType]
+        if (!draft || draft.systemInstructionsBaseline === content) return prev
+        return {
+          ...prev,
+          [agentType]: { ...draft, systemInstructionsBaseline: content },
+        }
+      })
+    },
+    []
+  )
+
+  const persistSystemInstructions = useCallback(
+    async (
+      agentType: AgentType,
+      content: string,
+      filePath: string | null | undefined
+    ) => {
+      setSavingInstructions((prev) => ({ ...prev, [agentType]: true }))
+      try {
+        const affected = await acpUpdateAgentConfig(agentType, {
+          system_instructions_content: content,
+          system_instructions_file_path: filePath ?? null,
+        })
+        reportAffectedSessions(affected)
+        setAgents((prev) =>
+          prev.map((agent) =>
+            agent.agent_type === agentType
+              ? {
+                  ...agent,
+                  system_instructions_content: content,
+                }
+              : agent
+          )
+        )
+        markSystemInstructionsSaved(agentType, content)
+        toast.success(t("toasts.systemInstructionsSaved"), {
+          description: t("toasts.configSavedHint"),
+        })
+      } catch (err) {
+        console.error("[Settings] save system instructions failed:", err)
+        const message = toErrorMessage(err)
+        toast.error(t("toasts.saveSystemInstructionsFailed"), {
+          description: message,
+        })
+      } finally {
+        setSavingInstructions((prev) => ({ ...prev, [agentType]: false }))
+      }
+    },
+    [markSystemInstructionsSaved, reportAffectedSessions, t]
+  )
+
   const persistConfig = useCallback(
     async (
       agentType: AgentType,
       configText: string,
       options?: {
+        systemInstructionsText?: string
+        systemInstructionsFilePath?: string
         codexAuthJsonText?: string
         codexConfigTomlText?: string
         codexConfigTomlBaseline?: string
@@ -5501,6 +5578,12 @@ export function AcpAgentSettings() {
       try {
         const affected = await acpUpdateAgentConfig(agentType, {
           config_json: configForPersist || null,
+          system_instructions_content:
+            typeof options?.systemInstructionsText === "string"
+              ? options.systemInstructionsText
+              : null,
+          system_instructions_file_path:
+            options?.systemInstructionsFilePath ?? null,
           codex_auth_json:
             typeof codexAuthJsonText === "string" ? codexAuthJsonText : null,
           codex_config_toml:
@@ -5529,6 +5612,10 @@ export function AcpAgentSettings() {
               ? {
                   ...agent,
                   config_json: normalizedConfig || null,
+                  system_instructions_content:
+                    typeof options?.systemInstructionsText === "string"
+                      ? options.systemInstructionsText
+                      : agent.system_instructions_content,
                   codex_auth_json:
                     typeof codexAuthJsonText === "string"
                       ? codexAuthJsonText
@@ -5571,11 +5658,14 @@ export function AcpAgentSettings() {
               : agent
           )
         )
+        if (typeof options?.systemInstructionsText === "string") {
+          markSystemInstructionsSaved(agentType, options.systemInstructionsText)
+        }
       } finally {
         setSavingConfig((prev) => ({ ...prev, [agentType]: false }))
       }
     },
-    [agents, reportAffectedSessions]
+    [agents, markSystemInstructionsSaved, reportAffectedSessions]
   )
 
   // After a Grok save, re-read the merged on-disk config and rebuild the Grok
@@ -6352,6 +6442,9 @@ export function AcpAgentSettings() {
   const selectedIsSavingConfig = selectedAgent
     ? Boolean(savingConfig[selectedAgent.agent_type])
     : false
+  const selectedIsSavingInstructions = selectedAgent
+    ? Boolean(savingInstructions[selectedAgent.agent_type])
+    : false
 
   const selectedAgentKind = selectedAgent?.agent_type ?? null
   // A custom agent is only offered the shared provider source when its stored
@@ -6541,16 +6634,14 @@ export function AcpAgentSettings() {
     openCodeIntegrations,
     openCodeCatalog,
   ])
-  const openCodeModelOptions = useMemo(() => {
-    const catalogGroups = buildConnectedModelOptions({
-      connected: openCodeConnected,
-      catalog: openCodeCatalog,
-    })
-    // Fall back to the config-derived groups before the catalog has loaded.
-    return catalogGroups.length > 0
-      ? catalogGroups
-      : buildOpenCodeModelOptions(selectedOpenCodeConfig)
-  }, [openCodeConnected, openCodeCatalog, selectedOpenCodeConfig])
+  const openCodeModelOptions = useMemo(
+    () =>
+      buildConnectedModelOptions({
+        connected: openCodeConnected,
+        catalog: openCodeCatalog,
+      }),
+    [openCodeConnected, openCodeCatalog]
+  )
   const openCodeCatalogIds = useMemo(
     () => new Set(openCodeCatalog.map((p) => p.id)),
     [openCodeCatalog]
@@ -9066,6 +9157,64 @@ export function AcpAgentSettings() {
                     </Button>
                   </div>
                 </div>
+
+                {selectedAgent.system_instructions_file_path && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-medium">
+                        {t("systemInstructions.label")}
+                      </label>
+                      <span
+                        className="text-2xs text-muted-foreground truncate max-w-[65%]"
+                        title={selectedAgent.system_instructions_file_path}
+                      >
+                        {selectedAgent.system_instructions_file_path}
+                      </span>
+                    </div>
+                    <p className="text-2xs text-muted-foreground">
+                      {t("systemInstructions.hint")}
+                    </p>
+                    <div className="relative group">
+                      <Textarea
+                        value={selectedDraft.systemInstructionsText}
+                        onChange={(event) => {
+                          updateSelectedDraft((current) => ({
+                            ...current,
+                            systemInstructionsText: event.target.value,
+                          }))
+                        }}
+                        placeholder={t("systemInstructions.placeholder")}
+                        className="min-h-32 font-mono text-xs"
+                        disabled={selectedIsSavingInstructions}
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        disabled={selectedIsSavingInstructions}
+                        onClick={() =>
+                          persistSystemInstructions(
+                            selectedAgent.agent_type,
+                            selectedDraft.systemInstructionsText,
+                            selectedAgent.system_instructions_file_path
+                          )
+                        }
+                      >
+                        {selectedIsSavingInstructions ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            {t("actions.saving")}
+                          </>
+                        ) : (
+                          <>
+                            <Save className="h-3.5 w-3.5" />
+                            {t("actions.saveSystemInstructions")}
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 {selectedAgentUsesSourceCardPanel ? (
                   <>
@@ -16810,7 +16959,21 @@ supports_websockets = true`}
                             .then(() =>
                               persistConfig(
                                 selectedAgent.agent_type,
-                                configToSave
+                                configToSave,
+                                {
+                                  // Only an edited text: an untouched one would
+                                  // write a stale copy over the file (or create
+                                  // an empty one).
+                                  systemInstructionsText:
+                                    selectedAgent.system_instructions_file_path &&
+                                    selectedDraft.systemInstructionsText !==
+                                      selectedDraft.systemInstructionsBaseline
+                                      ? selectedDraft.systemInstructionsText
+                                      : undefined,
+                                  systemInstructionsFilePath:
+                                    selectedAgent.system_instructions_file_path ??
+                                    undefined,
+                                }
                               )
                             )
                             .then(async () => {

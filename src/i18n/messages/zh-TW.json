@@ -382,6 +382,10 @@
     "giteaDescription": "管理用於身份驗證的 Gitea（及 Forgejo）帳號。權杖儲存在本機。",
     "giteaTokenHint": "在 Gitea → Settings → Applications 中建立具備 write:repository、write:issue 與 read:user 權限的存取權杖。",
     "giteaNoAccounts": "還沒有 Gitea 帳號",
+    "cnbTitle": "CNB 帳號",
+    "cnbDescription": "管理用於身分驗證的 CNB（cnb.cool）帳號。權杖儲存在本機。",
+    "cnbTokenHint": "在 CNB 的「個人設定 → 存取權杖」中建立存取權杖，勾選 account-profile:r、repo-issue:rw、repo-pr:rw、repo-notes:rw 與 repo-code:rw 權限。缺少 account-profile:r 時，CNB 不會回傳權杖所屬使用者，帳號將無法新增。",
+    "cnbNoAccounts": "還沒有 CNB 帳號",
     "noAccounts": "尚未設定 GitHub 帳號。",
     "addAccount": "新增帳號",
     "serverUrl": "伺服器網址",
@@ -763,6 +767,12 @@
     "emptyNoAgent": "暫無可用 Agent。",
     "configManagement": "配置管理",
     "envVars": "環境變數",
+    "systemInstructions": {
+      "label": "系統級提示詞",
+      "hint": "設定此 Agent 的全域系統級提示詞，並儲存至其全域指令檔案。",
+      "placeholder": "輸入全域系統提示詞（Markdown 格式，例如角色定義、行為準則、程式碼規範等）...",
+      "filePath": "檔案路徑"
+    },
     "hostTools": {
       "label": "由 Agent 自行處理檔案與指令",
       "description": "codeg 不再代為提供檔案存取與終端指令，改由 Agent 在自己的行程中執行——只有這樣它自帶的沙箱與權限規則才會生效。同時會關閉向其他 Agent 委派，否則同樣的操作又會繞回 codeg 執行。codeg 本身不提供沙箱，因此請僅在 Agent 已設定沙箱時開啟。"
@@ -890,6 +900,7 @@
       }
     },
     "actions": {
+      "saveSystemInstructions": "儲存系統級提示詞",
       "dragSort": "拖拽排序",
       "dragSortAgent": "拖拽排序 {name}",
       "refreshCheck": "刷新檢測",
@@ -1417,7 +1428,7 @@
         "hints": {
           "subagentDepth": "子智慧體最多可以巢狀幾層（experimental.subagent_depth）。填 1 表示子智慧體不能再啟動子智慧體。",
           "preserveRecentTokens": "壓縮後仍按原文保留的最近對話 token 預算（compaction.keep.tokens）。預設 15000。",
-          "reserved": "為壓縮本身預留的視窗，避免壓縮過程撐爆上下文（compaction.buffer）。不填則預留視窗的 15%，至少 16K。",
+          "reserved": "自動壓縮前在上下文視窗裡預留的空間（compaction.buffer）：填 token 數，如 <code>20000</code>；或填視窗占比，<code>1%</code> 到 <code>99%</code>，如 <code>20%</code>。不填則預留視窗的 <code>15%</code>，至少 <code>16000</code> 個 token。",
           "maxLines": "超過該行數的輸出會落檔，只在對話裡留一段預覽。預設 2000。",
           "maxBytes": "超過該位元組數的輸出會落檔，只在對話裡留一段預覽。預設 51200。"
         }
@@ -1615,6 +1626,8 @@
       "authRecoveredStructured": "auth.json 格式無效，已重置為結構化配置"
     },
     "toasts": {
+      "systemInstructionsSaved": "系統級提示詞已儲存",
+      "saveSystemInstructionsFailed": "儲存系統級提示詞失敗",
       "agentActionCompleted": "{name}{action}完成",
       "agentActionFailed": "{name}{action}失敗",
       "localVersion": "本地版本：{version}",
@@ -4008,15 +4021,6 @@
           "webSearches": "{count} 次網路搜尋",
           "memories": "{count} 次記憶檢索"
         },
-        "verb": {
-          "read": "讀取",
-          "search": "搜尋",
-          "glob": "比對",
-          "list": "列出",
-          "fetch": "擷取",
-          "webSearch": "網路搜尋",
-          "memory": "回憶"
-        },
         "stepVerb": {
           "read": "讀取",
           "search": "搜尋",
@@ -4597,6 +4601,8 @@
       "questionRequestDesc": "當智慧代理向你提問時",
       "userPromptSent": "使用者訊息",
       "userPromptSentDesc": "當你傳送訊息時——通知中會包含訊息內容",
+      "topLevelOnly": "僅頂層對話",
+      "topLevelOnlyDesc": "委派出來的子對話不再推送「對話完成」和「代理錯誤」，結果由發起委派的智慧代理在它完成時一併回報。子對話的權限請求和提問照常通知，因為智慧代理在等你處理。對頻道和 Webhook 都生效。",
       "saved": "事件篩選已更新。",
       "saveFailed": "儲存事件篩選失敗。",
       "loadFailed": "載入設定失敗。",
@@ -6253,6 +6259,10 @@
     "actionStart": "開始",
     "actionSchedule": "定時執行",
     "actionCancel": "取消",
+    "actionCancelTask": "取消任務",
+    "actionRespond": "去回應",
+    "actionRespondHint": "開啟會話，處理 agent 的權限請求、提問或計畫核准",
+    "awaitingInputHint": "agent 已暫停，在等你處理權限請求、回答提問或核准計畫。在會話裡回應後，任務會自動繼續執行。",
     "actionRetry": "重試",
     "actionRequeue": "重新排隊",
     "actionViewSession": "檢視會話",
@@ -7029,7 +7039,7 @@
     "noRemote": "該資料夾沒有可識別的程式碼託管遠端（origin）",
     "errors": {
       "noAccount": "尚未為 {host} 設定 {provider} 帳號。請先在「設定 → 版本控制」中新增，才能載入這個儲存庫。",
-      "unsupportedHost": "儲存庫面板目前僅支援 GitHub、GitLab 與 Gitea，而 {host} 不屬於其中任何一種。如果它是自架的 GitHub Enterprise、GitLab、Gitea 或 Forgejo 執行個體，請在「設定 → 版本控制」中為它新增帳號。",
+      "unsupportedHost": "儲存庫面板目前僅支援 GitHub、GitLab、Gitea 與 CNB，而 {host} 不屬於其中任何一種。如果它是自架的 GitHub Enterprise、GitLab、Gitea、Forgejo 或 CNB 執行個體，請在「設定 → 版本控制」中為它新增帳號。",
       "wrongForge": "{host} 實際上是 {provider}，先前被誤判為另一種程式碼託管服務。已自動更正，請重新載入。"
     },
     "addAccount": "新增帳號",
