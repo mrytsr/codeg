@@ -18,6 +18,11 @@ use super::{auth, handlers, ws};
 use crate::app_state::AppState;
 use tracing::Instrument;
 
+/// Composer voice input sends base64 WAV (whisper path) or PCM chunks
+/// (streaming path) inside JSON. A few seconds of 16 kHz mono is well under
+/// this; larger payloads are the caller's bug, not a body-limit problem.
+const VOICE_BODY_LIMIT: usize = 12 * 1024 * 1024;
+
 /// Token-only authentication: the desktop app's web service and the tests.
 pub fn build_router(
     state: Arc<AppState>,
@@ -555,6 +560,48 @@ pub fn build_router_with_srn(
             post(handlers::folders::list_directory_with_files),
         )
         .route("/get_file_tree", post(handlers::folders::get_file_tree))
+        // Composer voice input: local whisper.cpp STT. The WAV arrives as
+        // base64 inside JSON, so this route gets a larger body limit than the
+        // router's default (2 MiB) — see the layer on the two routes below.
+        .route(
+            "/voice_transcribe",
+            post(handlers::voice::voice_transcribe)
+                .layer(DefaultBodyLimit::max(VOICE_BODY_LIMIT)),
+        )
+        .route("/voice_status", post(handlers::voice::voice_status))
+        // First-use decoder + model download. Long running with progress
+        // events; no request body, so the default limit is fine.
+        .route(
+            "/voice_ensure_ready",
+            post(handlers::voice::voice_ensure_ready),
+        )
+        // Streaming zh+en STT: PCM chunks arrive as base64 inside JSON at the
+        // composer's ~10 chunks/s cadence; the whisper body limit headroom is
+        // plenty. Partials stream back on `voice://partial`.
+        .route(
+            "/voice_stream_status",
+            post(handlers::voice_stream::voice_stream_status),
+        )
+        .route(
+            "/voice_stream_prepare",
+            post(handlers::voice_stream::voice_stream_prepare),
+        )
+        .route(
+            "/voice_stream_start",
+            post(handlers::voice_stream::voice_stream_start),
+        )
+        .route(
+            "/voice_stream_chunk",
+            post(handlers::voice_stream::voice_stream_chunk),
+        )
+        .route(
+            "/voice_stream_stop",
+            post(handlers::voice_stream::voice_stream_stop),
+        )
+        .route(
+            "/voice_stream_cancel",
+            post(handlers::voice_stream::voice_stream_cancel),
+        )
         .route(
             "/list_workspace_files",
             post(handlers::folders::list_workspace_files),

@@ -207,6 +207,13 @@ bzip2 = "0.5"
 zstd = "0.13"
 tar = "0.4"
 zip = "2"
+# Streaming composer voice input (zh+en): `commands/voice_stream.rs` runs a
+# sherpa-onnx OnlineRecognizer over PCM chunks from the renderer. 2.x links
+# the prebuilt native libs statically; its build script downloads the archive
+# for the host target (~117 MB, cached in the user cache dir). Point
+# SHERPA_ONNX_ARCHIVE_DIR at a directory holding that archive for offline
+# builds. PoC + latency measurements: tools/voice-stream-poc.
+sherpa-onnx = "2.0.1"
 regex = "1"
 portable-pty = "0.8"
 urlencoding = "2"

@@ -177,6 +177,7 @@ import { useReferenceSearch } from "@/components/chat/composer/use-reference-sea
 import { useComposerMentionLabels } from "@/components/chat/composer/use-composer-mention-labels"
 import { ComposerAddMenu } from "@/components/chat/composer/composer-add-menu"
 import { ComposerImageThumbnails } from "@/components/chat/composer/composer-image-thumbnails"
+import { ComposerVoiceButton } from "@/components/chat/composer/composer-voice-button"
 import { useComposerAttachments } from "@/components/chat/composer/use-composer-attachments"
 import { useComposerShortcuts } from "@/components/chat/composer/use-composer-shortcuts"
 
@@ -1709,6 +1710,108 @@ export function MessageInput({
     }
   }, [attachmentTabId])
 
+  // Voice input. While a local streaming session records, each partial is
+  // spliced into the composer in place so the text reads like typing; the
+  // final transcript swaps that preview segment for the confirmed text. Both
+  // insert LITERAL text: `insertContent` treats a plain string as HTML, so
+  // everything routes through the same inline-content encoder the page-attach
+  // path uses.
+  const voicePreviewRef = useRef<{
+    from: number
+    to: number
+    /** Exact literal text occupying [from, to) — any separator excluded. */
+    text: string
+  } | null>(null)
+  const voiceSessionRef = useRef<string | null>(null)
+
+  const handleVoicePartial = useCallback((text: string, sessionId: string) => {
+    const editor = editorRef.current?.getEditor()
+    if (!editor) return
+    const trimmed = text.trim()
+    if (!trimmed) return
+    // A new session starts a fresh preview: a leftover segment from an
+    // earlier round (cancelled recording, failed stop) must not swallow it.
+    if (voiceSessionRef.current !== sessionId) {
+      voiceSessionRef.current = sessionId
+      voicePreviewRef.current = null
+    }
+    const preview = voicePreviewRef.current
+    const previewValid =
+      preview != null &&
+      preview.to <= editor.state.doc.content.size &&
+      editor.state.doc.textBetween(
+        preview.from,
+        preview.to,
+        "\n",
+        composerLeafText
+      ) === preview.text
+    if (previewValid && preview) {
+      editor
+        .chain()
+        .deleteRange({ from: preview.from, to: preview.to })
+        .insertContentAt(preview.from, textToInlineContent(trimmed))
+        .run()
+    } else {
+      const needsSpace = editorRef.current?.isEmpty() === false
+      editor
+        .chain()
+        .focus("end")
+        .insertContent(
+          textToInlineContent(`${needsSpace ? " " : ""}${trimmed}`)
+        )
+        .run()
+    }
+    // `insertContent(At)` parks the selection at the end of what it inserted,
+    // and the encoder's position span equals the source string's length (each
+    // \n becomes one hardBreak = one position), so [to - len, to] is exactly
+    // the inserted text.
+    const to = editor.state.selection.to
+    voicePreviewRef.current = { from: to - trimmed.length, to, text: trimmed }
+    setComposerEmpty(false)
+  }, [])
+
+  const handleVoiceTranscript = useCallback((text: string) => {
+    const trimmed = text.trim()
+    const editor = editorRef.current?.getEditor()
+    const preview = voicePreviewRef.current
+    // The round is over either way; the next one starts a fresh preview.
+    voicePreviewRef.current = null
+    voiceSessionRef.current = null
+    if (!editor) return
+    const previewValid =
+      preview != null &&
+      preview.to <= editor.state.doc.content.size &&
+      editor.state.doc.textBetween(
+        preview.from,
+        preview.to,
+        "\n",
+        composerLeafText
+      ) === preview.text
+    if (previewValid && preview) {
+      if (!trimmed) {
+        // Confirmed text vanished (recognition gave nothing): drop the
+        // preview rather than leave unconfirmed partial text behind.
+        editor.chain().deleteRange({ from: preview.from, to: preview.to }).run()
+        return
+      }
+      editor
+        .chain()
+        .deleteRange({ from: preview.from, to: preview.to })
+        .insertContentAt(preview.from, textToInlineContent(trimmed))
+        .run()
+      setComposerEmpty(false)
+      return
+    }
+    if (!trimmed) return
+    const needsSpace = editorRef.current?.isEmpty() === false
+    editor
+      .chain()
+      .focus("end")
+      .insertContent(textToInlineContent(`${needsSpace ? " " : ""}${trimmed}`))
+      .run()
+    setComposerEmpty(false)
+  }, [])
+
   const buildDraft = useCallback((): PromptDraft | null => {
     const editor = editorRef.current?.getEditor()
     // Authoritative prefix normalization at the send boundary. A skill / expert
@@ -2578,6 +2681,11 @@ export function MessageInput({
                       {inlineSelectorItems}
                     </div>
                   )}
+                  <ComposerVoiceButton
+                    disabled={disabled}
+                    onTranscript={handleVoiceTranscript}
+                    onPartial={handleVoicePartial}
+                  />
                   {hasAnySelector && (
                     <div
                       className={cn(

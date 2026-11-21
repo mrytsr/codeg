@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "externalBin": [],
+    "macOS": {
+      "entitlements": "macos/voice-input.entitlements.plist",
+      "files": {
+        "MacOS/codeg-mcp": "binaries/macos-release/codeg-mcp",
+        "MacOS/codeg-cli": "binaries/macos-release/codeg-cli"
+      }
+    }
+  }
+}

@@ -65,6 +65,14 @@ jobs:
         # repo-wide typecheck in `pnpm build` never sees our entry point.
         run: pnpm browser:agent:types
 
+      - name: Release workflow regression tests
+        # scripts/server-release.test.mjs walks the release workflow's YAML
+        # with node:test and re-runs its shell snippets against fixtures: the
+        # sherpa-onnx cache/export wiring the voice build scripts read, and
+        # the macOS microphone entitlement/signing matrix that only a real
+        # macOS runner could otherwise check.
+        run: node --test scripts/server-release.test.mjs
+
       - name: Unit tests (vitest)
         run: pnpm test
 
@@ -124,6 +132,44 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
           shared-key: test-${{ matrix.os }}-${{ matrix.mode }}
+
+      - name: Resolve sherpa-onnx native archive (voice_stream)
+        # `commands/voice_stream.rs` compiles sherpa-onnx, whose build script
+        # wants the prebuilt native archive for the build target. Resolve the
+        # archive name for the host and export the cache dir; the two steps
+        # below restore it from cache or download once (~120 MB). Keep the
+        # version in lockstep with the `sherpa-onnx` pin in
+        # src-tauri/Cargo.toml — the archive name carries the version, so a
+        # bump needs this map updated.
+        shell: bash
+        run: |
+          case "$RUNNER_OS/$RUNNER_ARCH" in
+            Linux/X64)     A=sherpa-onnx-v2.0.1-linux-x64-static-lib.tar.bz2 ;;
+            Linux/ARM64)   A=sherpa-onnx-v2.0.1-linux-aarch64-static-lib.tar.bz2 ;;
+            macOS/X64)     A=sherpa-onnx-v2.0.1-osx-x64-static-lib.tar.bz2 ;;
+            macOS/ARM64)   A=sherpa-onnx-v2.0.1-osx-arm64-static-lib.tar.bz2 ;;
+            Windows/X64)   A=sherpa-onnx-v2.0.1-win-x64-static-MT-Release-lib.tar.bz2 ;;
+            Windows/ARM64) A=sherpa-onnx-v2.0.1-win-arm64-static-MT-Release-lib.tar.bz2 ;;
+            *) echo "FATAL: no sherpa-onnx archive for $RUNNER_OS/$RUNNER_ARCH" >&2; exit 1 ;;
+          esac
+          printf 'SHERPA_ARCHIVE_NAME=%s\n' "$A" >> "$GITHUB_ENV"
+          printf 'SHERPA_ONNX_ARCHIVE_DIR=%s\n' "$RUNNER_TEMP/sherpa-onnx" >> "$GITHUB_ENV"
+
+      - name: Cache sherpa-onnx native archive
+        id: sherpa_archive
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SHERPA_ONNX_ARCHIVE_DIR }}
+          key: ${{ env.SHERPA_ARCHIVE_NAME }}
+
+      - name: Download sherpa-onnx native archive on cache miss
+        if: steps.sherpa_archive.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p "$SHERPA_ONNX_ARCHIVE_DIR"
+          curl -fL --retry 3 --retry-delay 5 \
+            -o "$SHERPA_ONNX_ARCHIVE_DIR/$SHERPA_ARCHIVE_NAME" \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/$SHERPA_ARCHIVE_NAME"
 
       - name: Install Linux desktop dependencies
         # Only the Linux desktop build needs webkit/appindicator. Windows

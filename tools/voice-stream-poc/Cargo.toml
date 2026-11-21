@@ -1,0 +1,15 @@
+[package]
+name = "voice-stream-poc"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone on purpose: this crate is a throwaway validation harness and must
+# not be pulled into `src-tauri`'s build graph or the desktop/server features.
+[workspace]
+
+[dependencies]
+# 2.x links the prebuilt native sherpa-onnx libraries statically; its build
+# script downloads the archive for the host target. See README for the offline
+# / CI override.
+sherpa-onnx = "2.0.1"

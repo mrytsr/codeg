@@ -132,7 +132,9 @@ mod tauri_app {
         session_info as session_info_commands,
         system_settings, terminal as terminal_commands,
         token_usage as token_usage_commands,
-        version_control, windows, work_task as work_task_commands,
+        version_control, voice as voice_commands,
+        voice_stream as voice_stream_commands,
+        windows, work_task as work_task_commands,
         workspace_state as workspace_state_commands, workspace_windows,
     };
     use crate::terminal::manager::TerminalManager;
@@ -2504,6 +2506,17 @@ mod tauri_app {
                 web::get_web_service_config,
                 web::update_web_service_config,
                 web::probe_web_service_port,
+                // Composer voice input: local whisper.cpp STT + readiness probe.
+                voice_commands::voice_transcribe,
+                voice_commands::voice_ensure_ready,
+                voice_commands::voice_status,
+                // Streaming zh+en voice input (sherpa-onnx).
+                voice_stream_commands::voice_stream_prepare,
+                voice_stream_commands::voice_stream_start,
+                voice_stream_commands::voice_stream_chunk,
+                voice_stream_commands::voice_stream_stop,
+                voice_stream_commands::voice_stream_status,
+                voice_stream_commands::voice_stream_cancel,
             ])
             .build(context)
             .expect("error while building tauri application")

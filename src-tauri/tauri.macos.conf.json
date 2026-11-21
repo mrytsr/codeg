@@ -3,6 +3,7 @@
   "bundle": {
     "externalBin": ["binaries/codeg-mcp", "binaries/codeg-cli"],
     "macOS": {
+      "infoPlist": "Info.plist",
       "files": {
         "Helpers/codeg-computer-helper.app": "binaries/codeg-computer-helper.app"
       }

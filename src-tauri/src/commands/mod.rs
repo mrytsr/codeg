@@ -102,6 +102,13 @@ pub mod terminal;
 pub mod token_usage;
 pub mod turn_window;
 pub mod version_control;
+/// Local whisper.cpp speech-to-text for the composer's voice button (both
+/// runtimes: the Tauri command and the Axum handler share `_core`).
+pub mod voice;
+/// Streaming zh+en speech-to-text (sherpa-onnx): partial transcripts while
+/// the user speaks, for locales that would otherwise wait on the full
+/// whisper recording. Same `_core` sharing as `voice`.
+pub mod voice_stream;
 #[cfg(feature = "tauri-runtime")]
 pub mod windows;
 pub mod work_task;

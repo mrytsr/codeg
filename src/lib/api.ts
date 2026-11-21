@@ -4567,6 +4567,185 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
   return btoa(binary)
 }
 
+// ── Composer voice input (local whisper.cpp) ──────────────────────────
+//
+// The renderer captures 16 kHz mono PCM and wraps it in a WAV itself. The
+// backend only persists those bytes and runs the local decoder — no audio
+// goes to any third-party service. `voice_ensure_ready` installs the decoder
+// and model on first use (no terminal command), and `voice://prepare` streams
+// progress. `needsManualInstall` is true only where no prebuilt decoder
+// exists, so the UI can explain that case without leaving a dead button.
+
+export interface VoiceTranscribeResult {
+  text: string
+  engine: string
+  model: string
+}
+
+export interface VoiceStatus {
+  available: boolean
+  binary: string | null
+  model: string | null
+  reason: string | null
+  needsManualInstall: boolean
+}
+
+/** Wire format of `VoicePrepareProgress` in `src-tauri/src/commands/voice.rs`.
+ *  Stages are snake_case there because Rust serializes the enum that way. */
+export interface VoicePrepareProgress {
+  stage:
+    | "downloading_binary"
+    | "downloading_model"
+    | "extracting"
+    | "downloading_stream_model"
+    | "loading_model"
+    | "done"
+  /** -1 when the server did not send a content length. */
+  percent: number
+  message: string
+}
+
+export const VOICE_PREPARE_EVENT = "voice://prepare"
+
+export async function transcribeVoice(
+  wav: Uint8Array,
+  language: string
+): Promise<VoiceTranscribeResult> {
+  return getTransport().call("voice_transcribe", {
+    dataBase64: arrayBufferToBase64(
+      wav.buffer.slice(
+        wav.byteOffset,
+        wav.byteOffset + wav.byteLength
+      ) as ArrayBuffer
+    ),
+    language,
+  })
+}
+
+/** Download + extract the local decoder and model if they are not installed
+ *  yet. Idempotent; the backend emits `voice://prepare` while it works.
+ *  A full model download can take minutes, so the default web-call timeout
+ *  is explicitly raised above the backend's own 15-minute ceiling. */
+export async function ensureVoiceReady(): Promise<VoiceStatus> {
+  return getTransport().call(
+    "voice_ensure_ready",
+    {},
+    { timeoutMs: 16 * 60_000 }
+  )
+}
+
+export async function getVoiceStatus(): Promise<VoiceStatus> {
+  return getTransport().call("voice_status", {})
+}
+
+/** Subscribe to first-run decoder download progress. Unsubscribe on unmount. */
+export async function listenVoicePrepare(
+  handler: (progress: VoicePrepareProgress) => void
+): Promise<() => void> {
+  return getTransport().subscribe<VoicePrepareProgress>(
+    VOICE_PREPARE_EVENT,
+    handler
+  )
+}
+
+// ── Streaming composer voice input (sherpa-onnx, zh+en) ───────────────
+//
+// The streaming engine (src-tauri/src/commands/voice_stream.rs) keeps one
+// `OnlineRecognizer` per process and one session per recording. The renderer
+// ships ~100 ms PCM16 chunks from the same recorder the whisper path uses;
+// partial transcripts come back live on `voice://partial` and the full text
+// is the return value of `voice_stream_stop`.
+
+export interface VoiceStreamStatus {
+  /** Model files installed; the recognizer may still need its first load. */
+  available: boolean
+  /** Recognizer already loaded — `startVoiceStream` is instant when true. */
+  loaded: boolean
+  modelDir: string | null
+  reason: string | null
+}
+
+export interface VoiceStreamStartResult {
+  sessionId: string
+}
+
+export interface VoiceStreamChunkResult {
+  /** Transcript so far; also broadcast on `voice://partial`. */
+  partial: string
+}
+
+export interface VoiceStreamFinal {
+  sessionId: string
+  text: string
+}
+
+export interface VoiceStreamCancelResult {
+  cancelled: boolean
+}
+
+/** Wire format of `VoicePartialEvent` in `commands/voice_stream.rs`. */
+export interface VoicePartialEvent {
+  sessionId: string
+  text: string
+  isFinal: boolean
+}
+
+export const VOICE_PARTIAL_EVENT = "voice://partial"
+
+export async function getVoiceStreamStatus(): Promise<VoiceStreamStatus> {
+  return getTransport().call("voice_stream_status", {})
+}
+
+/** Download (first use) + load the streaming model. Idempotent; progress
+ *  rides the shared `voice://prepare` topic, so a cold download can take
+ *  minutes and gets the same raised timeout as the whisper prepare. */
+export async function prepareVoiceStream(): Promise<VoiceStreamStatus> {
+  return getTransport().call(
+    "voice_stream_prepare",
+    {},
+    { timeoutMs: 16 * 60_000 }
+  )
+}
+
+export async function startVoiceStream(): Promise<VoiceStreamStartResult> {
+  return getTransport().call("voice_stream_start", {})
+}
+
+/** Upload one ~100 ms PCM16 chunk. Ordered by the caller; partials arrive
+ *  via `voice://partial` while the user keeps talking. */
+export async function sendVoiceStreamChunk(
+  sessionId: string,
+  pcm16Base64: string
+): Promise<VoiceStreamChunkResult> {
+  return getTransport().call("voice_stream_chunk", {
+    sessionId,
+    pcm16Base64,
+  })
+}
+
+export async function stopVoiceStream(
+  sessionId: string
+): Promise<VoiceStreamFinal> {
+  return getTransport().call("voice_stream_stop", { sessionId })
+}
+
+export async function cancelVoiceStream(
+  sessionId: string
+): Promise<VoiceStreamCancelResult> {
+  return getTransport().call("voice_stream_cancel", { sessionId })
+}
+
+/** Subscribe to live partial transcripts. Filter by `sessionId`; the final
+ *  `text` arrives from `stopVoiceStream`, not here. */
+export async function listenVoicePartial(
+  handler: (event: VoicePartialEvent) => void
+): Promise<() => void> {
+  return getTransport().subscribe<VoicePartialEvent>(
+    VOICE_PARTIAL_EVENT,
+    handler
+  )
+}
+
 // i18n_key values the Rust upload layer stamps via `with_i18n` and that
 // the frontend branches on. MUST stay in lockstep with the Rust
 // constants `UPLOAD_I18N_KEY_TOO_LARGE` / `UPLOAD_I18N_KEY_NOT_A_FILE`

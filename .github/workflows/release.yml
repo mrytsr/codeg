@@ -218,6 +218,44 @@ jobs:
           workspaces: "./src-tauri -> target"
           shared-key: ${{ matrix.target }}
 
+      - name: Resolve sherpa-onnx native archive (voice_stream)
+        # `commands/voice_stream.rs` compiles sherpa-onnx, whose build script
+        # wants the prebuilt native archive for the build TARGET — which is
+        # matrix.target here, not the host (arm64 cross builds). Cache it per
+        # target so releases do not re-pull ~120 MB per job. Keep the version
+        # in lockstep with the `sherpa-onnx` pin in src-tauri/Cargo.toml —
+        # the archive name carries the version, so a bump needs this map
+        # updated.
+        shell: bash
+        run: |
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-gnu)  A=sherpa-onnx-v2.0.1-linux-x64-static-lib.tar.bz2 ;;
+            aarch64-unknown-linux-gnu) A=sherpa-onnx-v2.0.1-linux-aarch64-static-lib.tar.bz2 ;;
+            x86_64-apple-darwin)       A=sherpa-onnx-v2.0.1-osx-x64-static-lib.tar.bz2 ;;
+            aarch64-apple-darwin)      A=sherpa-onnx-v2.0.1-osx-arm64-static-lib.tar.bz2 ;;
+            x86_64-pc-windows-msvc)    A=sherpa-onnx-v2.0.1-win-x64-static-MT-Release-lib.tar.bz2 ;;
+            aarch64-pc-windows-msvc)   A=sherpa-onnx-v2.0.1-win-arm64-static-MT-Release-lib.tar.bz2 ;;
+            *) echo "FATAL: no sherpa-onnx archive for ${{ matrix.target }}" >&2; exit 1 ;;
+          esac
+          printf 'SHERPA_ARCHIVE_NAME=%s\n' "$A" >> "$GITHUB_ENV"
+          printf 'SHERPA_ONNX_ARCHIVE_DIR=%s\n' "$RUNNER_TEMP/sherpa-onnx" >> "$GITHUB_ENV"
+
+      - name: Cache sherpa-onnx native archive
+        id: sherpa_archive
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SHERPA_ONNX_ARCHIVE_DIR }}
+          key: ${{ env.SHERPA_ARCHIVE_NAME }}
+
+      - name: Download sherpa-onnx native archive on cache miss
+        if: steps.sherpa_archive.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p "$SHERPA_ONNX_ARCHIVE_DIR"
+          curl -fL --retry 3 --retry-delay 5 \
+            -o "$SHERPA_ONNX_ARCHIVE_DIR/$SHERPA_ARCHIVE_NAME" \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/$SHERPA_ARCHIVE_NAME"
+
       - name: Install Linux x64 dependencies
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
@@ -330,16 +368,14 @@ jobs:
       # `codeg-computer-helper` computer-use executor and the `codeg-cli`
       # command-line client — for the matrix target
       # and stage them at `src-tauri/binaries/<bin>-<triple>{.exe}`.
-      # `tauri-action` (below) then bundles them via the `bundle.externalBin`
-      # entries in `tauri.conf.json` — Tauri installs them next to the main
-      # executable (install root on Linux/Windows) where the runtime finds
-      # them via `current_exe` sibling lookup. On macOS the helper is no
-      # sidecar: it is staged as `src-tauri/binaries/codeg-computer-helper.app`
+      # `tauri-action` bundles the command-line sidecars next to the main
+      # executable, where the runtime finds them via current_exe. macOS signs
+      # them separately below so the main app alone receives Audio Input.
+      # The macOS helper is staged as `src-tauri/binaries/codeg-computer-helper.app`
       # and bundled as `Contents/Helpers/codeg-computer-helper.app`
       # (`tauri.macos.conf.json`), since macOS charges an executable's
-      # permissions to the app bundle it sits in — a helper in Contents/MacOS
-      # would hold codeg's. The Linux arm64 cross env vars set above also
-      # apply to this cargo invocation.
+      # permissions to the app bundle it sits in. The Linux arm64 cross env
+      # vars set above also apply to this cargo invocation.
       - name: Stage sidecars for Tauri bundle
         shell: bash
         run: pnpm tauri:prepare-sidecars --target ${{ matrix.target }}
@@ -567,6 +603,25 @@ jobs:
           includeUpdaterJson: true
           retryAttempts: 2
 
+      # Tauri applies bundle.macOS.entitlements to every executable it signs.
+      # Sign the command-line sidecars separately and copy them at their usual
+      # bundle paths (the release config's bundle.macOS.files) so only the
+      # main application receives Audio Input.
+      - name: Stage signed macOS sidecars
+        if: contains(matrix.target, 'apple-darwin')
+        shell: bash
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          bin_dir="src-tauri/binaries"
+          mkdir -p "$bin_dir/macos-release"
+          for bin in codeg-mcp codeg-cli; do
+            staged="$bin_dir/macos-release/$bin"
+            install -m 0755 "$bin_dir/$bin-$BUILD_TARGET" "$staged"
+            codesign --force --options runtime --timestamp \
+              --sign "$APPLE_SIGNING_IDENTITY" "$staged"
+          done
       - name: Build, sign, and upload to draft release (macOS)
         if: contains(matrix.target, 'apple-darwin')
         uses: tauri-apps/tauri-action@v0.6.1
@@ -595,7 +650,7 @@ jobs:
           releaseDraft: true
           prerelease: ${{ needs.create-draft-release.outputs.prerelease }}
           tauriScript: pnpm tauri
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} --config src-tauri/macos/tauri.release.conf.json
           includeUpdaterJson: true
           retryAttempts: 2
 
@@ -606,8 +661,10 @@ jobs:
       #     codeg-computer-helper.app`, and no bare copy of it is in
       #     `Contents/MacOS/`: macOS charges an executable's permissions to the
       #     app bundle it sits in, so a helper there would hold codeg's;
-      #   * codeg, codeg-mcp, codeg-cli and codeg-computer-helper carry NO
-      #     entitlements —
+      #   * only codeg carries an entitlement — exactly one key, the
+      #     microphone access the release config grants it — while
+      #     codeg-mcp, codeg-cli and codeg-computer-helper carry NO
+      #     entitlements:
       #     in particular none that let another process load code into them
       #     (library-validation / dyld / get-task-allow exemptions), and codeg
       #     never Apple Events: every agent's shell runs as codeg for TCC.
@@ -658,14 +715,32 @@ jobs:
               exit 1
             fi
           done
-          for path in "$app/Contents/MacOS/codeg" "$app/Contents/MacOS/codeg-mcp" "$app/Contents/MacOS/codeg-cli" "$helper_app"; do
+          main="$app/Contents/MacOS/codeg"
+          mic_ent="$(codesign -d --entitlements - --xml "$main")"
+          if [ -z "$mic_ent" ]; then
+            echo "FATAL: codeg carries no entitlements; the release config must grant it audio-input"
+            exit 1
+          fi
+          printf '%s' "$mic_ent" | plutil -convert json -o - - | node -e '
+              const assert = require("node:assert/strict")
+              const { readFileSync } = require("node:fs")
+              assert.deepEqual(JSON.parse(readFileSync(0, "utf8")), {
+                "com.apple.security.device.audio-input": true,
+              })
+            '
+          mic_usage="$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$app/Contents/Info.plist" 2>/dev/null || true)"
+          if [ -z "$mic_usage" ]; then
+            echo "FATAL: the bundle Info.plist is missing NSMicrophoneUsageDescription"
+            exit 1
+          fi
+          for path in "$app/Contents/MacOS/codeg-mcp" "$app/Contents/MacOS/codeg-cli" "$helper_app"; do
             name="$(basename "$path")"
             if ! codesign -dv "$path" 2>&1 | grep -q 'flags=0x[0-9a-f]*(runtime)'; then
               echo "FATAL: $name is not signed with the hardened runtime"
               exit 1
             fi
             if codesign -d --entitlements - --xml "$path" 2>/dev/null | grep -q '<key>'; then
-              echo "FATAL: $name carries entitlements; codeg's executables must carry none"
+              echo "FATAL: $name carries entitlements; codeg's helpers must carry none"
               codesign -d --entitlements - "$path" || true
               exit 1
             fi
@@ -763,6 +838,39 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
           shared-key: server-${{ matrix.target }}
+
+      - name: Resolve sherpa-onnx native archive (voice_stream)
+        # Same as the build-tauri job: the build script wants the archive for
+        # the build TARGET (matrix.target, not the host). Keep the version in
+        # lockstep with the `sherpa-onnx` pin in src-tauri/Cargo.toml.
+        shell: bash
+        run: |
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-gnu)  A=sherpa-onnx-v2.0.1-linux-x64-static-lib.tar.bz2 ;;
+            aarch64-unknown-linux-gnu) A=sherpa-onnx-v2.0.1-linux-aarch64-static-lib.tar.bz2 ;;
+            x86_64-apple-darwin)       A=sherpa-onnx-v2.0.1-osx-x64-static-lib.tar.bz2 ;;
+            aarch64-apple-darwin)      A=sherpa-onnx-v2.0.1-osx-arm64-static-lib.tar.bz2 ;;
+            x86_64-pc-windows-msvc)    A=sherpa-onnx-v2.0.1-win-x64-static-MT-Release-lib.tar.bz2 ;;
+            *) echo "FATAL: no sherpa-onnx archive for ${{ matrix.target }}" >&2; exit 1 ;;
+          esac
+          printf 'SHERPA_ARCHIVE_NAME=%s\n' "$A" >> "$GITHUB_ENV"
+          printf 'SHERPA_ONNX_ARCHIVE_DIR=%s\n' "$RUNNER_TEMP/sherpa-onnx" >> "$GITHUB_ENV"
+
+      - name: Cache sherpa-onnx native archive
+        id: sherpa_archive
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SHERPA_ONNX_ARCHIVE_DIR }}
+          key: ${{ env.SHERPA_ARCHIVE_NAME }}
+
+      - name: Download sherpa-onnx native archive on cache miss
+        if: steps.sherpa_archive.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p "$SHERPA_ONNX_ARCHIVE_DIR"
+          curl -fL --retry 3 --retry-delay 5 \
+            -o "$SHERPA_ONNX_ARCHIVE_DIR/$SHERPA_ARCHIVE_NAME" \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/$SHERPA_ARCHIVE_NAME"
 
       - name: Install Linux arm64 cross compiler
         if: matrix.target == 'aarch64-unknown-linux-gnu'
