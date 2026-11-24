@@ -99,6 +99,8 @@ function claudeAgent(configJson: string | null): AcpAgentInfo {
     cursor_cli_config_json: null,
     cursor_settings: null,
     model_provider_id: null,
+    model_source: "native",
+    model_provider_api_types: [],
     icon_url: null,
   }
 }

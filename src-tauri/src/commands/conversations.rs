@@ -18,10 +18,11 @@ use crate::models::*;
 // Concrete parser type only for `load_thread_name_index`, which is codex's own
 // index reader and not part of the `AgentParser` trait. Every history read goes
 // through `build_agent_parser`.
-use crate::parsers::codex::CodexParser;
+use crate::parsers::codex::{CodexParser, CodexText};
 use crate::parsers::{
-    build_agent_parser, build_workspace_agent_parser, folder_name_from_path,
-    normalize_path_for_matching, path_eq_for_matching, AgentEnvs, AgentParser, ParseError,
+    build_agent_parser, build_agent_parser_with_text, build_workspace_agent_parser,
+    folder_name_from_path, normalize_path_for_matching, path_eq_for_matching, AgentEnvs,
+    AgentParser, ParseError,
 };
 use crate::web::event_bridge::{
     emit_event, ConversationChange, ConversationsBulkChanged, EventEmitter, ImportScanProgress,
@@ -1553,6 +1554,15 @@ pub async fn get_folder_conversation_core(
     conversation_id: i32,
     data_dir: Option<&std::path::Path>,
 ) -> Result<(DbConversationDetail, Option<String>), AppCommandError> {
+    get_folder_conversation_with_text(conn, conversation_id, data_dir, CodexText::Display).await
+}
+
+pub(crate) async fn get_folder_conversation_with_text(
+    conn: &sea_orm::DatabaseConnection,
+    conversation_id: i32,
+    data_dir: Option<&std::path::Path>,
+    text: CodexText,
+) -> Result<(DbConversationDetail, Option<String>), AppCommandError> {
     let summary = conversation_service::get_by_id(conn, conversation_id)
         .await
         .map_err(AppCommandError::from)?;
@@ -1591,11 +1601,9 @@ pub async fn get_folder_conversation_core(
         let agent_env = agent_setting_service::load_agent_env(conn, at).await;
         tokio::task::spawn_blocking(move || -> Result<_, AppCommandError> {
             let parser = match (model_source.as_deref(), data_dir_owned.as_deref()) {
-                (Some("provider"), Some(dir)) => {
-                    build_workspace_agent_parser(at, dir, conversation_id)
-                        .unwrap_or_else(|| build_agent_parser(at, &agent_env))
-                }
-                _ => build_agent_parser(at, &agent_env),
+                (Some("provider"), Some(dir)) => build_workspace_agent_parser(at, dir, conversation_id)
+                    .unwrap_or_else(|| build_agent_parser_with_text(at, &agent_env, text)),
+                _ => build_agent_parser_with_text(at, &agent_env, text),
             };
             match parser.get_conversation(&eid) {
                 Ok(d) => {

@@ -665,6 +665,7 @@ async fn import_one(
         assistant_id: Set(None),
         assistant_snapshot: Set(None),
         source: Set(None),
+        selector_state: Set(None),
     };
     conv.insert(conn).await?;
     Ok(ImportOutcome::Imported)
@@ -1165,6 +1166,7 @@ mod tests {
             assistant_id: Set(None),
             assistant_snapshot: Set(None),
             source: Set(None),
+            selector_state: Set(None),
         }
         .insert(&db.conn)
         .await
@@ -1470,6 +1472,7 @@ mod tests {
             assistant_id: Set(None),
             assistant_snapshot: Set(None),
             source: Set(None),
+            selector_state: Set(None),
         }
         .insert(&db.conn)
         .await
