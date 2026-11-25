@@ -59,6 +59,52 @@ function renderVoiceButton(props: Partial<ComposerVoiceButtonProps> = {}) {
   )
 }
 
+function makeFakeSpeechCtor() {
+  const instances: {
+    interimResults: boolean
+    onresult:
+      | ((event: {
+          resultIndex: number
+          results: {
+            length: number
+            [index: number]: {
+              length: number
+              isFinal: boolean
+              0: { transcript: string }
+            }
+          }
+        }) => void)
+      | null
+  }[] = []
+  class FakeSpeechRecognition {
+    lang = ""
+    continuous = false
+    interimResults = false
+    maxAlternatives = 1
+    onresult:
+      | ((event: {
+          resultIndex: number
+          results: {
+            length: number
+            [index: number]: {
+              length: number
+              isFinal: boolean
+              0: { transcript: string }
+            }
+          }
+        }) => void)
+      | null = null
+    onerror: ((event: { error: string }) => void) | null = null
+    onend: (() => void) | null = null
+    start() {
+      instances.push(this)
+    }
+    stop() {}
+    abort() {}
+  }
+  return { Ctor: FakeSpeechRecognition, instances }
+}
+
 beforeEach(() => {
   vi.stubGlobal("__TAURI_INTERNALS__", {})
   // WKWebView may expose this even though its speech service cannot start.
@@ -108,9 +154,20 @@ describe("ComposerVoiceButton on Tauri macOS", () => {
   it("starts local streaming and explains a microphone permission denial", async () => {
     renderVoiceButton()
 
-    expect(
-      screen.queryByRole("button", { name: MI.voiceSwitchEngine })
-    ).not.toBeInTheDocument()
+    // The engine menu always lists every engine: local is checked and
+    // selectable, the browser engine is listed but disabled on macOS Tauri.
+    await userEvent.click(
+      screen.getByRole("button", { name: MI.voiceSwitchEngine })
+    )
+    const webItem = screen.getByRole("menuitem", { name: MI.voiceEngineWeb })
+    expect(webItem).toHaveAttribute("data-disabled")
+    const localItem = screen.getByRole("menuitem", {
+      name: MI.voiceEngineLocal,
+    })
+    expect(localItem).not.toHaveAttribute("data-disabled")
+    expect(localItem.querySelector("svg")).toHaveClass("opacity-100")
+    await userEvent.keyboard("{Escape}")
+
     await userEvent.click(screen.getByRole("button", { name: MI.voiceStart }))
 
     await waitFor(() => {
@@ -156,33 +213,7 @@ describe("ComposerVoiceButton on Tauri macOS", () => {
   })
 
   it("streams web-speech interim results live and settles on final", async () => {
-    const instances: FakeSpeechRecognition[] = []
-    class FakeSpeechRecognition {
-      lang = ""
-      continuous = false
-      interimResults = false
-      maxAlternatives = 1
-      onresult:
-        | ((event: {
-            resultIndex: number
-            results: {
-              length: number
-              [index: number]: {
-                length: number
-                isFinal: boolean
-                0: { transcript: string }
-              }
-            }
-          }) => void)
-        | null = null
-      onerror: ((event: { error: string }) => void) | null = null
-      onend: (() => void) | null = null
-      start() {
-        instances.push(this)
-      }
-      stop() {}
-      abort() {}
-    }
+    const { Ctor: FakeSpeechRecognition, instances } = makeFakeSpeechCtor()
     vi.stubGlobal("SpeechRecognition", FakeSpeechRecognition)
     // Not macOS Tauri, so the WKWebView guard lets the fake ctor through.
     vi.stubGlobal("navigator", {
@@ -224,5 +255,70 @@ describe("ComposerVoiceButton on Tauri macOS", () => {
     expect(onTranscript).toHaveBeenCalledTimes(1)
     expect(onTranscript).toHaveBeenCalledWith("你好世界")
     expect(onPartial).toHaveBeenCalledTimes(2)
+  })
+
+  it("checks the web engine and switches to local on select", async () => {
+    const { Ctor: FakeSpeechRecognition } = makeFakeSpeechCtor()
+    vi.stubGlobal("SpeechRecognition", FakeSpeechRecognition)
+    // Not macOS Tauri, so the WKWebView guard lets the fake ctor through and
+    // the detected engine is web-speech.
+    vi.stubGlobal("navigator", {
+      platform: "Win32",
+      userAgent: "",
+      mediaDevices: { getUserMedia },
+    })
+    getUserMedia.mockResolvedValue(undefined)
+    renderVoiceButton()
+
+    await userEvent.click(
+      screen.getByRole("button", { name: MI.voiceSwitchEngine })
+    )
+    const webItem = screen.getByRole("menuitem", { name: MI.voiceEngineWeb })
+    expect(webItem).not.toHaveAttribute("data-disabled")
+    expect(webItem.querySelector("svg")).toHaveClass("opacity-100")
+    const localItem = screen.getByRole("menuitem", {
+      name: MI.voiceEngineLocal,
+    })
+    // The status probe resolved as available, so local is selectable too.
+    expect(localItem).not.toHaveAttribute("data-disabled")
+
+    // Selecting local aborts nothing and starts the streaming engine at once.
+    await userEvent.click(localItem)
+    await waitFor(() => {
+      expect(voiceApi.startVoiceStream).toHaveBeenCalledTimes(1)
+      expect(
+        screen.getByRole("button", { name: MI.voiceStop })
+      ).toBeInTheDocument()
+    })
+  })
+
+  it("disables the local engine entries when the backend says so", async () => {
+    const { Ctor: FakeSpeechRecognition } = makeFakeSpeechCtor()
+    vi.stubGlobal("SpeechRecognition", FakeSpeechRecognition)
+    vi.stubGlobal("navigator", {
+      platform: "Win32",
+      userAgent: "",
+      mediaDevices: { getUserMedia },
+    })
+    voiceApi.getVoiceStatus.mockReset().mockResolvedValue({
+      available: false,
+      binary: null,
+      model: null,
+      reason: "dependency_missing",
+      needsManualInstall: true,
+    })
+    renderVoiceButton()
+
+    await userEvent.click(
+      screen.getByRole("button", { name: MI.voiceSwitchEngine })
+    )
+    await waitFor(() => {
+      expect(
+        screen.getByRole("menuitem", { name: MI.voiceEngineLocal })
+      ).toHaveAttribute("data-disabled")
+    })
+    expect(
+      screen.getByRole("menuitem", { name: MI.voiceEngineWeb })
+    ).not.toHaveAttribute("data-disabled")
   })
 })

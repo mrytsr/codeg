@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useLocale, useTranslations } from "next-intl"
-import { Mic, MicOff } from "lucide-react"
+import { Check, Mic, MicOff } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -43,6 +43,8 @@ import {
 } from "@/lib/voice-input"
 
 type VoicePhase = "idle" | "listening" | "transcribing" | "preparing"
+/** Probe result for the backend recognizer behind the `local` engine. */
+type LocalAvailability = "checking" | "available" | "unavailable"
 
 export interface ComposerVoiceButtonProps {
   disabled?: boolean
@@ -86,7 +88,8 @@ export function ComposerVoiceButton({
   // Lazy initializer keeps the probe out of an effect (no cascading render).
   // On SSR this is "none"; the client re-probes on hydration.
   const [engine, setEngine] = useState<VoiceEngine>(() => detectVoiceEngine())
-  const [manualInstall, setManualInstall] = useState(false)
+  const [localAvailability, setLocalAvailability] =
+    useState<LocalAvailability>("checking")
   const [levels, setLevels] = useState<number[]>([])
 
   const recorderRef = useRef<LocalPcmRecorder | null>(null)
@@ -134,18 +137,23 @@ export function ComposerVoiceButton({
     }
   }, [])
 
-  // Probe local readiness lazily. It is only a cache: if the decoder is not
-  // installed yet, selecting the local engine still triggers auto-download.
+  // Probe local readiness lazily. The result drives the engine menu: an
+  // unreachable status API or a missing manual dependency disables the local
+  // entry; otherwise selecting it is fine — a missing model auto-downloads.
   useEffect(() => {
     let active = true
     void getVoiceStatus()
       .then((status) => {
         if (!active) return
         localStatusRef.current = status
-        setManualInstall(status.needsManualInstall)
+        setLocalAvailability(
+          status.needsManualInstall ? "unavailable" : "available"
+        )
       })
       .catch(() => {
-        if (active) localStatusRef.current = null
+        if (!active) return
+        localStatusRef.current = null
+        setLocalAvailability("unavailable")
       })
     return () => {
       active = false
@@ -203,11 +211,13 @@ export function ComposerVoiceButton({
     }
   }, [])
 
-  // Pre-warm the streaming recognizer on mount (~1.5 s load) so the first
-  // click is instant. Only when the model is already installed: never start a
-  // download from a passive mount — that happens on first mic click.
+  // Pre-warm the streaming recognizer only while the local engine is the
+  // selected one (~1.5 s load) so the first click is instant. Only when the
+  // model is already installed: never start a download from a passive mount —
+  // that happens on first mic click.
   useEffect(() => {
     if (!localeSupportsStreaming(locale)) return
+    if (engine !== "local") return
     let active = true
     void getVoiceStreamStatus()
       .then((status) => {
@@ -218,7 +228,7 @@ export function ComposerVoiceButton({
     return () => {
       active = false
     }
-  }, [locale])
+  }, [locale, engine])
 
   const ensureLocalReady = useCallback(async () => {
     const current = localStatusRef.current
@@ -233,7 +243,9 @@ export function ComposerVoiceButton({
     try {
       const status = await ensureVoiceReady()
       localStatusRef.current = status
-      setManualInstall(status.needsManualInstall)
+      setLocalAvailability(
+        status.needsManualInstall ? "unavailable" : "available"
+      )
       if (!status.available) {
         toast.error(t("voiceManualInstallRequired"), {
           id: prepareToastIdRef.current,
@@ -573,50 +585,41 @@ export function ComposerVoiceButton({
           ))}
         </span>
       )}
-      {!manualInstall && engine === "web-speech" && !busy && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              disabled={disabled}
-              variant="ghost"
-              size="icon-xs"
-              className="shrink-0 text-muted-foreground"
-              title={t("voiceEngineWeb")}
-              aria-label={t("voiceSwitchEngine")}
-            >
-              <span className="text-[10px]">▾</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="start" className="min-w-44">
-            <DropdownMenuItem onSelect={() => switchToLocal()}>
-              {t("voiceEngineLocal")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-      {engine === "local" && webSpeechAvailable && !busy && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              disabled={disabled}
-              variant="ghost"
-              size="icon-xs"
-              className="shrink-0 text-muted-foreground"
-              title={t("voiceEngineLocal")}
-              aria-label={t("voiceSwitchEngine")}
-            >
-              <span className="text-[10px]">▾</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="start" className="min-w-44">
-            <DropdownMenuItem onSelect={() => switchToWeb()}>
-              {t("voiceEngineWeb")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            disabled={disabled || busy}
+            variant="ghost"
+            size="icon-xs"
+            className="shrink-0 text-muted-foreground"
+            title={t("voiceSwitchEngine")}
+            aria-label={t("voiceSwitchEngine")}
+          >
+            <span className="text-[10px]">▾</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start" className="min-w-44">
+          <DropdownMenuItem
+            disabled={!webSpeechAvailable}
+            onSelect={() => switchToWeb()}
+          >
+            <Check
+              className={engine === "web-speech" ? "opacity-100" : "opacity-0"}
+            />
+            {t("voiceEngineWeb")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={localAvailability === "unavailable"}
+            onSelect={() => switchToLocal()}
+          >
+            <Check
+              className={engine === "local" ? "opacity-100" : "opacity-0"}
+            />
+            {t("voiceEngineLocal")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }
